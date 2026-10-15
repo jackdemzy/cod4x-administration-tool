@@ -111,6 +111,40 @@ test('start retains stdout and stderr emitted immediately after spawn', async ()
   assert.match(state.output.stderr, /early stderr/);
 });
 
+test('private output mode drops early and later bytes and sanitizes stream errors before persistence', async () => {
+  const h = harness({ lifecycle: true });
+  const persisted = [];
+  h.context.fs.writeFile = async (_file, bytes) => { persisted.push(String(bytes)); };
+  const state = await h.evaluate('startRuntime({relative:"server",outputPolicy:"private"})');
+  const secret = 'Disposable-stream-secret-123!';
+  h.children[0].stdout.emit('data', Buffer.from(secret.slice(0, 10)));
+  h.children[0].stdout.emit('data', Buffer.from(secret.slice(10)));
+  h.children[0].stderr.emit('data', Buffer.from(secret));
+  h.children[0].stderr.emit('error', new Error(secret));
+  await h.evaluate('persistRuntimeState()');
+  assert.equal(state.outputPolicy, 'private');
+  assert.equal(state.consoleOutputPrivate, true);
+  assert.equal(state.output.stdout, ''); assert.equal(state.output.stderr, '');
+  assert.ok(!JSON.stringify(state).includes(secret));
+  assert.ok(!persisted.join('').includes(secret));
+  assert.ok(!persisted.join('').includes('early stdout'));
+  assert.ok(!persisted.join('').includes('early stderr'));
+  assert.equal(state.history.find(event => event.event === 'runtime.output.error').error, 'RUNTIME_PRIVATE_OUTPUT_ERROR');
+});
+
+test('unknown output mode is refused before spawning', async () => {
+  const h = harness({ lifecycle: true });
+  await assert.rejects(h.evaluate('startRuntime({relative:"server",outputPolicy:null})'), { code: 'RUNTIME_OUTPUT_POLICY_INVALID' });
+  await assert.rejects(h.evaluate('startRuntime({relative:"server",outputPolicy:"typo"})'), { code: 'RUNTIME_OUTPUT_POLICY_INVALID' });
+  assert.equal(h.children.length, 0);
+  await assert.rejects(h.evaluate('startRuntime({relative:"server",platform:"linux",outputPolicy:"private"})'), { code: 'RUNTIME_PRIVATE_OUTPUT_UNSUPPORTED' });
+  assert.equal(h.children.length, 0);
+  await h.evaluate('startRuntime({relative:"server"})');
+  await assert.rejects(h.evaluate('restartRuntime({relative:"server",outputPolicy:null})'), { code: 'RUNTIME_OUTPUT_POLICY_INVALID' });
+  await assert.rejects(h.evaluate('restartRuntime({relative:"server",outputPolicy:"typo"})'), { code: 'RUNTIME_OUTPUT_POLICY_INVALID' });
+  assert.equal(h.commands.some(command => command.file === 'taskkill.exe'), false);
+});
+
 test('unverified core is rejected before layout creates a server home', async () => {
   const h = harness({ lifecycle: true, verified: false });
   await assert.rejects(h.evaluate('startRuntime({relative:"server"})'), /Verified-Core gate/);

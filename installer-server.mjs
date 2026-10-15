@@ -31,6 +31,8 @@ import { createRuntimeManager } from "./lib/runtime-manager.mjs";
 import { ServerInstanceStore, resolveRealFuturePath } from "./lib/server-instance-store.mjs";
 import { ServerInstanceManager } from "./lib/server-instance-manager.mjs";
 import { InstanceCredentialService } from "./lib/instance-credential-service.mjs";
+import { withPrivateRuntimeConfig } from "./lib/runtime-credential-file.mjs";
+import { waitForCredentialRuntime } from "./lib/runtime-credential-readiness.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 
@@ -2250,6 +2252,7 @@ const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, r
 const instanceManager = new ServerInstanceManager({
   store: instanceStore,
   credentialService,
+  credentialRuntime: { withConfig: withPrivateRuntimeConfig, waitReady: waitForCredentialRuntime },
   legacyRuntime: defaultRuntime,
   runtimeFactory: (instance, options) => createRuntimeManager({
     ...runtimeDependencies,

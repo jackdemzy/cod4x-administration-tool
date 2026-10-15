@@ -147,3 +147,64 @@ test('registry write failure leaves a recoverable directory and no phantom insta
   await assert.rejects(fs.stat(path.join(options.root, input.id)), { code: 'ENOENT' });
   assert.equal((await fs.readdir(path.join(options.root, '.recovery'))).length, 1);
 });
+
+test('join policy survives reload, cannot be injected on create and is not cloned', async t => {
+  const { store, input, options } = await fixture(t);
+  const instance = await store.create({ ...input, credentialPolicy: { join: 'required' } });
+  assert.deepEqual(instance.credentialPolicy, { join: 'none', rcon: 'none' });
+  await store.setJoinRequirement(instance, 'required');
+  const loaded = new ServerInstanceStore(options);
+  await loaded.load();
+  assert.deepEqual(loaded.get(instance.id).credentialPolicy, { join: 'required', rcon: 'none' });
+  const cloned = await loaded.clone(instance.id, { id: 'public-02', port: 28961 });
+  assert.deepEqual(cloned.credentialPolicy, { join: 'none', rcon: 'none' });
+});
+
+test('legacy join policy remains unclassified and malformed stored policy fails closed', async t => {
+  const { store, input, options } = await fixture(t);
+  await store.create(input);
+  const raw = JSON.parse(await fs.readFile(options.registryFile, 'utf8'));
+  delete raw.instances[0].credentialPolicy;
+  await fs.writeFile(options.registryFile, JSON.stringify(raw));
+  await store.load();
+  assert.deepEqual(store.get(input.id).credentialPolicy, { join: 'unclassified', rcon: 'unclassified' });
+  for (const policy of [null, {}, { join: 'optional' }, { join: 'none', value: 'forbidden' }]) {
+    raw.instances[0].credentialPolicy = policy;
+    await fs.writeFile(options.registryFile, JSON.stringify(raw));
+    await assert.rejects(store.load(), { code: 'INSTANCE_CREDENTIAL_POLICY_INVALID' });
+    assert.throws(() => store.list(), { code: 'INSTANCE_REGISTRY_UNAVAILABLE' });
+  }
+});
+
+test('join policy publication requires matching instance birth/home and successful persistence', async t => {
+  const { store, input, options } = await fixture(t);
+  const instance = await store.create(input);
+  const original = await fs.readFile(options.registryFile);
+  for (const expected of [{ ...instance, createdAt: '2000-01-01T00:00:00.000Z' }, { ...instance, homePath: input.basePath }]) {
+    await assert.rejects(store.setJoinRequirement(expected, 'required'), { code: 'INSTANCE_IDENTITY_CONFLICT' });
+  }
+  await assert.rejects(store.setJoinRequirement(instance, 'unclassified'), { code: 'INSTANCE_CREDENTIAL_POLICY_INVALID' });
+  store.persist = async () => { throw Object.assign(new Error('Controlled registry write denial'), { code: 'EACCES' }); };
+  await assert.rejects(store.setJoinRequirement(instance, 'required'), { code: 'EACCES' });
+  assert.deepEqual(store.get(instance.id).credentialPolicy, { join: 'none', rcon: 'none' });
+  assert.deepEqual(await fs.readFile(options.registryFile), original);
+});
+
+test('RCON policy persists independently, clones no credentials and migrates old Join-only metadata as unknown', async t => {
+  const { store, input, options } = await fixture(t);
+  const created = await store.create({ ...input, credentialPolicy: { join: 'required', rcon: 'required' } });
+  assert.deepEqual(created.credentialPolicy, { join: 'none', rcon: 'none' });
+  await store.setCredentialRequirement(created, 'rcon', 'required');
+  const reloaded = new ServerInstanceStore(options); await reloaded.load();
+  assert.deepEqual(reloaded.get(created.id).credentialPolicy, { join: 'none', rcon: 'required' });
+  assert.deepEqual((await reloaded.clone(created.id, { id: 'public-02', port: 28961 })).credentialPolicy, { join: 'none', rcon: 'none' });
+  const raw = JSON.parse(await fs.readFile(options.registryFile, 'utf8'));
+  raw.instances[0].credentialPolicy = { join: 'none' };
+  await fs.writeFile(options.registryFile, JSON.stringify(raw)); await store.load();
+  assert.deepEqual(store.get(created.id).credentialPolicy, { join: 'none', rcon: 'unclassified' });
+  for (const policy of [{ join: 'none', rcon: null }, { join: 'none', rcon: 'optional' }, { join: 'none', rcon: 'none', master: 'required' }]) {
+    raw.instances[0].credentialPolicy = policy;
+    await fs.writeFile(options.registryFile, JSON.stringify(raw));
+    await assert.rejects(store.load(), { code: 'INSTANCE_CREDENTIAL_POLICY_INVALID' });
+  }
+});

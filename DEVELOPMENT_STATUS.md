@@ -1,20 +1,41 @@
-# Entwicklungsstand vor dem ersten GitHub-Upload
+# Development checkpoint: 4.18.3 / Block 6 in progress
 
-Stand: 2026-10-15. Version 4.18.3. COD4X CONTROL / COD4X Administration Tool ist weiterhin in Entwicklung. Block 6 (Config Engine) ist offen; dies ist kein fertiger Release und kein Sicherheitszertifikat.
+Saved on 2026-10-15 at the owner's explicit request. This is a source checkpoint, not a completed release, installer certification or general security approval. The binding ROADMAP files remain authoritative; development through Block 10 is not complete.
 
-Zuletzt unter Windows ausgeführt: node scripts/preflight-4.18.3.mjs, 130 PASS / 0 FAIL / 6 SKIP, Exit 0. Linux-/WSL-Gates wurden am aktuellen Stand nicht erneut ausgeführt und bleiben offen. Ein erfolgreicher Preflight ersetzt keine native Runtime-, UI-, Installer- oder vollständige Sicherheitsprüfung.
+## Implemented since the initial upload
 
-Der verschlüsselte Credential-Service, seine API und Oberfläche sind vorhanden. Ein interner kurzlebiger Runtime-Credential-Zugriff wird entwickelt und wurde in einer isolierten nativen Windows-Probe verwendet. Der normale ServerInstanceManager-Start ist noch nicht daran angeschlossen: gespeicherte Credentials bedeuten nicht, dass sie im Dedicated-Core aktiv sind.
+- Vault conflicts and locks revoke active runtime leases, overwrite supplied buffers and abort pending credential operations.
+- Conservative persisted Join and RCON activation policies, including legacy classification, clone isolation, and ordered registry/vault changes that fail closed.
+- Windows private RCON/Join handoff with restricted ACLs, short-lived configuration, bounded Loopback readiness and cleanup before successful startup.
+- Persistent nonsecret guard against the known Core Join-password archive writer. Private runtime stdout/stderr and console-file readback are suppressed.
+- Actual backend start/restart integration, runId-bound activation metadata and stop/exit invalidation. Failed readiness stops only the newly owned run through existing identity checks.
+- RCON-only activation explicitly verifies that the Join-password flag is false. Optional Master credentials do not block local startup by themselves.
 
-Offener Review-Befund: Eine durch konkurrierendes Lesen ausgelöste Vault-Sperre muss auch den laufenden Credential-Zugriff sofort abbrechen und dessen Buffer überschreiben. Dieser Fehlerpfad ist noch zu korrigieren und zu testen. Start-/Lock-/Recovery-Regeln, kurzlebige Secret-Dateien und optionale Masterregistrierung sind nicht vollständig integriert. Keine echten Zugangsdaten für diese unfertige Integration verwenden.
+## Evidence and limits
 
-Die Quellkonfiguration unter config/ enthält ausschließlich geprüfte leere/default Projektvorlagen. Für lokale Ausführung COD4X_DATA_ROOT auf ein separates, ignoriertes Datenverzeichnis setzen, z. B. in PowerShell vor dem Backendstart:
+Latest local Windows preflight: **169 passed, 0 failed, 6 skipped**, exit 0. This includes syntax, runtime/version consistency and executable regression suites. Skips are the existing host-dependent chmod check and Linux-only checks; they are not passes.
+
+Isolated native Core 21.2 tests exercised the Manager and authenticated HTTP backend with synthetic credentials, unique homes and Loopback ports. Combined RCON/Join and RCON-only start/restart/stop passed. Locked restart preserved the old process; an intentionally wrong readiness password stopped only its own new run. Cleanup checked process absence, private-file absence, secret residue, and unchanged Core/BaseGame assets. These are bounded one-run gates, not broad runtime certification.
+
+Independent bounded source reviews found a stale READY-state bug, which was reproduced and fixed with lifecycle regression tests. The final reviewed RCON-only/migration delta had no further concrete findings. Reviews did not independently execute the native gates.
+
+Still open: native Join-only/ephemeral-RCON gate, real vault abort during readiness, hard backend-abort and private-file/archive-transaction recovery, full UI/Electron evidence, remaining configuration-schema breadth and the complete Block 6 gate. RCON commands, Master registration/list verification and Plugin Manager blocks are not complete. Stored credentials alone are never proof of active runtime configuration.
+
+## Dependency provenance
+
+This checkpoint preserves the dependency files of the tested local source. It branches from the original source-import commit `c4c4de611bc85b41149fa09b5373b9683ea849b4`.
+
+The separate `main` branch had advanced to `f8785e9d66272c6e63dcb6a84c8f38e50a844b55`, updating Electron and adm-zip. Those updates are deliberately neither overwritten nor silently included here: they have not been validated with this local checkpoint. Integrating the two lines requires an explicit dependency-aware verification pass.
+
+## Repository hygiene
+
+No local vault/auth/server data, real credentials, game assets, Dedicated EXE/DLL files, dependencies, builds, native test homes or private machine reports are included. `.env.example` and source configuration templates contain no configured user credentials. Pattern scanning is supplementary and is not a full secret/security audit.
+
+Keep local state outside tracked source, for example:
 
 ```powershell
 $env:COD4X_DATA_ROOT = Join-Path (Get-Location) 'data'
 npm start
 ```
 
-Backend-/Auth-/Vault-/Serverdaten, Spielassets, Dedicated-Binaries, Abhängigkeiten, Build-Ausgaben, lokale Testhomes und ältere Arbeitskopien gehören nicht ins Repository. .gitignore schützt nur ungetrackte Dateien; vor jedem Commit auch Änderungen bereits getrackter Konfigurationsdateien prüfen.
-
-Das Originalprojekt und die lokalen Sicherungen bleiben beim GitHub-Upload erhalten. Für Versions- und Architekturregeln gelten die vorhandenen ROADMAP-Dateien.
+All previous checkpoints and the authoritative local source remain intact. No release/tag or merge into main is implied by this save.

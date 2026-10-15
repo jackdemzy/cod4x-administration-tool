@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { ServerInstanceStore } from '../lib/server-instance-store.mjs';
 import { ServerInstanceManager } from '../lib/server-instance-manager.mjs';
+import { InstanceCredentialService } from '../lib/instance-credential-service.mjs';
 import { createRuntimeManager } from '../lib/runtime-manager.mjs';
 import { mergeBaseGameState, resolveRuntimeLayout, selectRuntimeBaseGamePath } from '../lib/runtime-layout.mjs';
 import { assertWindowsInstanceOwnership } from '../lib/windows-process-ownership.mjs';
@@ -69,6 +70,329 @@ async function fixture(t) {
   await manager.create({ ...input, id: 'public-02', port: 28961 });
   return { root, manager, children, kills, events };
 }
+
+const vaultPassphrase = 'Disposable policy test passphrase!';
+test('private runtime output policy survives backend recreation and keeps console hidden after a later public run', async t => {
+  const { root, manager, children } = await fixture(t);
+  const instance = manager.store.get('public-01');
+  const runtime = await manager.runtime(instance.id);
+  const privateState = await runtime.startRuntime({ relative: instance.homePath, executablePath: instance.serverCore.executablePath, baseGamePath: instance.basePath, expectedCod4x: '21.5', platform: 'windows', outputPolicy: 'private', args: ['+set', 'net_port', String(instance.port)] });
+  const secret = 'Disposable-private-console-123!';
+  await fs.writeFile(path.join(instance.homePath, 'main/qconsole.log'), secret + '\n');
+  children.get(privateState.pid).stdout.emit('data', Buffer.from(secret));
+  await runtime.persistRuntimeState();
+  const check = async manager => {
+    const status = await manager.status(instance.id);
+    assert.equal(status.consoleLog.status, 'suppressed');
+    assert.equal(status.consoleLog.text, '');
+    assert.ok(!JSON.stringify(status).includes(secret));
+    assert.ok(!JSON.stringify(await manager.list()).includes(secret));
+  };
+  await check(manager);
+  const recovered = new ServerInstanceManager({ store: manager.store, runtimeFactory: manager.runtimeFactory });
+  await recovered.load();
+  await check(recovered);
+  assert.ok(!(await fs.readFile(path.join(instance.homePath, 'logs/runtime-state.json'), 'utf8')).includes(secret));
+  await manager.stop(instance.id);
+  await manager.launch(instance.id);
+  assert.equal((await manager.status(instance.id)).runtime.outputPolicy, 'standard');
+  assert.match((await manager.status(instance.id)).runtime.output.stdout, /output:public-01/);
+  await check(manager); // Historical console stays private; do not unhide old bytes.
+  await manager.stop(instance.id);
+});
+
+test('invalid privacy checkpoint blocks recovery without exposing its console through instance listing', async t => {
+  const { manager } = await fixture(t);
+  const instance = manager.store.get('public-01'), runtime = await manager.runtime(instance.id);
+  const secret = 'Disposable-corrupt-checkpoint-console-123!';
+  await fs.writeFile(path.join(instance.homePath, 'main/qconsole.log'), secret + '\n');
+  const checkpoint = JSON.stringify({ ...runtime.state, outputPolicy: 'private', consoleOutputPrivate: 'corrupt' });
+  const file = path.join(instance.homePath, 'logs/runtime-state.json');
+  await fs.writeFile(file, checkpoint);
+  const recovered = new ServerInstanceManager({ store: manager.store, runtimeFactory: manager.runtimeFactory });
+  await recovered.load();
+  const listed = await recovered.list();
+  const result = listed.find(value => value.id === instance.id);
+  assert.equal(result.runtime.recoveryBlocked, true);
+  assert.equal(result.consoleLog.status, 'suppressed');
+  assert.ok(!JSON.stringify(listed).includes(secret));
+  assert.equal(await fs.readFile(file, 'utf8'), checkpoint);
+});
+
+async function credentialFixture(t) {
+  const result = await fixture(t);
+  const service = new InstanceCredentialService({ dataRoot: result.root, resolveInstance: id => result.manager.store.get(id) });
+  result.manager.credentialService = service;
+  t.after(() => service.lock());
+  await service.initialize(vaultPassphrase);
+  await service.unlock(vaultPassphrase);
+  return { ...result, service };
+}
+
+function credentialDriver(manager, overrides = {}) {
+  return {
+    withConfig: async ({ credentials, signal }, consume) => {
+      assert.ok(credentials.join === null || Buffer.isBuffer(credentials.join));
+      assert.ok(Buffer.isBuffer(credentials.rcon));
+      assert.equal(signal.aborted, false);
+      return consume({ relativeConfig: 'control-test/run.cfg' });
+    },
+    waitReady: async ({ signal, joinRequired }) => {
+      assert.equal(signal.aborted, false);
+      assert.equal((await manager.status('public-01')).runtime.outputPolicy, 'private');
+      return { rconAuthenticated: true, joinPasswordFlag: joinRequired, map: 'mp_backlot' };
+    },
+    ...overrides,
+  };
+}
+
+test('credential startup coordinates private mode, readiness and vault scope before returning success', async t => {
+  const { manager, service, children, kills } = await credentialFixture(t);
+  const id = 'public-01', phases = [];
+  const join = 'Disposable-Manager-Join-123!';
+  await manager.changeCredential(id, 'join', { value: join, expectedSha256: (await service.status()).sha256 });
+  let supplied;
+  manager.credentialRuntime = credentialDriver(manager, {
+    withConfig: async ({ credentials, signal }, consume) => {
+      supplied = credentials;
+      assert.equal(credentials.join.toString(), join);
+      phases.push('prepared');
+      try { return await consume({ relativeConfig: 'control-test/run.cfg' }); }
+      finally { phases.push('removed'); }
+    },
+    waitReady: async () => { phases.push('ready'); return { rconAuthenticated: true, joinPasswordFlag: true, map: 'mp_backlot' }; },
+  });
+  const state = await manager.launch(id);
+  assert.deepEqual(phases, ['prepared', 'ready', 'removed']);
+  assert.equal(state.outputPolicy, 'private');
+  assert.equal(state.credentialActivation.state, 'READY');
+  assert.equal(state.credentialActivation.joinPasswordFlag, true);
+  const child = children.get(state.pid);
+  assert.ok(child.args.includes('control-test/run.cfg'));
+  assert.ok(!child.args.join(' ').includes(join));
+  assert.ok(supplied.join.every(byte => byte === 0));
+  assert.ok(supplied.rcon.every(byte => byte === 0));
+  service.lock();
+  await assert.rejects(manager.launch(id, true), { code: 'VAULT_LOCKED' });
+  assert.deepEqual(kills, []);
+  assert.equal((await manager.status(id)).runtime.pid, state.pid);
+  await manager.stop(id);
+});
+
+test('activation belongs only to its running run, never a later unprotected start or crashed process', async t => {
+  const { manager, service, children } = await credentialFixture(t);
+  const id = 'public-01';
+  await manager.changeCredential(id, 'join', { value: 'Disposable-Manager-Join-123!', expectedSha256: (await service.status()).sha256 });
+  manager.credentialRuntime = credentialDriver(manager);
+  const protectedRun = await manager.launch(id);
+  assert.equal(protectedRun.credentialActivation.runId, protectedRun.runId);
+  await manager.stop(id);
+  assert.notEqual((await manager.status(id)).runtime.credentialActivation.state, 'READY');
+  await manager.changeCredential(id, 'join', { expectedSha256: (await service.status()).sha256 }, true);
+  const publicRun = await manager.launch(id);
+  assert.notEqual(publicRun.runId, protectedRun.runId);
+  assert.equal(publicRun.credentialActivation.state, 'NOT_APPLIED');
+  assert.equal(publicRun.credentialActivation.runId, publicRun.runId);
+  await manager.stop(id);
+  await manager.changeCredential(id, 'join', { value: 'Disposable-Manager-Join-123!', expectedSha256: (await service.status()).sha256 });
+  const crashing = await manager.launch(id);
+  children.get(crashing.pid).emit('exit', 17, null);
+  const failed = (await manager.status(id)).runtime;
+  assert.equal(failed.status, 'FAILED');
+  assert.notEqual(failed.credentialActivation.state, 'READY');
+  assert.equal(failed.credentialActivation.runId, crashing.runId);
+});
+
+test('a Core exit during final READY persistence cannot return startup success', async t => {
+  const { manager, service, children } = await credentialFixture(t);
+  const id = 'public-01';
+  await manager.changeCredential(id, 'join', { value: 'Disposable-Manager-Join-123!', expectedSha256: (await service.status()).sha256 });
+  manager.credentialRuntime = credentialDriver(manager);
+  const runtime = await manager.runtime(id), persist = runtime.persistRuntimeState;
+  runtime.persistRuntimeState = async () => {
+    if (runtime.state.credentialActivation?.state === 'READY') children.get(runtime.state.pid).emit('exit', 17, null);
+    return persist();
+  };
+  await assert.rejects(manager.launch(id), { code: 'CREDENTIAL_RUNTIME_PROCESS_LOST' });
+  assert.notEqual((await manager.status(id)).runtime.credentialActivation.state, 'READY');
+});
+
+test('failed readiness stops only its new owned run and preserves a sibling', async t => {
+  const { manager, service, children, kills } = await credentialFixture(t);
+  const sibling = await manager.launch('public-02');
+  await manager.changeCredential('public-01', 'join', { value: 'Disposable-Manager-Join-123!', expectedSha256: (await service.status()).sha256 });
+  manager.credentialRuntime = credentialDriver(manager, { waitReady: async () => { throw Object.assign(new Error('Controlled readiness timeout'), { code: 'CREDENTIAL_RUNTIME_READINESS_TIMEOUT' }); } });
+  await assert.rejects(manager.launch('public-01'), { code: 'CREDENTIAL_RUNTIME_READINESS_TIMEOUT' });
+  const started = [...children.values()].find(child => child.pid !== sibling.pid);
+  assert.ok(started.gone);
+  assert.deepEqual(kills, [started.pid]);
+  assert.equal((await manager.status('public-02')).runtime.pid, sibling.pid);
+  await manager.stop('public-02');
+});
+
+test('vault abort during readiness stops the new run while failed preparation preserves the old run', async t => {
+  const { manager, service, children, kills } = await credentialFixture(t);
+  await manager.changeCredential('public-01', 'join', { value: 'Disposable-Manager-Join-123!', expectedSha256: (await service.status()).sha256 });
+  manager.credentialRuntime = credentialDriver(manager, { waitReady: async ({ signal }) => { service.lock(); assert.equal(signal.aborted, true); throw Object.assign(new Error('Cancelled'), { code: 'CREDENTIAL_RUNTIME_ABORTED' }); } });
+  await assert.rejects(manager.launch('public-01'), { code: 'CREDENTIAL_RUNTIME_ABORTED' });
+  assert.equal(kills.length, 1);
+  assert.ok(children.get(kills[0]).gone);
+  await service.unlock(vaultPassphrase);
+  manager.credentialRuntime = credentialDriver(manager);
+  const running = await manager.launch('public-01');
+  manager.credentialRuntime.withConfig = async () => { throw Object.assign(new Error('Controlled ACL denial'), { code: 'CREDENTIAL_RUNTIME_ACL_BLOCKED' }); };
+  await assert.rejects(manager.launch('public-01', true), { code: 'CREDENTIAL_RUNTIME_ACL_BLOCKED' });
+  assert.equal(kills.length, 1);
+  assert.equal((await manager.status('public-01')).runtime.pid, running.pid);
+  await manager.stop('public-01');
+});
+
+test('join changes persist protection before vault mutation; removal repairs a failed registry clear', async t => {
+  const { manager, service, children } = await credentialFixture(t);
+  const id = 'public-01', instance = manager.store.get(id);
+  const savedSet = service.set.bind(service);
+  service.set = async (...args) => {
+    assert.equal(manager.store.get(id).credentialPolicy.join, 'required');
+    throw Object.assign(new Error('Controlled vault write failure'), { code: 'EACCES' });
+  };
+  await assert.rejects(manager.changeCredential(id, 'join', { value: 'Policy-Join-123!', expectedSha256: (await service.status()).sha256 }), { code: 'EACCES' });
+  assert.equal(manager.store.get(id).credentialPolicy.join, 'required');
+  assert.equal((await service.instanceStatus(id)).join.configured, false);
+  service.set = savedSet;
+  await manager.changeCredential(id, 'join', { value: 'Policy-Join-123!', expectedSha256: (await service.status()).sha256 });
+  service.lock();
+  await assert.rejects(manager.launch(id), { code: 'CREDENTIAL_RUNTIME_NOT_READY' });
+  assert.equal(children.size, 0);
+  await service.unlock(vaultPassphrase);
+  const persist = manager.store.persist.bind(manager.store);
+  manager.store.persist = async () => { throw Object.assign(new Error('Controlled registry denial'), { code: 'EACCES' }); };
+  await assert.rejects(manager.changeCredential(id, 'join', { expectedSha256: (await service.status()).sha256 }, true), { code: 'EACCES' });
+  assert.equal((await service.instanceStatus(id)).join.configured, false);
+  assert.equal(manager.store.get(id).credentialPolicy.join, 'required');
+  manager.store.persist = persist;
+  await manager.changeCredential(id, 'join', { expectedSha256: (await service.status()).sha256 }, true);
+  assert.equal(manager.store.get(id).credentialPolicy.join, 'none');
+  assert.equal(manager.store.get(id).createdAt, instance.createdAt);
+  await manager.launch(id); await manager.stop(id);
+});
+
+test('invalid Join changes and failed policy persistence cannot write credentials', async t => {
+  const { manager, service } = await credentialFixture(t);
+  const id = 'public-01', sha256 = (await service.status()).sha256;
+  for (const input of [{ value: 'bad', expectedSha256: sha256 }, { value: 'Policy-Join-123!', expectedSha256: 'bad' }, { value: 'Policy-Join-123!', expectedSha256: sha256, extra: true }]) {
+    await assert.rejects(manager.changeCredential(id, 'join', input), { code: 'CREDENTIAL_INVALID' });
+    assert.equal(manager.store.get(id).credentialPolicy.join, 'none');
+  }
+  manager.store.persist = async () => { throw Object.assign(new Error('Controlled registry denial'), { code: 'EACCES' }); };
+  await assert.rejects(manager.changeCredential(id, 'join', { value: 'Policy-Join-123!', expectedSha256: sha256 }), { code: 'EACCES' });
+  assert.equal((await service.status()).sha256, sha256);
+  assert.equal((await service.instanceStatus(id)).join.configured, false);
+});
+
+test('RCON-only startup requires the vault, applies no Join secret and removal permits a locked public start', async t => {
+  const { manager, service, children, kills } = await credentialFixture(t);
+  const id = 'public-01', rcon = 'Disposable-Rcon-Only-123!';
+  await manager.changeCredential(id, 'rcon', { value: rcon, expectedSha256: (await service.status()).sha256 });
+  assert.equal(manager.store.get(id).credentialPolicy.rcon, 'required');
+  let supplied;
+  manager.credentialRuntime = credentialDriver(manager, { withConfig: async ({ credentials }, consume) => {
+    supplied = credentials; assert.equal(credentials.join, null); assert.equal(credentials.rcon.toString(), rcon);
+    return consume({ relativeConfig: 'control-test/run.cfg' });
+  } });
+  const running = await manager.launch(id);
+  assert.equal(running.credentialActivation.state, 'READY'); assert.equal(running.credentialActivation.joinPasswordFlag, false);
+  assert.equal(running.outputPolicy, 'private'); assert.ok(supplied.rcon.every(byte => byte === 0));
+  assert.equal(children.get(running.pid).args.includes(rcon), false);
+  service.lock();
+  await assert.rejects(manager.launch(id, true), { code: 'VAULT_LOCKED' }); assert.deepEqual(kills, []);
+  assert.equal((await manager.status(id)).runtime.pid, running.pid);
+  await manager.stop(id); await service.unlock(vaultPassphrase);
+  await manager.changeCredential(id, 'rcon', { expectedSha256: (await service.status()).sha256 }, true);
+  assert.equal(manager.store.get(id).credentialPolicy.rcon, 'none'); service.lock();
+  assert.equal((await manager.launch(id)).credentialActivation.state, 'NOT_APPLIED'); await manager.stop(id);
+});
+
+test('RCON requirement survives failed vault writes and failed policy removal until explicit retry', async t => {
+  const { manager, service, children } = await credentialFixture(t);
+  const id = 'public-01', savedSet = service.set.bind(service);
+  service.set = async () => {
+    assert.equal(manager.store.get(id).credentialPolicy.rcon, 'required');
+    throw Object.assign(new Error('Controlled vault denial'), { code: 'EACCES' });
+  };
+  await assert.rejects(manager.changeCredential(id, 'rcon', { value: 'Disposable-Rcon-Only-123!', expectedSha256: (await service.status()).sha256 }), { code: 'EACCES' });
+  assert.equal(manager.store.get(id).credentialPolicy.rcon, 'required');
+  manager.credentialRuntime = credentialDriver(manager);
+  await assert.rejects(manager.launch(id), { code: 'CREDENTIAL_NOT_CONFIGURED' }); assert.equal(children.size, 0);
+  service.set = savedSet;
+  await manager.changeCredential(id, 'rcon', { value: 'Disposable-Rcon-Only-123!', expectedSha256: (await service.status()).sha256 });
+  const persist = manager.store.persist.bind(manager.store);
+  manager.store.persist = async () => { throw Object.assign(new Error('Controlled registry denial'), { code: 'EACCES' }); };
+  await assert.rejects(manager.changeCredential(id, 'rcon', { expectedSha256: (await service.status()).sha256 }, true), { code: 'EACCES' });
+  assert.equal((await service.instanceStatus(id)).rcon.configured, false); assert.equal(manager.store.get(id).credentialPolicy.rcon, 'required');
+  await assert.rejects(manager.launch(id), { code: 'CREDENTIAL_NOT_CONFIGURED' }); assert.equal(children.size, 0);
+  manager.store.persist = persist;
+  await manager.changeCredential(id, 'rcon', { expectedSha256: (await service.status()).sha256 }, true);
+  assert.equal(manager.store.get(id).credentialPolicy.rcon, 'none');
+});
+
+test('legacy Join-only policy cannot silently omit an old RCON credential while locked', async t => {
+  const { manager, service, children } = await credentialFixture(t);
+  const id = 'public-01';
+  await service.set(id, 'rcon', { value: 'Disposable-Legacy-Rcon-123!', expectedSha256: (await service.status()).sha256 });
+  const raw = JSON.parse(await fs.readFile(manager.store.registryFile, 'utf8'));
+  raw.instances[0].credentialPolicy = { join: 'none' };
+  await fs.writeFile(manager.store.registryFile, JSON.stringify(raw)); await manager.store.load();
+  assert.equal(manager.store.get(id).credentialPolicy.rcon, 'unclassified'); service.lock();
+  await assert.rejects(manager.launch(id), { code: 'CREDENTIAL_POLICY_UNCLASSIFIED' }); assert.equal(children.size, 0);
+  await service.unlock(vaultPassphrase); manager.credentialRuntime = credentialDriver(manager);
+  const running = await manager.launch(id);
+  assert.equal(running.credentialActivation.joinPasswordFlag, false); assert.equal(manager.store.get(id).credentialPolicy.rcon, 'required');
+  await manager.stop(id);
+});
+
+test('optional Master credential never changes Join policy or blocks local start when locked', async t => {
+  const { manager, service } = await credentialFixture(t);
+  await manager.changeCredential('public-01', 'master', { value: 'A'.repeat(32), expectedSha256: (await service.status()).sha256 });
+  service.lock();
+  assert.equal(manager.store.get('public-01').credentialPolicy.join, 'none');
+  const state = await manager.launch('public-01');
+  assert.equal(state.status, 'RUNNING');
+  await manager.stop('public-01');
+});
+
+test('legacy policy requires unlocked classification before restart can stop a process', async t => {
+  const { manager, service, children, kills } = await credentialFixture(t);
+  const id = 'public-01';
+  const running = await manager.launch(id);
+  const registry = manager.store.registryFile;
+  const raw = JSON.parse(await fs.readFile(registry, 'utf8'));
+  delete raw.instances[0].credentialPolicy;
+  await fs.writeFile(registry, JSON.stringify(raw));
+  await manager.store.load();
+  service.lock();
+  await assert.rejects(manager.launch(id, true), { code: 'CREDENTIAL_POLICY_UNCLASSIFIED' });
+  assert.deepEqual(kills, []);
+  assert.equal(children.get(running.pid).gone, false);
+  await service.unlock(vaultPassphrase);
+  await manager.launch(id, true);
+  assert.equal(manager.store.get(id).credentialPolicy.join, 'none');
+  assert.equal(kills.length, 1);
+  await manager.stop(id);
+});
+
+test('legacy protected instance classifies required without starting an unprotected process', async t => {
+  const { manager, service, children } = await credentialFixture(t);
+  const id = 'public-01';
+  // Represents a vault created by the earlier version, before policy metadata existed.
+  await service.set(id, 'join', { value: 'Legacy-Join-123!', expectedSha256: (await service.status()).sha256 });
+  const raw = JSON.parse(await fs.readFile(manager.store.registryFile, 'utf8'));
+  delete raw.instances[0].credentialPolicy;
+  await fs.writeFile(manager.store.registryFile, JSON.stringify(raw));
+  await manager.store.load();
+  await assert.rejects(manager.launch(id), { code: 'CREDENTIAL_RUNTIME_NOT_READY' });
+  assert.equal(manager.store.get(id).credentialPolicy.join, 'required');
+  assert.equal(children.size, 0);
+});
 
 test('instance startup refuses unknown and plaintext-secret CVARs before spawning', async t => {
   const { manager, children, kills } = await fixture(t);

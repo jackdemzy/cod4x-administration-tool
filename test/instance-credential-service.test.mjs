@@ -90,6 +90,50 @@ async function fixture(action) {
   finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 
+for (const reader of ['instanceStatus', 'resolve']) {
+  test(`${reader} vault conflict revokes a still-active runtime scope before abort notification`, () => fixture(async (service, root) => {
+    await service.initialize(passphrase); await service.unlock(passphrase);
+    await service.set('server-a', 'rcon', { value: 'Scoped-Rcon-123!', expectedSha256: (await service.status()).sha256 });
+    let abortObserved = false;
+    await assert.rejects(service.withRuntimeCredentials('server-a', async (credentials, signal) => {
+      signal.addEventListener('abort', () => {
+        abortObserved = true;
+        assert.ok(credentials.rcon.every(value => value === 0), 'Revocation precedes notification');
+      }, { once: true });
+      await fs.appendFile(path.join(root, 'credential-vault', 'vault.json'), '\n');
+      await assert.rejects(reader === 'resolve' ? service.resolve('server-a', 'rcon') : service.instanceStatus('server-a'), { code: 'VAULT_CONFLICT' });
+      assert.equal(signal.aborted, true, 'Concurrent verification must abort before the consumer resumes');
+      assert.equal(abortObserved, true);
+      assert.ok(credentials.rcon.every(value => value === 0));
+    }), { code: 'VAULT_LOCKED' });
+    assert.equal((await service.status()).locked, true);
+  }));
+}
+
+test('global vault status detects conflict and aborts the active runtime scope', () => fixture(async (service, root) => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  await service.set('server-a', 'rcon', { value: 'Scoped-Rcon-123!', expectedSha256: (await service.status()).sha256 });
+  await assert.rejects(service.withRuntimeCredentials('server-a', async (credentials, signal) => {
+    await fs.appendFile(path.join(root, 'credential-vault', 'vault.json'), '\n');
+    await assert.rejects(service.status(), { code: 'VAULT_CONFLICT' });
+    assert.equal(signal.aborted, true);
+    assert.ok(credentials.rcon.every(value => value === 0));
+  }), { code: 'VAULT_LOCKED' });
+}));
+
+test('missing vault status cannot leave a runtime scope live with cached credentials', () => fixture(async (service, root) => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  await service.set('server-a', 'rcon', { value: 'Scoped-Rcon-123!', expectedSha256: (await service.status()).sha256 });
+  await assert.rejects(service.withRuntimeCredentials('server-a', async (credentials, signal) => {
+    await fs.unlink(path.join(root, 'credential-vault', 'vault.json'));
+    const metadata = await service.instanceStatus('server-a');
+    assert.equal(metadata.initialized, false);
+    assert.equal(metadata.locked, true);
+    assert.equal(signal.aborted, true, 'Missing file must revoke cached credential lease');
+    assert.ok(credentials.rcon.every(value => value === 0));
+  }), { code: 'VAULT_LOCKED' });
+}));
+
 test('credential service isolates instances and returns only metadata, survives encrypted restart and removal', () => fixture(async (service, root, resolveInstance) => {
   assert.deepEqual(await service.status(), { initialized: false, locked: true, sha256: null });
   await service.initialize(passphrase);

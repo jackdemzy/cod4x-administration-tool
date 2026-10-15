@@ -155,7 +155,21 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     const unlocked = await request('/api/credentials/vault/unlock', { passphrase: vaultPassphrase });
     assert.equal(unlocked.status, 200, unlocked.json.error);
     assert.equal(unlocked.json.vault.locked, false);
-    const credentialSet = await request('/api/instances/public-01/credentials/rcon', { value: rconSecret, expectedSha256: unlocked.json.vault.sha256 });
+    const joinSecret = 'Disposable-HTTP-Join-123!';
+    const joinSet = await request('/api/instances/public-01/credentials/join', { value: joinSecret, expectedSha256: unlocked.json.vault.sha256 });
+    assert.equal(joinSet.status, 200, joinSet.json.error);
+    assert.equal((await request('/api/instances/public-01')).json.instance.credentialPolicy.join, 'required');
+    assert.ok(!JSON.stringify(joinSet.json).includes(joinSecret));
+    await request('/api/credentials/vault/lock', {});
+    const protectedStart = await request('/api/instances/public-01/start', {});
+    assert.equal(protectedStart.json.code, platform === 'windows' ? 'VAULT_LOCKED' : 'CREDENTIAL_RUNTIME_NOT_READY');
+    assert.notEqual(protectedStart.status, 201);
+    assert.ok(!JSON.stringify(protectedStart.json).includes(joinSecret));
+    await request('/api/credentials/vault/unlock', { passphrase: vaultPassphrase });
+    const joinRemoved = await request('/api/instances/public-01/credentials/join/remove', { expectedSha256: joinSet.json.credential.sha256 });
+    assert.equal(joinRemoved.status, 200, joinRemoved.json.error);
+    assert.equal((await request('/api/instances/public-01')).json.instance.credentialPolicy.join, 'none');
+    const credentialSet = await request('/api/instances/public-01/credentials/rcon', { value: rconSecret, expectedSha256: joinRemoved.json.credential.sha256 });
     assert.equal(credentialSet.status, 200, credentialSet.json.error);
     assert.equal(credentialSet.json.credential.verified, true);
     assert.ok(!JSON.stringify(credentialSet.json).includes(rconSecret));
@@ -218,10 +232,12 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     assert.equal(repaired.status, 200, repaired.json.error);
     assert.equal(repaired.json.configuration.sha256, configBefore.json.configuration.sha256);
     assert.equal((await fetch(`${url}/api/instances/public-01/config`)).status, 401);
-    const rejectedStart = await request('/api/instances/public-01/start', {}, 'POST');
+    // public-01 now requires real credential activation. Keep the independent
+    // Verified-Core denial on the public sibling (Master alone stays optional).
+    const rejectedStart = await request('/api/instances/public-02/start', {}, 'POST');
     assert.equal(rejectedStart.status, 400);
     assert.equal(rejectedStart.json.code, 'VERIFIED_CORE_BLOCKED');
-    assert.equal((await request('/api/instances/public-02')).json.instance.runtime.status, 'STOPPED');
+    assert.equal((await request('/api/instances/public-01')).json.instance.runtime.status, 'STOPPED');
     const auditEntries = (await request('/api/audit?limit=100')).json.events;
     const createAudit = auditEntries.find(entry => entry.details?.correlationId === created.json.correlationId);
     assert.equal(createAudit.details.route, '/api/instances');
@@ -231,6 +247,7 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     assert.equal(startAudit.details.route, '/api/instances/:id/start');
     assert.equal(startAudit.details.method, 'POST');
     assert.equal(startAudit.details.code, 'VERIFIED_CORE_BLOCKED');
+    assert.equal(startAudit.details.instanceId, 'public-02');
 
     // Restart only our isolated backend: registry and legacy state must survive.
     child.kill(); await closed; await startBackend();
@@ -239,6 +256,9 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     ({ token } = await login.json());
     assert.equal((await request('/api/credentials/vault')).json.vault.locked, true);
     assert.equal((await request('/api/instances/public-01/credentials')).json.credentials.rcon.configured, null);
+    const lockedRconStart = await request('/api/instances/public-01/start', {});
+    assert.equal(lockedRconStart.json.code, platform === 'windows' ? 'VAULT_LOCKED' : 'CREDENTIAL_RUNTIME_NOT_READY');
+    assert.notEqual(lockedRconStart.status, 201);
     const lockedWrite = await request('/api/instances/public-01/credentials/rcon', { value: 'Disposable-New-123!', expectedSha256: masterSet.json.credential.sha256 });
     assert.equal(lockedWrite.status, 423);
     assert.equal((await request('/api/credentials/vault/unlock', { passphrase: vaultPassphrase })).status, 200);
