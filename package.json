@@ -1,0 +1,59 @@
+{
+  "name": "cod4x-control-installer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "node installer-server.mjs",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "preflight": "node scripts/preflight-4.18.3.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "express": "^5.1.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "tar": "^7.4.3"
+  },
+  "version": "4.18.3",
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12",
+    "vite": "^7.1.3"
+  },
+  "build": {
+    "appId": "eu.cod4x.control",
+    "productName": "COD4X CONTROL",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.cjs",
+      "electron-preload.cjs",
+      "installer-server.mjs",
+      "lib/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "COD4X-CONTROL-Setup-${version}-${arch}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": true
+    },
+    "artifactName": "COD4X-CONTROL-Setup-${version}-${arch}.exe"
+  },
+  "main": "electron-main.cjs",
+  "description": "COD4X CONTROL — Windows and Linux Dedicated Server runtime with verified process lifecycle controls.",
+  "author": "COD4X CONTROL"
+}

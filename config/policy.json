@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "audit": {
+    "maxEvents": 500,
+    "persistReadLimit": 500,
+    "maxBytes": 10485760,
+    "maxRotated": 7
+  },
+  "security": {
+    "allowedCod4xVersions": ["21.2", "21.3", "21.4", "21.5"],
+    "targets": ["server", "client"],
+    "portMin": 1,
+    "portMax": 65535
+  }
+}

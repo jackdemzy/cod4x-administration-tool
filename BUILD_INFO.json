@@ -1,0 +1,15 @@
+{
+  "version": "4.18.3",
+  "block": "Linux Dedicated Runtime",
+  "base": "4.18.1",
+  "nativeExecutable": "cod4x18_dedrun.exe",
+  "platform": "windows + linux",
+  "validation": "preflight-4.18.3",
+  "verifiedCore": "manifest + executable SHA-256 fingerprint",
+  "fix": "Shared lifecycle with unprivileged Linux process identity checks, executable permissions, backend-independent output files, guarded Unix signals and IPv4/IPv6 loopback isolation.",
+  "buildStatus": "development-block-5-runtime-gates-pass",
+  "notes": "4.18.3 Windows and Linux source preflights and Vite build passed. Isolated real Core 21.2 lifecycle gates passed on both hosts, with repeated Linux runs. Windows stop may require guarded force fallback; Linux graceful SIGTERM was observed. Development source, not a release or installer certification. No live deployment.",
+  "linuxExecutable": "cod4x18_dedrun",
+  "clientExecutable": "iw3mp.exe",
+  "architecture": "Shared Runtime with Windows and Linux adapters"
+}
