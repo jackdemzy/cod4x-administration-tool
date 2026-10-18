@@ -1,13 +1,16 @@
 # eBc-B3 Audit (Roadmap-Block 11)
 
-Stand: 2026-10-18 · Geprüft für COD4X CONTROL 4.18.9 · Methode: statische Quellprüfung, nichts wurde ausgeführt.
+Stand: 2026-10-19 · Geprüft für COD4X CONTROL 4.18.9 (statisch), nachgeführt in 4.18.10 nach dem ersten echten Start (siehe „Nachtrag Block 12“).
+
+> **Festgeschriebener Stand seit 4.18.10: `90966246ab1953ceeca5e8b62c714851a120b28a`** (2022-06-23, „CoD4x Help - Readme“). Der neueste Commit `d44c05e` startet nicht und wird von CONTROL als bekannt fehlerhaft blockiert.
 
 ## Quelle
 
 | Feld | Wert |
 |---|---|
 | Repository | https://github.com/kristiandz/ebc-b3 |
-| Geprüfter Commit | `d44c05eaa809c7047073e0d3776bcdb5d1827fee` (2022-08-12, „Syntax update“), Branch `master` |
+| Ursprünglich geprüfter Commit (Block 11) | `d44c05eaa809c7047073e0d3776bcdb5d1827fee` (2022-08-12, „Syntax update“), Branch `master` – **startet nicht**, siehe Nachtrag |
+| Festgeschriebener Commit (Block 12) | `90966246ab1953ceeca5e8b62c714851a120b28a` (2022-06-23), direkter Vorgänger von `d44c05e` |
 | Letzte Aktivität | 2022-08-12 (seitdem keine Commits) |
 | Basis | BigBrotherBot `1.10.10` (`b3/__init__.py`), eBc-Anpassungen |
 | Lizenz | Repository GPL-3.0; B3-Quelldateien GPL-2.0-or-later. CONTROL bündelt und verändert eBc-B3 nicht. |
@@ -95,3 +98,14 @@ Maschinenlesbar in `lib/b3-dependencies.mjs` (`B3_DEPENDENCY_MATRIX`), dort auch
 - Block 16: `b3.xml` erzeugen (`parser cod4x`, lokaler `game_log`, RCON aus dem Vault, `auth`-Plugin für b3hide), Datei mit restriktiven Rechten.
 - Sicherheitsfrage (Block 20): Python 2.7 erhält keine Sicherheitsupdates mehr; B3 sollte nur lokal und mit minimalen Rechten laufen.
 - eBc-Promod-Livebetrieb: benötigt das GSCLIB-Plugin (`.dll`/`.so`, über den Plugin-Manager aus Block 10 freigebbar) und einen selbst kompilierten CoD4X-Core. Ein solcher Core muss das Verified-Core-Gate bestehen (eigener Manifest-/Hash-Nachweis) – das ist eine bewusste Betreiberentscheidung, keine automatische Freigabe.
+
+## Nachtrag Block 12 (2026-10-19): erster echter Start
+
+Ausgeführt in WSL `COD4X-Test` (Ubuntu 24.04, Python 2.7.18 via pyenv, PyMySQL 0.10.1, python-dateutil 2.9.0.post0) mit `scripts/verify-4.18.10-b3-native.mjs`.
+
+- **`d44c05e` ist nicht lauffähig.** Der „Syntax update“ ersetzt `import b3` durch relative Importe, ruft in `b3/config.py` `load()` aber weiter `getAbsolutePath(...)` auf: `NameError: global name 'getAbsolutePath' is not defined` beim Laden jeder Konfiguration, danach `EOFError` im interaktiven `raw_input("press any key…")`. Der Commit ändert außerdem 15 Dateien (117+/311−), u. a. Ausnahmebehandlung und Ereignisverarbeitung in `b3/parser.py`. CONTROL erkennt ihn am Hash von `b3/config.py` (`B3_KNOWN_BROKEN_COMMIT`).
+- **Festschreibung auf `9096624`** (Entscheidung des Betreibers). Mit diesem Stand: Start → `RUNNING`, B3-Log „Start reading game events“, SIGKILL → `CRASHED`, Neustart, Wiedererkennung nach Backend-Neustart über `/proc`, SIGTERM-Stopp – alles bestanden.
+- **B3 läuft ohne CoD4x-Server weiter.** Ohne Server meldet `b3/parsers/q3a/rcon.py` „RCON: too many tries: aborting“; B3 bleibt aktiv. CONTROL zeigt das als `rcon: UNREACHABLE` im Health-Check, getrennt vom Prozesszustand.
+- **Startbedingungen**, die CONTROL erfüllt: Die Spiel-Logdatei muss existieren (sonst `critical` → Exit 220), CONTROL legt sie leer an ohne vorhandene Inhalte anzutasten. Das Plugin `admin` ist Pflicht. Ein `autodoc`-Abschnitt ohne Ziel erzeugt einen Traceback im `documentationBuilder` und wird deshalb weggelassen.
+- **Startargumente:** `python2.7 -B -E b3_run.py --config <instance>/b3/b3.xml`, ohne `-r` (CONTROL verwaltet Neustarts selbst). `-B`, weil frühe Commits `.pyc` im Repository führen und B3 sonst den Quellbaum verändert.
+- Für den Lebenszyklus-Test nutzt die Minimalkonfiguration SQLite (`b3/storage/sqlite.py` legt das Schema selbst an). MySQL-Anbindung, RCON-Passwort und das Statusformat gegen einen echten CoD4x 21.x bleiben für Block 14/16 offen.

@@ -34,6 +34,7 @@ import { InstanceCredentialService } from "./lib/instance-credential-service.mjs
 import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
 import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
+import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 
@@ -2255,11 +2256,15 @@ let instanceManager = null;
 const rconService = new InstanceRconService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit });
 // Master audit events carry instance, run and fixed codes only, never the token.
 const masterService = new InstanceMasterService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit });
+// B3 runtime (Block 12): separate processes; events are audited, never the output.
+const b3EnvironmentForRuntime = new B3Environment(dataPath("config", "b3-environment.json"));
+const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
 instanceManager = new ServerInstanceManager({
   store: instanceStore,
   credentialService,
   rconService,
   masterService,
+  b3Service,
   legacyRuntime: defaultRuntime,
   runtimeFactory: (instance, options) => createRuntimeManager({
     ...runtimeDependencies,
@@ -2288,7 +2293,7 @@ function instanceRoute(action, status = 200) {
       res.status(status).json({ ok: true, correlationId, ...result });
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
-      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS"].includes(error.code) ? 409 : error.code === "INSTANCE_NETWORK_CONFIRMATION_REQUIRED" ? 428 : 400;
+      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING"].includes(error.code) ? 409 : error.code === "INSTANCE_NETWORK_CONFIRMATION_REQUIRED" ? 428 : 400;
       res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
     }
   };
@@ -2419,6 +2424,10 @@ app.post("/api/b3/dependencies/check", requirePermission("config.manage"), b3Rou
   audit(result.overall === "BLOCKED" ? "warn" : "info", "b3.dependencies.checked", { actor: req.auth.username, overall: result.overall, blocking: result.blocking, python: result.python?.version || null });
   return { dependencies: result };
 }));
+app.get("/api/instances/:id/b3", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.status(req.params.id) })));
+app.post("/api/instances/:id/b3/start", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id) })));
+app.post("/api/instances/:id/b3/stop", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.stop(req.params.id) })));
+app.post("/api/instances/:id/b3/restart", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id, true) })));
 // Logical deletion is recoverable: move owned home to .trash, never recursively erase it.
 app.delete("/api/instances/:id", requirePermission("server.manage"), instanceRoute(async req => ({ archive: await instanceManager.archive(req.params.id) })));
 

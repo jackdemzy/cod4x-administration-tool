@@ -1,3 +1,9 @@
+## 4.18.10 B3 Runtime note
+
+4.18.10 implements roadmap Block 12. Each instance can run eBc-B3 as its own process (`python2.7 -B -E b3_run.py --config <home>/b3/b3.xml`, detached, `shell:false`, without B3's own `-r` restart mode). CONTROL starts, stops and restarts it, verifies the PID (on Linux via `/proc` argv, owner and start time), detects crashes and lost processes, re-identifies a running B3 after a backend restart and reports health from B3's own log (ready marker, errors, RCON reachability). B3 and the CoD4x server never depend on each other: a B3 crash leaves the server running, a server stop or restart leaves B3 running. B3 only starts when the Block 11 dependency check is satisfied.
+
+The first real start showed that the newest eBc-B3 commit `d44c05e` cannot start (NameError in `b3/config.py`); CONTROL therefore pins `9096624` and blocks `d44c05e` by hash. The native check `scripts/verify-4.18.10-b3-native.mjs` passed in WSL with Python 2.7.18 (SQLite, no CoD4x server). MySQL and the RCON password follow in Blocks 14/16. Development source, not a release.
+
 ## 4.18.9 eBc-B3 Audit note
 
 4.18.9 implements roadmap Block 11. `docs/EBC-B3-AUDIT.md` documents a static audit of https://github.com/kristiandz/ebc-b3 at commit `d44c05e` (B3 1.10.10) including the dependency matrix. Key results: eBc-B3 runs only on Python 2.7; it needs python-dateutil and a MySQL driver (PyMySQL first); the shipped `b3.xml` uses the `cod4` parser and empty server settings; b3hide is driven by the `auth` ext plugin; `b3-update-ebc.sql` (eBc promod statistics) contains `DROP TABLE` and is never run automatically; the CoD4x 21.x `status` format against the `cod4x` parser can only be confirmed natively. CONTROL now stores the Python and B3 paths, probes the interpreter with a fixed isolated import check and inspects the B3 files statically. B3 itself is not started yet (Block 12).

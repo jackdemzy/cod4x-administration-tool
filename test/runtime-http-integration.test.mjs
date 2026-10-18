@@ -189,6 +189,13 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     const b3Check = await request('/api/b3/dependencies/check', {});
     assert.equal(b3Check.status, 200, b3Check.json.error);
     assert.equal(b3Check.json.dependencies.overall, 'BLOCKED', 'unconfigured B3 environment is blocked, never assumed ready');
+    // B3 runtime: separate process per instance; unconfigured dependencies never start it.
+    const b3Status = await request('/api/instances/public-02/b3');
+    assert.equal(b3Status.status, 200, b3Status.json.error);
+    assert.deepEqual([b3Status.json.b3.runtime.status, b3Status.json.b3.health.status], ['STOPPED', 'DOWN']);
+    const b3Start = await request('/api/instances/public-02/b3/start', {});
+    assert.deepEqual([b3Start.status, b3Start.json.code], [400, 'B3_DEPENDENCIES_BLOCKED']);
+    assert.equal((await request('/api/instances/public-02')).json.instance.runtime.status, 'STOPPED', 'a blocked B3 start never touches the server');
     // Plugin manager: discovery is empty, malformed requests use fixed codes.
     const pluginList = await request('/api/instances/public-02/plugins');
     assert.equal(pluginList.status, 200, pluginList.json.error);
