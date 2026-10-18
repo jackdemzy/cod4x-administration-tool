@@ -1,15 +1,15 @@
 {
-  "version": "4.18.3",
-  "block": "Linux Dedicated Runtime",
-  "base": "4.18.1",
+  "version": "4.18.8",
+  "block": "Plugin Manager",
+  "base": "4.18.7",
   "nativeExecutable": "cod4x18_dedrun.exe",
   "platform": "windows + linux",
-  "validation": "preflight-4.18.3",
+  "validation": "preflight-4.18.8",
   "verifiedCore": "manifest + executable SHA-256 fingerprint",
-  "fix": "Shared lifecycle with unprivileged Linux process identity checks, executable permissions, backend-independent output files, guarded Unix signals and IPv4/IPv6 loopback isolation.",
-  "buildStatus": "development-block-5-runtime-gates-pass",
-  "notes": "4.18.3 Windows and Linux source preflights and Vite build passed. Isolated real Core 21.2 lifecycle gates passed on both hosts, with repeated Linux runs. Windows stop may require guarded force fallback; Linux graceful SIGTERM was observed. Development source, not a release or installer certification. No live deployment.",
+  "fix": "Per-instance CoD4x plugin manager: discovery of <home>/plugins/<name>.dll|.so with SHA-256, operator approval pinning the hash, install from a local file without overwrite, enable/disable and catalog-validated plugin dvars (b3hide: b3Prefix/b3Hide/b3HideLvl) only while stopped, +loadPlugin before server.cfg, launch blocked fail-closed on hash mismatch or missing enabled plugin, removal archives to plugins/.removed, runtime load state from plugin_handler.c messages, version via allowlisted RCON pluginInfo, approvals never cloned, audit plugin.installed/approved/enabled/disabled/configured/removed.",
+  "buildStatus": "development-block-10-plugin-gate-pass",
+  "notes": "4.18.8 Windows source preflight with the Plugin Discovery + Enable/Disable + Integrity gate against the UDP test double using inert test files. No real b3hide.dll/.so was loaded by a real cod4x18_dedrun. Linux/WSL preflight and native lifecycle gates were not run for this block. Development source, not a release or installer certification. No live deployment.",
   "linuxExecutable": "cod4x18_dedrun",
   "clientExecutable": "iw3mp.exe",
-  "architecture": "Shared Runtime with Windows and Linux adapters"
+  "architecture": "Shared Runtime with Windows and Linux adapters; schema-based Config Engine; per-instance RCON, master status, master list verification and plugin manager; per-instance network exposure"
 }

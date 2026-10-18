@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseConfigAssignments, writeConfigAssignments, diffConfigAssignments, validateConfigModel, CONFIG_SCHEMA } from '../lib/config-engine.mjs';
+import { parseConfigAssignments, writeConfigAssignments, diffConfigAssignments, validateConfigModel, CONFIG_SCHEMA, CONFIG_SECTIONS } from '../lib/config-engine.mjs';
 
 test('config parser preserves quoted delimiters and comments, with deterministic writer roundtrip', () => {
   const input = '// header\nset sv_hostname "Name; // remains data"; seta g_log "logs/games_mp.log"\nsets locale "de"';
@@ -32,4 +32,12 @@ test('schema validates engine-backed CVARs and refuses unknown names, invalid va
   }
   assert.equal(CONFIG_SCHEMA.sv_maxclients.restartRequired, true);
   assert.equal(CONFIG_SCHEMA.net_port.managed, true);
+});
+
+test('config sections cover every roadmap Block 6 area and every schema setting belongs to a schema-managed section', () => {
+  assert.deepEqual(CONFIG_SECTIONS.map(section => section.label), ['Server Identity', 'Network', 'Gameplay', 'RCON', 'Master Server', 'Maps', 'Mods', 'Plugins', 'Security', 'B3']);
+  const schemaSections = new Set(CONFIG_SECTIONS.filter(section => section.managedBy === 'schema').map(section => section.id));
+  for (const [name, definition] of Object.entries(CONFIG_SCHEMA)) assert.ok(schemaSections.has(definition.section), `${name} has no schema-managed section`);
+  // Credentials stay delegated to the vault, never plain configuration fields.
+  for (const id of ['rcon', 'master']) assert.equal(CONFIG_SECTIONS.find(section => section.id === id).managedBy, 'credential-vault');
 });

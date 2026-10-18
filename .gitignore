@@ -23,3 +23,6 @@ runtime-state.json
 remembered-login.json
 .DS_Store
 Thumbs.db
+
+# Local Claude Code permissions (per user)
+.claude/settings.local.json

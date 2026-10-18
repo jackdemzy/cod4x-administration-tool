@@ -1,5 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
 
+const ACTIVATION_TEXT = {
+  ACTIVE: ['Laufender Server verwendet diese Datei.', 'Running server uses this file.'],
+  RESTART_REQUIRED: ['Datei weicht vom laufenden Stand ab – Neustart erforderlich.', 'File differs from the running state – restart required.'],
+  UNKNOWN: ['Laufender Server ohne zugeordneten Konfigurationsnachweis – Stand unbekannt.', 'Running server without matching configuration evidence – state unknown.'],
+  STOPPED: ['Server gestoppt; Änderungen werden beim nächsten Start aktiv.', 'Server stopped; changes activate on next start.'],
+};
+const DELEGATED_TEXT = {
+  'credential-vault': ['Credential Vault', 'credential vault'],
+  planned: ['noch nicht verwaltet', 'not managed yet'],
+};
+
+export function ConfigActivationStatus({ activation, de }) {
+  if (!activation) return null;
+  const text = ACTIVATION_TEXT[activation.state] || ACTIVATION_TEXT.UNKNOWN;
+  const pending = activation.state === 'STOPPED' && activation.changedSinceLastStart;
+  return <p role={activation.state === 'RESTART_REQUIRED' ? 'alert' : 'status'}>
+    {de ? 'Aktivierung' : 'Activation'}: <strong>{activation.state}</strong> – {text[de ? 0 : 1]}
+    {pending && (de ? ' Seit dem letzten Start geändert.' : ' Changed since last start.')}
+  </p>;
+}
+
+export function ConfigSectionOverview({ sections, de }) {
+  const delegated = (sections || []).filter(section => section.managedBy !== 'schema');
+  if (!delegated.length) return null;
+  return <p>{de ? 'Nicht über dieses Schema bearbeitbar' : 'Not editable through this schema'}: {delegated.map(section => `${section.label} (${(DELEGATED_TEXT[section.managedBy] || DELEGATED_TEXT.planned)[de ? 0 : 1]}, Block ${section.roadmapBlock})`).join(' · ')}</p>;
+}
+
+export function ConfigDiffTable({ diff, de }) {
+  if (!diff?.length) return <p role="status">{de ? 'Keine Änderungen gegenüber der Datei.' : 'No changes compared to the file.'}</p>;
+  const shown = value => value === null || value === undefined ? '—' : value === '' ? '""' : value;
+  return <table>
+    <thead><tr><th>{de ? 'Einstellung' : 'Setting'}</th><th>{de ? 'Änderung' : 'Change'}</th><th>{de ? 'Vorher' : 'Before'}</th><th>{de ? 'Nachher' : 'After'}</th></tr></thead>
+    <tbody>{diff.map(entry => <tr key={entry.name}><td>{entry.name}</td><td>{entry.change}</td><td>{shown(entry.before)}</td><td>{shown(entry.after)}</td></tr>)}</tbody>
+  </table>;
+}
+
 export function InstanceConfigEditor({ instance, request, de }) {
   const [configuration, setConfiguration] = useState(null), [entries, setEntries] = useState([]);
   const [preview, setPreview] = useState(null), [backupId, setBackupId] = useState('');
@@ -56,26 +92,32 @@ export function InstanceConfigEditor({ instance, request, de }) {
     {error && <p role="alert">{error}</p>}
     {message && <p role="status">{message}</p>}
     {configuration && <>
+      <ConfigActivationStatus activation={configuration.activation} de={de}/>
+      <ConfigSectionOverview sections={configuration.sections} de={de}/>
       {configuration.valid === false && <p role="alert">{de ? 'Aktuelle Konfiguration ist beschädigt oder nicht schema-konform. Nur aus einer geprüften Sicherung wiederherstellen.' : 'Current configuration is damaged or outside the schema. Restore a verified backup.'}</p>}
       <p style={{ overflowWrap: 'anywhere' }}>SHA256: {configuration.sha256}</p>
+      {(configuration.sections || []).filter(section => entries.some(entry => configuration.schema[entry.name]?.section === section.id)).map(section => <fieldset key={section.id} style={{ marginBottom: 8 }}>
+        <legend>{section.label}</legend>
       {entries.map((entry, index) => {
         const schema = configuration.schema[entry.name], disabled = busy || active || schema?.managed;
+        if (schema?.section !== section.id) return null;
         return <div key={entry.name} style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-          <label>{schema?.section} / {entry.name}{schema?.type === 'enum'
+          <label>{entry.name}{schema?.type === 'enum'
             ? <select disabled={disabled} value={entry.value} onChange={event => edit(entries.map((value, position) => position === index ? { ...value, value: event.target.value } : value))}>{schema.values.map(value => <option key={value}>{value}</option>)}</select>
             : <input disabled={disabled} type={schema?.type === 'integer' ? 'number' : 'text'} min={schema?.min} max={schema?.max} value={entry.value} onChange={event => edit(entries.map((value, position) => position === index ? { ...value, value: event.target.value } : value))}/>}</label>
           {!schema?.managed && <button disabled={busy || active} onClick={() => edit(entries.filter((_, position) => position !== index))}>{de ? 'Entfernen' : 'Remove'}</button>}
         </div>;
       })}
+      </fieldset>)}
       <label>{de ? 'Einstellung ergänzen' : 'Add setting'}<select disabled={busy || active} value="" onChange={event => {
         const name = event.target.value, schema = configuration.schema[name];
         if (schema) edit([...entries, { command: 'set', name, value: schema.type === 'enum' ? schema.values[0] : schema.type === 'integer' ? String(schema.min) : '' }]);
-      }}><option value="">—</option>{available.map(([name]) => <option key={name} value={name}>{name}</option>)}</select></label>
+      }}><option value="">—</option>{available.map(([name, schema]) => <option key={name} value={name}>{schema.section} / {name}</option>)}</select></label>
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <button disabled={busy || active || configuration.valid === false} onClick={() => action('preview')}>{de ? 'Vorprüfen / Vergleich' : 'Preview / diff'}</button>
         <button disabled={busy || active || !preview?.valid || !preview.diff.length} onClick={() => action('apply')}>{de ? 'Backup + Übernehmen + Prüfen' : 'Backup + apply + verify'}</button>
       </div>
-      {preview && <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(preview.diff, null, 2)}</pre>}
+      {preview && <ConfigDiffTable diff={preview.diff} de={de}/>}
       <label>{de ? 'Geprüfte Sicherung auswählen' : 'Select verified backup'}<select disabled={busy || active} value={backupId} onChange={event => setBackupId(event.target.value)}>
         <option value="">—</option>
         {backups.map(backup => <option key={backup.id} value={backup.id} disabled={!backup.valid}>{backup.valid ? backup.createdAt : (de ? 'BESCHÄDIGT – gesperrt' : 'CORRUPT – blocked')} · {backup.id}</option>)}

@@ -31,6 +31,8 @@ import { createRuntimeManager } from "./lib/runtime-manager.mjs";
 import { ServerInstanceStore, resolveRealFuturePath } from "./lib/server-instance-store.mjs";
 import { ServerInstanceManager } from "./lib/server-instance-manager.mjs";
 import { InstanceCredentialService } from "./lib/instance-credential-service.mjs";
+import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
+import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 
@@ -270,7 +272,7 @@ function requirePermission(permission) {
 const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "installation", permission: "install.execute", routes: ["POST /api/installer"] },
   { area: "updates", permission: "update.execute", routes: ["POST /api/fpschallenge/anticheat/download/:version"] },
-  { area: "server", permission: "server.manage", routes: ["POST /api/server/start", "POST /api/runtime/start", "POST /api/runtime/stop", "POST /api/runtime/restart", "POST /api/rcon/execute", "POST /api/admin/test"] },
+  { area: "server", permission: "server.manage", routes: ["POST /api/server/start", "POST /api/runtime/start", "POST /api/runtime/stop", "POST /api/runtime/restart", "POST /api/rcon/execute", "POST /api/instances/:id/rcon/connect", "POST /api/instances/:id/rcon/command", "POST /api/admin/test"] },
   { area: "configuration", permission: "config.manage", routes: ["GET /api/policy", "POST /api/policy/validate", "POST /api/policy/save", "GET /api/config/profiles", "POST /api/config/profiles/save", "POST /api/config/profiles/activate", "POST /api/config/profiles/delete"] },
   { area: "secrets", permission: "secrets.manage", routes: [] },
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
@@ -2247,9 +2249,16 @@ const instanceRoot = dataPath("servers");
 runtimeDependencies.onRuntimeEvent = entry => audit(entry.expected === false || /failed|blocked|error/.test(entry.event) ? "warn" : "info", entry.event, entry);
 const instanceStore = new ServerInstanceStore({ root: instanceRoot, registryFile: dataPath("config", "server-instances.json") });
 const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => instanceStore.get(id) });
-const instanceManager = new ServerInstanceManager({
+let instanceManager = null;
+// RCON audit events carry instance, actor, normalized command and codes only, never the password.
+const rconService = new InstanceRconService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit });
+// Master audit events carry instance, run and fixed codes only, never the token.
+const masterService = new InstanceMasterService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit });
+instanceManager = new ServerInstanceManager({
   store: instanceStore,
   credentialService,
+  rconService,
+  masterService,
   legacyRuntime: defaultRuntime,
   runtimeFactory: (instance, options) => createRuntimeManager({
     ...runtimeDependencies,
@@ -2278,7 +2287,7 @@ function instanceRoute(action, status = 200) {
       res.status(status).json({ ok: true, correlationId, ...result });
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
-      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY"].includes(error.code) ? 409 : 400;
+      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS"].includes(error.code) ? 409 : error.code === "INSTANCE_NETWORK_CONFIRMATION_REQUIRED" ? 428 : 400;
       res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
     }
   };
@@ -2311,8 +2320,13 @@ app.post("/api/credentials/vault/initialize", requirePermission("config.manage")
 app.post("/api/credentials/vault/unlock", requirePermission("config.manage"), credentialRoute(async req => ({ vault: await credentialService.unlock(vaultPassphrase(req)) })));
 app.post("/api/credentials/vault/lock", requirePermission("config.manage"), credentialRoute(async () => { credentialService.lock(); return { vault: await credentialService.status() }; }));
 app.get("/api/instances/:id/credentials", requirePermission("config.manage"), credentialRoute(async req => ({ credentials: await credentialService.instanceStatus(req.params.id) })));
-app.post("/api/instances/:id/credentials/:kind", requirePermission("config.manage"), credentialRoute(async req => ({ credential: await instanceManager.changeCredential(req.params.id, req.params.kind, req.body) })));
-app.post("/api/instances/:id/credentials/:kind/remove", requirePermission("config.manage"), credentialRoute(async req => ({ credential: await instanceManager.changeCredential(req.params.id, req.params.kind, req.body, true) })));
+// Block 8 audit names for the master token; the generic credential event stays.
+function auditMasterToken(req, removed, credential) {
+  if (req.params.kind === "master" && credential.changed !== false) audit("info", removed ? "master.token.removed" : "master.token.configured", { instanceId: req.params.id, actor: req.auth.username, backupId: credential.backupId || null });
+  return credential;
+}
+app.post("/api/instances/:id/credentials/:kind", requirePermission("config.manage"), credentialRoute(async req => ({ credential: auditMasterToken(req, false, await instanceManager.changeCredential(req.params.id, req.params.kind, req.body)) })));
+app.post("/api/instances/:id/credentials/:kind/remove", requirePermission("config.manage"), credentialRoute(async req => ({ credential: auditMasterToken(req, true, await instanceManager.changeCredential(req.params.id, req.params.kind, req.body, true)) })));
 app.get("/api/instances", requirePermission("diagnostics.read"), instanceRoute(async () => ({ instances: await instanceManager.list(), root: instanceRoot, hostPlatform: process.platform === "win32" ? "windows" : process.platform === "linux" ? "linux" : "unsupported" })));
 app.post("/api/instances", requirePermission("server.manage"), instanceRoute(async req => ({ instance: await instanceManager.create(req.body) }), 201));
 app.get("/api/instances/:id", requirePermission("diagnostics.read"), instanceRoute(async req => ({ instance: await instanceManager.status(req.params.id) })));
@@ -2323,8 +2337,61 @@ app.post("/api/instances/:id/restart", requirePermission("server.manage"), insta
 app.get("/api/instances/:id/config", requirePermission("config.manage"), instanceRoute(async req => ({ configuration: await instanceManager.configuration(req.params.id) })));
 app.get("/api/instances/:id/config/backups", requirePermission("config.manage"), instanceRoute(async req => ({ backups: await instanceManager.configurationBackups(req.params.id) })));
 app.post("/api/instances/:id/config/preview", requirePermission("config.manage"), instanceRoute(async req => ({ configuration: await instanceManager.previewConfiguration(req.params.id, req.body) })));
-app.put("/api/instances/:id/config", requirePermission("config.manage"), instanceRoute(async req => ({ configuration: await instanceManager.changeConfiguration(req.params.id, req.body) })));
-app.post("/api/instances/:id/config/restore", requirePermission("config.manage"), instanceRoute(async req => ({ configuration: await instanceManager.changeConfiguration(req.params.id, req.body, true) })));
+// Reproducible change trail: fingerprints, backup reference and changed names only, never values.
+function auditConfigChange(event, req, result) {
+  audit("info", event, { instanceId: req.params.id, actor: req.auth.username, changed: result.changed, previousSha256: result.previousSha256, sha256: result.sha256, backupId: result.backupId, restartRequired: result.restartRequired, settings: result.diff.map(entry => `${entry.change}:${entry.name}`) });
+  return result;
+}
+app.put("/api/instances/:id/config", requirePermission("config.manage"), instanceRoute(async req => ({ configuration: auditConfigChange("config.change.applied", req, await instanceManager.changeConfiguration(req.params.id, req.body)) })));
+app.post("/api/instances/:id/config/restore", requirePermission("config.manage"), instanceRoute(async req => ({ configuration: auditConfigChange("config.change.restored", req, await instanceManager.changeConfiguration(req.params.id, req.body, true)) })));
+function rconRoute(action) {
+  return async (req, res) => {
+    const correlationId = crypto.randomUUID();
+    try { res.json({ ok: true, correlationId, ...await action(req) }); }
+    catch (error) {
+      // Fixed codes only: raw socket/vault errors are never forwarded.
+      const code = /^(?:RCON_[A-Z_]+|VAULT_[A-Z_]+|CREDENTIAL_[A-Z_]+|INSTANCE_[A-Z_]+)$/.test(error.code || "") ? error.code : "RCON_FAILED";
+      const status = code === "INSTANCE_NOT_FOUND" ? 404 : code === "VAULT_LOCKED" ? 423 : /BUSY|NOT_RUNNING/.test(code) ? 409 : code === "RCON_COMMAND_BLOCKED" ? 403 : /TIMEOUT|UNREACHABLE|SOCKET/.test(code) ? 504 : 400;
+      res.status(status).json({ ok: false, correlationId, code, error: code, rcon: error.rcon || null });
+    }
+  };
+}
+app.get("/api/instances/:id/rcon", requirePermission("server.manage"), rconRoute(async req => ({ rcon: rconService.status(req.params.id) })));
+app.post("/api/instances/:id/rcon/connect", requirePermission("server.manage"), rconRoute(async req => ({ rcon: await rconService.connect(req.params.id, req.auth.username) })));
+app.post("/api/instances/:id/rcon/command", requirePermission("server.manage"), rconRoute(async req => {
+  if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).join(",") !== "command") throw Object.assign(new Error("RCON_COMMAND_BLOCKED"), { code: "RCON_COMMAND_BLOCKED" });
+  return { result: await rconService.execute(req.params.id, req.body.command, req.auth.username) };
+}));
+app.get("/api/instances/:id/master", requirePermission("diagnostics.read"), instanceRoute(async req => ({ master: await masterService.status(req.params.id) })));
+// Explicit operator action: one HTTPS request to the fixed CoD4x master list URL.
+app.post("/api/instances/:id/master/verify", requirePermission("server.manage"), instanceRoute(async req => ({ master: await masterService.verify(req.params.id, req.auth.username) })));
+// Plugin manager (Block 10): integrity is pinned per instance; every change needs a stopped server.
+function pluginRoute(event, action) {
+  return instanceRoute(async req => {
+    const result = await action(req);
+    audit("info", event, { instanceId: req.params.id, actor: req.auth.username, plugin: result.name, sha256: result.sha256 || null, enabled: result.enabled ?? null });
+    return { plugin: result };
+  });
+}
+const pluginBody = (req, key) => {
+  if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).join(",") !== key) throw Object.assign(new Error("PLUGIN_REQUEST_INVALID"), { code: "PLUGIN_REQUEST_INVALID" });
+  return req.body[key];
+};
+app.get("/api/instances/:id/plugins", requirePermission("diagnostics.read"), instanceRoute(async req => ({ plugins: await instanceManager.plugins(req.params.id) })));
+app.post("/api/instances/:id/plugins/install", requirePermission("server.manage"), pluginRoute("plugin.installed", req => instanceManager.installPlugin(req.params.id, req.body)));
+app.post("/api/instances/:id/plugins/approve", requirePermission("server.manage"), pluginRoute("plugin.approved", req => instanceManager.approvePlugin(req.params.id, req.body)));
+app.post("/api/instances/:id/plugins/versions", requirePermission("server.manage"), instanceRoute(async req => ({ plugins: await instanceManager.readPluginVersions(req.params.id, req.auth.username) })));
+app.post("/api/instances/:id/plugins/:name/enable", requirePermission("server.manage"), pluginRoute("plugin.enabled", req => instanceManager.setPluginEnabled(req.params.id, req.params.name, true)));
+app.post("/api/instances/:id/plugins/:name/disable", requirePermission("server.manage"), pluginRoute("plugin.disabled", req => instanceManager.setPluginEnabled(req.params.id, req.params.name, false)));
+app.post("/api/instances/:id/plugins/:name/config", requirePermission("server.manage"), pluginRoute("plugin.configured", req => instanceManager.configurePlugin(req.params.id, req.params.name, pluginBody(req, "config"))));
+// Removal archives the file into plugins/.removed; nothing is deleted.
+app.post("/api/instances/:id/plugins/:name/remove", requirePermission("server.manage"), pluginRoute("plugin.removed", req => instanceManager.removePlugin(req.params.id, req.params.name)));
+// Public exposure is opt-in per instance and needs the confirmation phrase; default stays loopback.
+app.post("/api/instances/:id/network", requirePermission("server.manage"), instanceRoute(async req => {
+  const change = await instanceManager.changeNetwork(req.params.id, req.body);
+  audit(change.network.scope === "PUBLIC" ? "warn" : "info", "network.exposure.changed", { instanceId: req.params.id, actor: req.auth.username, from: change.previous?.scope || "LOOPBACK", to: change.network.scope, publicAddressConfigured: Boolean(change.network.publicAddress) });
+  return { network: change.network };
+}));
 // Logical deletion is recoverable: move owned home to .trash, never recursively erase it.
 app.delete("/api/instances/:id", requirePermission("server.manage"), instanceRoute(async req => ({ archive: await instanceManager.archive(req.params.id) })));
 

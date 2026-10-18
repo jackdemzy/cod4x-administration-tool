@@ -1,3 +1,35 @@
+## 4.18.8 Plugin Manager note
+
+4.18.8 implements roadmap Block 10. CONTROL discovers CoD4x plugins in each instance's `plugins/` folder (`.dll` on Windows, `.so` on Linux, as loaded by `loadPlugin` in `src/plugin_handler.c`), shows their SHA-256 and only trusts a file after the operator approves its hash or installs it from a local file. Enabled plugins are passed as `+loadPlugin <name>` (plus validated plugin dvars) before `server.cfg`; a changed or missing enabled plugin blocks the start before anything is spawned. Enable/disable, configuration, install and removal (archived, never deleted) require a stopped server and are audited. The runtime load state comes from the core's console messages, the version from the allowlisted RCON command `pluginInfo`. `b3hide` is catalogued with its dvars; B3 itself follows in Blocks 11-16.
+
+No real plugin binary was loaded by a native core. Development source, not a release.
+
+## 4.18.7 Master List Verification note
+
+4.18.7 implements roadmap Block 9. Each instance stays bound to loopback by default; public binding (`net_ip 0.0.0.0`, `net_ip6 ::`) must be enabled explicitly per instance with a confirmation, only while stopped, and is never cloned. On request, CONTROL fetches the official list behind https://cod4master.cod4x.ovh/ (`serverstatus.json`) and checks whether the running instance is actually listed, by configured public address or by server identity on the instance port. It reports Registration / Heartbeat / Listed / Last seen (`HEARTBEAT_OK`, `HEARTBEAT_LOST`) and diagnoses not listed, wrong port, ambiguous, unreachable master and offline server. The local server never depends on the result.
+
+Public binding also exposes RCON on the same UDP port. Real listing of a native core has not been tested. Development source, not a release.
+
+## 4.18.6 Master Server note
+
+4.18.6 adds the optional CoD4x master token (roadmap Block 8). A token stored in the credential vault is passed briefly to the Dedicated Core as `+set sv_authtoken` on the next start; without a token, or with a locked vault, the server starts and runs locally as before. The master state per run (`NOT_CONFIGURED`, `TOKEN_CONFIGURED`, `REGISTERING`, `REGISTERED`, `REGISTRATION_FAILED`, `UNKNOWN`) is derived from the exact console messages in CoD4x_Server `src/sv_main.c` and reported with fixed diagnosis codes, never log text or the token.
+
+Important limit, verified in `SV_SendHeartbeatThread`: CoD4x sends no master heartbeat from 127.x addresses. Managed instances bind to loopback, so they report `LOOPBACK_BINDING` and cannot be listed. A public binding and the actual listing check (`HEARTBEAT_OK`/`HEARTBEAT_LOST`) belong to Block 9. Development source, not a release.
+
+## 4.18.5 RCON note
+
+4.18.5 implements per-instance RCON (roadmap Block 7) against `127.0.0.1:<instance.port>`, following the wire format of the official CoD4x_Server source (`src/sv_main.c`): `0xFFFFFFFF rcon <password> <command>`, multi-packet `print` responses, `Bad rcon` with a 100 ms deny rate limit, and `getinfo`/`infoResponse` as unauthenticated health probe. Only controlled commands are accepted: `status`, `serverinfo`, `systeminfo`, `map_rotate` and `map <mapname>`; everything else is rejected before the vault or the network is touched.
+
+The RCON password is read only inside `InstanceCredentialService.withRuntimeCredentials` and handed to the Dedicated Core on start as `+set rcon_password` (the official startup mechanism, `Com_StartupVariable`). Values containing `+` are refused because CoD4x splits its command line at `+`. Secret CVARs are redacted from runtime history, persisted runtime state, process info and captured output. A locked vault starts the server without RCON instead of blocking it. Audit events `rcon.login`, `rcon.command` and `rcon.failure` carry instance, actor, normalized command and fixed codes, never the password. The instance view gains an integrated server console (live qconsole.log/runtime output, command history, Enter to send, filter, copy, clear, auto-scroll, warn/error highlighting, reconnect status, log export).
+
+Gate "Live Output + RCON Command + Response + Reconnect + Audit" passes against a UDP test double of the core (`scripts/verify-4.18.5-rcon-gate.mjs`). RCON against a real `cod4x18_dedrun` is still open, as are Linux/WSL gates for this block. Known limitation: as a process argument the password is visible to local process inspection (Windows `Win32_Process.CommandLine`, Linux `/proc/<pid>/cmdline`). Development source, not a release.
+
+## 4.18.4 Config Engine note
+
+4.18.4 completes the schema-based Server Configuration Engine (roadmap Block 6). All ten configuration areas are declared: Identity, Network, Gameplay, Maps, Security and B3 logging are schema-managed; RCON and Master secrets stay in the credential vault; Mods and Plugins are explicitly not yet managed and remain rejected. Every change runs Preview -> Diff -> Backup -> Apply -> Verify, can be restored byte-identically and is audited as `config.change.applied` / `config.change.restored` with fingerprints and setting names only, never values. Each start records which configuration fingerprint the run uses, so CONTROL reports `ACTIVE`, `RESTART_REQUIRED`, `UNKNOWN` or `STOPPED`.
+
+A vault self-lock (for example a conflict detected by a concurrent reader) now immediately aborts and wipes any active runtime credential scope. Credentials are still not passed to the Dedicated Core; that remains part of Blocks 7/8. Development source, not a release.
+
 ## 4.18.3 Linux Runtime note
 
 4.18.3 adds an unprivileged Linux adapter to the shared lifecycle API. Linux starts only `cod4x18_dedrun`, checks executable permissions and process ownership/birth identity, uses per-instance output files that survive backend restarts, and attempts SIGTERM before guarded SIGKILL. Each instance keeps its own `fs_homepath`; BaseGame remains separate and read-only. Managed local servers bind IPv4 and IPv6 to loopback.

@@ -79,6 +79,26 @@ test('runtime scope rejects an externally replaced vault before reporting succes
   assert.ok(supplied.every(value => value === 0));
   assert.equal((await service.status()).locked, true);
 }));
+test('conflict self-lock from a concurrent reader aborts and wipes the active runtime scope immediately', () => fixture(async (service, root) => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  await service.set('server-a', 'rcon', { value: 'Scoped-Rcon-123!', expectedSha256: (await service.status()).sha256 });
+  const file = path.join(root, 'credential-vault', 'vault.json');
+  let supplied, abortedBeforeReturn = false, wipedBeforeReturn = false;
+  await assert.rejects(service.withRuntimeCredentials('server-a', async (credentials, signal) => {
+    supplied = credentials.rcon;
+    await fs.appendFile(file, '\n');
+    // A metadata reader outside the exclusive scope detects the replaced vault.
+    await assert.rejects(service.instanceStatus('server-a'), { code: 'VAULT_CONFLICT' });
+    abortedBeforeReturn = signal.aborted;
+    wipedBeforeReturn = credentials.rcon.every(value => value === 0);
+    return 'must-not-succeed';
+  }), { code: 'VAULT_LOCKED' });
+  assert.equal(abortedBeforeReturn, true);
+  assert.equal(wipedBeforeReturn, true);
+  assert.ok(supplied.every(value => value === 0));
+  assert.equal((await service.status()).locked, true);
+}));
+
 async function fixture(action) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-credential-service-'));
   const births = new Map([['server-a', '2026-10-04T10:00:00.000Z'], ['server-b', '2026-10-04T10:00:01.000Z']]);
