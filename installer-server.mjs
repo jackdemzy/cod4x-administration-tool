@@ -33,6 +33,7 @@ import { ServerInstanceManager } from "./lib/server-instance-manager.mjs";
 import { InstanceCredentialService } from "./lib/instance-credential-service.mjs";
 import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
 import { InstanceMasterService } from "./lib/instance-master-service.mjs";
+import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 
@@ -2391,6 +2392,32 @@ app.post("/api/instances/:id/network", requirePermission("server.manage"), insta
   const change = await instanceManager.changeNetwork(req.params.id, req.body);
   audit(change.network.scope === "PUBLIC" ? "warn" : "info", "network.exposure.changed", { instanceId: req.params.id, actor: req.auth.username, from: change.previous?.scope || "LOOPBACK", to: change.network.scope, publicAddressConfigured: Boolean(change.network.publicAddress) });
   return { network: change.network };
+}));
+// eBc-B3 dependency layer (Block 11): audit-derived checks only; B3 is never started here.
+const b3Environment = new B3Environment(dataPath("config", "b3-environment.json"));
+function b3Route(action) {
+  return async (req, res) => {
+    const correlationId = crypto.randomUUID();
+    try { res.json({ ok: true, correlationId, ...await action(req) }); }
+    catch (error) {
+      const code = /^B3_[A-Z_]+$/.test(error.code || "") ? error.code : "B3_OPERATION_FAILED";
+      audit("warn", "b3.operation.blocked", { correlationId, route: req.route.path, actor: req.auth.username, code });
+      res.status(400).json({ ok: false, correlationId, code, error: code });
+    }
+  };
+}
+app.get("/api/b3/dependencies/matrix", requirePermission("diagnostics.read"), b3Route(async () => ({ matrix: B3_DEPENDENCY_MATRIX, source: { repository: B3_SOURCE.repository, commit: B3_SOURCE.commit, b3Version: B3_SOURCE.b3Version, blockedSql: B3_SOURCE.blockedSql }, auditReport: "docs/EBC-B3-AUDIT.md" })));
+app.get("/api/b3/environment", requirePermission("config.manage"), b3Route(async () => ({ environment: await b3Environment.read() })));
+app.post("/api/b3/environment", requirePermission("config.manage"), b3Route(async req => {
+  const environment = await b3Environment.save(req.body);
+  audit("info", "b3.environment.configured", { actor: req.auth.username, pythonConfigured: Boolean(environment.pythonPath), sourceConfigured: Boolean(environment.b3Path) });
+  return { environment };
+}));
+// Runs the configured interpreter with a fixed import probe; reads B3 files statically.
+app.post("/api/b3/dependencies/check", requirePermission("config.manage"), b3Route(async req => {
+  const result = await b3Environment.check();
+  audit(result.overall === "BLOCKED" ? "warn" : "info", "b3.dependencies.checked", { actor: req.auth.username, overall: result.overall, blocking: result.blocking, python: result.python?.version || null });
+  return { dependencies: result };
 }));
 // Logical deletion is recoverable: move owned home to .trash, never recursively erase it.
 app.delete("/api/instances/:id", requirePermission("server.manage"), instanceRoute(async req => ({ archive: await instanceManager.archive(req.params.id) })));

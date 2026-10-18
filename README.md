@@ -1,3 +1,9 @@
+## 4.18.9 eBc-B3 Audit note
+
+4.18.9 implements roadmap Block 11. `docs/EBC-B3-AUDIT.md` documents a static audit of https://github.com/kristiandz/ebc-b3 at commit `d44c05e` (B3 1.10.10) including the dependency matrix. Key results: eBc-B3 runs only on Python 2.7; it needs python-dateutil and a MySQL driver (PyMySQL first); the shipped `b3.xml` uses the `cod4` parser and empty server settings; b3hide is driven by the `auth` ext plugin; `b3-update-ebc.sql` (eBc promod statistics) contains `DROP TABLE` and is never run automatically; the CoD4x 21.x `status` format against the `cod4x` parser can only be confirmed natively. CONTROL now stores the Python and B3 paths, probes the interpreter with a fixed isolated import check and inspects the B3 files statically. B3 itself is not started yet (Block 12).
+
+Development source, not a release.
+
 ## 4.18.8 Plugin Manager note
 
 4.18.8 implements roadmap Block 10. CONTROL discovers CoD4x plugins in each instance's `plugins/` folder (`.dll` on Windows, `.so` on Linux, as loaded by `loadPlugin` in `src/plugin_handler.c`), shows their SHA-256 and only trusts a file after the operator approves its hash or installs it from a local file. Enabled plugins are passed as `+loadPlugin <name>` (plus validated plugin dvars) before `server.cfg`; a changed or missing enabled plugin blocks the start before anything is spawned. Enable/disable, configuration, install and removal (archived, never deleted) require a stopped server and are audited. The runtime load state comes from the core's console messages, the version from the allowlisted RCON command `pluginInfo`. `b3hide` is catalogued with its dvars; B3 itself follows in Blocks 11-16.

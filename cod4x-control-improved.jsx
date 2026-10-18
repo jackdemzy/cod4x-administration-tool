@@ -5,6 +5,7 @@ import { InstanceCredentialEditor } from "./lib/instance-credential-editor.jsx";
 import { InstanceRconConsole } from "./lib/instance-rcon-console.jsx";
 import { InstanceMasterStatus } from "./lib/instance-master-status.jsx";
 import { InstancePluginManager } from "./lib/instance-plugin-manager.jsx";
+import { B3DependencyPanel } from "./lib/b3-dependency-panel.jsx";
 
 /**
  * COD4X CONTROL — CoD4x 21.5 Admin Panel
@@ -1384,10 +1385,11 @@ function ProductionRuntimePanel({lang}){
   return <>
     <Header
       title={de ? "Production Runtime" : "Production Runtime"}
-      sub={de ? "4.18.8 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins" : "4.18.8 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins"}
+      sub={de ? "4.18.9 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Audit" : "4.18.9 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Audit"}
     />
 
     <ServerInstancesPanel lang={lang} executablePath={executablePath} baseGamePath={baseGamePath} platform={platform} cod4x={cod4x}/>
+    <Section title={de ? "B3 / eBc-B3" : "B3 / eBc-B3"}><B3DependencyPanel de={de} request={(route, options)=>apiFetch(apiUrl(route),options)}/></Section>
     <Section title={de ? "Bisherige Einzel-Runtime (Kompatibilität)" : "Legacy single runtime (compatibility)"}>
       {error && (
         <div style={{background:"rgba(239,68,68,.1)",border:`1px solid ${C.danger}55`,color:C.danger,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:10}}>
@@ -1577,9 +1579,9 @@ function ProductionRuntimePanel({lang}){
       )}
     </Section>
 
-    <Section title={de ? "Sicherheitsgrenzen 4.18.8" : "4.18.8 security boundaries"}>
+    <Section title={de ? "Sicherheitsgrenzen 4.18.9" : "4.18.9 security boundaries"}>
       <div style={{fontSize:10,color:C.muted,lineHeight:1.7}}>
-        Windows Runtime startet ausschließlich <code style={{color:C.text}}>cod4x18_dedrun.exe</code> · Linux-Core <code style={{color:C.text}}>cod4x18_dedrun</code> ist für Discovery/Verifikation vorbereitet · Client-EXE <code style={{color:C.text}}>iw3mp.exe</code> wird nicht als Server-Core akzeptiert · getrenntes Server-Arbeitsverzeichnis je Instanz (<code style={{color:C.text}}>fs_homepath</code>) · Verified-Core Gate · <code style={{color:C.text}}>shell:false</code> · PID-/Pfad-Verifikation nach Spawn · begrenztes stdout/stderr · kontrollierter Stop mit Prozessende-Prüfung · persistenter Runtime-State · SHA-256-Fingerprint · Core-Nachweis im Runtime-Core-Registry-Verzeichnis möglich · schema-basierte Instanzkonfiguration mit Vorprüfung, Backup, Apply, Verify, Restore und Aktivierungsnachweis · RCON nur über 127.0.0.1 mit Befehls-Allowlist, Passwort nur kurzlebig aus dem Tresor und redigiert in Runtime-History/-Output · optionaler Master-Token (<code style={{color:C.text}}>sv_authtoken</code>) aus dem Tresor, Serverstart nie davon abhängig · Netzwerkbindung standardmäßig Loopback, öffentlich nur ausdrücklich pro Instanz bestätigt · Master-List-Prüfung gegen die offizielle Liste · Plugins nur mit freigegebenem SHA-256, Abweichung blockiert den Start · Audit + Correlation-ID.
+        Windows Runtime startet ausschließlich <code style={{color:C.text}}>cod4x18_dedrun.exe</code> · Linux-Core <code style={{color:C.text}}>cod4x18_dedrun</code> ist für Discovery/Verifikation vorbereitet · Client-EXE <code style={{color:C.text}}>iw3mp.exe</code> wird nicht als Server-Core akzeptiert · getrenntes Server-Arbeitsverzeichnis je Instanz (<code style={{color:C.text}}>fs_homepath</code>) · Verified-Core Gate · <code style={{color:C.text}}>shell:false</code> · PID-/Pfad-Verifikation nach Spawn · begrenztes stdout/stderr · kontrollierter Stop mit Prozessende-Prüfung · persistenter Runtime-State · SHA-256-Fingerprint · Core-Nachweis im Runtime-Core-Registry-Verzeichnis möglich · schema-basierte Instanzkonfiguration mit Vorprüfung, Backup, Apply, Verify, Restore und Aktivierungsnachweis · RCON nur über 127.0.0.1 mit Befehls-Allowlist, Passwort nur kurzlebig aus dem Tresor und redigiert in Runtime-History/-Output · optionaler Master-Token (<code style={{color:C.text}}>sv_authtoken</code>) aus dem Tresor, Serverstart nie davon abhängig · Netzwerkbindung standardmäßig Loopback, öffentlich nur ausdrücklich pro Instanz bestätigt · Master-List-Prüfung gegen die offizielle Liste · Plugins nur mit freigegebenem SHA-256, Abweichung blockiert den Start · B3-Abhängigkeiten nur per fester Interpreter-Probe und statischer Quellprüfung, B3 wird nicht gestartet · Audit + Correlation-ID.
       </div>
     </Section>
   </>;
@@ -2466,7 +2468,7 @@ function ControlApp({user,onLogout}){
     <main className="app-main" style={{flex:1,padding:"0 30px 30px",overflow:"auto",maxWidth:"calc(100vw - 228px)"}}>
       <header className="topbar">
         <div><div className="topbar-kicker">COD4X CONTROL <span>/</span> {currentLabel.toUpperCase()}</div><div className="topbar-title">{tab==="overview"?"SERVER OVERVIEW":"SERVER ADMINISTRATION"}</div></div>
-        <div className="topbar-right"><span className="topbar-version">4.18.8</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>Logout</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
+        <div className="topbar-right"><span className="topbar-version">4.18.9</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>Logout</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
       </header>
       <div className="content-frame">
         {tab==="overview"&&<><Header title="COD4X CONTROL" sub={lang==="de"?"Serververwaltung":"Server administration"}/><Section title={lang==="de"?"Server":"Server"}><div style={{fontSize:12,color:C.muted}}>Bereit. Wähle links nur den Bereich, den du gerade benötigst.</div></Section></>}
@@ -2481,7 +2483,7 @@ function ControlApp({user,onLogout}){
         {tab==="versions"&&<VersionManager t={t} lang={lang}/>}
         {tab==="tools"&&<><DvarBrowser t={t}/><GSCAssistant t={t} lang={lang}/></>}
       </div>
-      <footer className="app-footer"><span>COD4X CONTROL 4.18.8</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
+      <footer className="app-footer"><span>COD4X CONTROL 4.18.9</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
     </main>
   </div>;
 }
