@@ -35,6 +35,7 @@ import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
 import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
 import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
+import { RconClient } from "./lib/rcon-client.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 
@@ -2258,7 +2259,17 @@ const rconService = new InstanceRconService({ resolveInstance: id => instanceSto
 const masterService = new InstanceMasterService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit });
 // B3 runtime (Block 12): separate processes; events are audited, never the output.
 const b3EnvironmentForRuntime = new B3Environment(dataPath("config", "b3-environment.json"));
-const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
+// Dashboard reads the server state only: instance runtime status plus a short
+// unauthenticated getinfo probe on loopback. It never starts or stops the server.
+async function b3ServerStatus(id) {
+  let status;
+  // Inspection failures are "unknown", never "offline".
+  try { status = await instanceManager.status(id); } catch { return { status: "UNKNOWN", reachable: null }; }
+  if (status.runtime.status !== "RUNNING") return { status: status.runtime.status, reachable: false };
+  try { await new RconClient({ port: status.port, timeoutMs: 800 }).probe(); return { status: "RUNNING", reachable: true }; }
+  catch { return { status: "RUNNING", reachable: false }; }
+}
+const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
 instanceManager = new ServerInstanceManager({
   store: instanceStore,
   credentialService,
@@ -2415,6 +2426,8 @@ app.get("/api/b3/dependencies/matrix", requirePermission("diagnostics.read"), b3
 app.get("/api/b3/environment", requirePermission("config.manage"), b3Route(async () => ({ environment: await b3Environment.read() })));
 app.post("/api/b3/environment", requirePermission("config.manage"), b3Route(async req => {
   const environment = await b3Environment.save(req.body);
+  // New paths: dashboards must not show the previous interpreter/source check.
+  b3Service.invalidateDependencies();
   audit("info", "b3.environment.configured", { actor: req.auth.username, pythonConfigured: Boolean(environment.pythonPath), sourceConfigured: Boolean(environment.b3Path) });
   return { environment };
 }));
@@ -2425,6 +2438,10 @@ app.post("/api/b3/dependencies/check", requirePermission("config.manage"), b3Rou
   return { dependencies: result };
 }));
 app.get("/api/instances/:id/b3", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.status(req.params.id) })));
+app.get("/api/instances/:id/b3/dashboard", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.dashboard(req.params.id, { fresh: req.query.fresh === "1" }) })));
+app.get("/api/instances/:id/b3/logs", requirePermission("diagnostics.read"), instanceRoute(async req => ({ logs: await b3Service.logs(req.params.id) })));
+// Generated config with credential values redacted.
+app.get("/api/instances/:id/b3/config", requirePermission("config.manage"), instanceRoute(async req => ({ config: await b3Service.config(req.params.id) })));
 app.post("/api/instances/:id/b3/start", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id) })));
 app.post("/api/instances/:id/b3/stop", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.stop(req.params.id) })));
 app.post("/api/instances/:id/b3/restart", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id, true) })));
