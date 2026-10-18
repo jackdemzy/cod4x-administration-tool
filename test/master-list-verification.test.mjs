@@ -149,7 +149,8 @@ test('verification distinguishes token set from actually listed, tracks heartbea
 });
 
 test('master list route requires an explicit POST and the network route needs confirmation', async () => {
-  const server = await fs.readFile(path.join(import.meta.dirname, '..', 'installer-server.mjs'), 'utf8');
+  // URL form instead of import.meta.dirname: also runs on Node 18 (WSL).
+  const server = await fs.readFile(new URL('../installer-server.mjs', import.meta.url), 'utf8');
   assert.match(server, /app\.post\("\/api\/instances\/:id\/master\/verify", requirePermission\("server\.manage"\)/);
   assert.match(server, /app\.post\("\/api\/instances\/:id\/network", requirePermission\("server\.manage"\)/);
   assert.match(server, /"network\.exposure\.changed"/);

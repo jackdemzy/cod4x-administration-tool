@@ -28,7 +28,7 @@ test('B3 dependency panel shows the matrix, blocking state and blocked SQL witho
   assert.match(html, /INCOMPATIBLE – inkompatibel \(PYTHON_INCOMPATIBLE\)/);
   assert.match(html, /UNVERIFIED – nur nativ prüfbar/);
   assert.match(html, /b3-update-ebc\.sql/);
-  assert.match(html, /d44c05eaa809/);
+  assert.match(html, /90966246ab19/);
   const panel = render('B3DependencyPanel', { de: false, request: () => { throw new Error('SSR must not fetch'); } });
   assert.match(panel, /does not start B3 here/);
 });

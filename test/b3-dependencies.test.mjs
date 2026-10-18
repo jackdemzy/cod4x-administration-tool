@@ -40,6 +40,11 @@ test('evaluation detects incompatible Python, missing packages, driver fallback 
   assert.equal(status(evaluateB3Dependencies({ python: python('2.7.18', ['dateutil', 'pymysql']), source: { ...auditedSource, b3Version: '1.8.2' } }), 'b3-source'), 'INCOMPATIBLE');
   const modified = evaluateB3Dependencies({ python: python('2.7.18', ['dateutil', 'pymysql']), source: { ...auditedSource, audited: false } });
   assert.deepEqual([modified.overall, status(modified, 'b3-source')], ['UNAUDITED', 'UNAUDITED']);
+  // d44c05e fails on every start (NameError in b3/config.py); recognized by hash.
+  const broken = evaluateB3Dependencies({ python: python('2.7.18', ['dateutil', 'pymysql']), source: { ...auditedSource, audited: false, brokenCommit: 'd44c05eaa809c7047073e0d3776bcdb5d1827fee' } });
+  assert.deepEqual([broken.overall, status(broken, 'b3-source'), broken.results.find(item => item.id === 'b3-source').detail], ['BLOCKED', 'INCOMPATIBLE', 'B3_KNOWN_BROKEN_COMMIT']);
+  assert.equal(B3_SOURCE.commit, '90966246ab1953ceeca5e8b62c714851a120b28a');
+  assert.ok(Object.values(B3_SOURCE.knownBroken['b3/config.py']).includes('d44c05eaa809c7047073e0d3776bcdb5d1827fee'));
   const nothing = evaluateB3Dependencies({});
   assert.deepEqual(nothing.blocking.sort(), ['b3-source', 'python']);
 });

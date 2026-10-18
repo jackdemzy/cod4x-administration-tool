@@ -1,15 +1,15 @@
 {
-  "version": "4.18.9",
-  "block": "eBc-B3 Audit + Dependency Layer",
-  "base": "4.18.8",
+  "version": "4.18.10",
+  "block": "B3 Runtime",
+  "base": "4.18.9",
   "nativeExecutable": "cod4x18_dedrun.exe",
   "platform": "windows + linux",
-  "validation": "preflight-4.18.9",
+  "validation": "preflight-4.18.10",
   "verifiedCore": "manifest + executable SHA-256 fingerprint",
-  "fix": "Static audit of kristiandz/ebc-b3 @ d44c05e (B3 1.10.10, Python 2.7 only, PyMySQL/dateutil, cod4x parser, b3.xml format, SQL schema incl. destructive eBc promod dump, b3hide via auth extplugin, CoD4x 21.x status format risk) in docs/EBC-B3-AUDIT.md plus machine-readable dependency matrix and checks: fixed isolated interpreter import probe (shell:false, -E, empty cwd), static source inspection with audited CRLF-safe hashes, destructive SQL block list, B3 environment settings, API, audit events and UI. B3 is never started.",
-  "buildStatus": "development-block-11-b3-audit-gate-pass",
-  "notes": "4.18.9 Windows source preflight with the eBc-B3 Audit + Dependency Matrix gate. Real Python 2.7, MySQL and a native CoD4x 21.x status-format check were not available and remain open for Blocks 12/14. Linux/WSL preflight and native lifecycle gates were not run for this block. Development source, not a release or installer certification. No live deployment.",
+  "fix": "Per-instance B3 process (python2.7 -B -E b3_run.py --config <home>/b3/b3.xml, detached, shell:false, no -r) with start/stop/restart, verified PID identity (/proc argv+uid+start time, Windows CIM), SIGTERM then guarded SIGKILL, crash/lost detection, persisted state with re-identification after backend restart, health from B3 log (ready marker, errors, RCON reachability), minimal SQLite runtime config and non-truncating game log creation; fully independent of the CoD4x lifecycle. eBc-B3 pinned to 9096624 because the newest commit d44c05e fails on every start (NameError in b3/config.py), detected by hash.",
+  "buildStatus": "development-block-12-b3-runtime-gate-pass",
+  "notes": "4.18.10 Windows source preflight with the B3 Lifecycle unabhängig vom CoD4X Lifecycle gate (test doubles). Native check scripts/verify-4.18.10-b3-native.mjs passed 15/15 in WSL COD4X-Test with real Python 2.7.18 and eBc-B3 9096624 (SQLite, no CoD4x server). MySQL, RCON password transfer and the CoD4x 21.x status format with a real server remain open (Blocks 14/16). Development source, not a release or installer certification. No live deployment.",
   "linuxExecutable": "cod4x18_dedrun",
   "clientExecutable": "iw3mp.exe",
-  "architecture": "Shared Runtime with Windows and Linux adapters; schema-based Config Engine; per-instance RCON, master status, master list verification and plugin manager; per-instance network exposure; eBc-B3 dependency layer"
+  "architecture": "Shared Runtime with Windows and Linux adapters; schema-based Config Engine; per-instance RCON, master status, master list verification, plugin manager and B3 runtime; per-instance network exposure; eBc-B3 dependency layer"
 }
