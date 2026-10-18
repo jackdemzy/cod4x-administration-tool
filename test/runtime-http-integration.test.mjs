@@ -166,6 +166,31 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     const masterSet = await request('/api/instances/public-02/credentials/master', { value: masterSecret, expectedSha256: credentialSet.json.credential.sha256 });
     assert.equal(masterSet.status, 200, masterSet.json.error);
     assert.equal((await request('/api/instances/public-01/credentials')).json.credentials.master.configured, false);
+    const masterStopped = await request('/api/instances/public-02/master');
+    assert.equal(masterStopped.status, 200, masterStopped.json.error);
+    assert.deepEqual([masterStopped.json.master.state, masterStopped.json.master.reason], ['TOKEN_CONFIGURED', 'SERVER_STOPPED']);
+    assert.equal((await request('/api/instances/public-01/master')).json.master.state, 'NOT_CONFIGURED');
+    assert.ok(!JSON.stringify(masterStopped.json).includes(masterSecret));
+    // Public exposure: loopback default, confirmation required, persisted, audited.
+    assert.equal((await request('/api/instances/public-02')).json.instance.network.scope, 'LOOPBACK');
+    const unconfirmed = await request('/api/instances/public-02/network', { scope: 'PUBLIC' });
+    assert.equal(unconfirmed.status, 428);
+    assert.equal(unconfirmed.json.code, 'INSTANCE_NETWORK_CONFIRMATION_REQUIRED');
+    const exposed = await request('/api/instances/public-02/network', { scope: 'PUBLIC', publicAddress: '203.0.113.7', confirm: 'PUBLIC_EXPOSURE' });
+    assert.equal(exposed.status, 200, exposed.json.error);
+    assert.deepEqual(exposed.json.network, { scope: 'PUBLIC', publicAddress: '203.0.113.7' });
+    assert.equal((await request('/api/instances/public-02/network', { scope: 'LOOPBACK' })).json.network.scope, 'LOOPBACK');
+    // Plugin manager: discovery is empty, malformed requests use fixed codes.
+    const pluginList = await request('/api/instances/public-02/plugins');
+    assert.equal(pluginList.status, 200, pluginList.json.error);
+    assert.deepEqual(pluginList.json.plugins.plugins, []);
+    const badInstall = await request('/api/instances/public-02/plugins/install', { sourcePath: 'relative.dll' });
+    assert.deepEqual([badInstall.status, badInstall.json.code], [400, 'PLUGIN_SOURCE_INVALID']);
+    assert.equal((await request('/api/instances/public-02/plugins/b3hide/enable', {})).json.code, 'PLUGIN_NOT_APPROVED');
+    // Verify on a stopped server never contacts the master list.
+    const stoppedVerify = await request('/api/instances/public-02/master/verify', {});
+    assert.equal(stoppedVerify.status, 200, stoppedVerify.json.error);
+    assert.equal(stoppedVerify.json.master.list, null);
     const invalidSecret = 'private-secret;quit';
     const invalidCredential = await request('/api/instances/public-01/credentials/rcon', { value: invalidSecret, expectedSha256: masterSet.json.credential.sha256 });
     assert.equal(invalidCredential.status, 400);
@@ -231,6 +256,14 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     assert.equal(startAudit.details.route, '/api/instances/:id/start');
     assert.equal(startAudit.details.method, 'POST');
     assert.equal(startAudit.details.code, 'VERIFIED_CORE_BLOCKED');
+    assert.ok(auditEntries.some(entry => entry.event === 'master.token.configured' && entry.details?.instanceId === 'public-02'));
+    assert.equal(auditEntries.filter(entry => entry.event === 'network.exposure.changed' && entry.details?.instanceId === 'public-02').length, 2);
+    const appliedAudit = auditEntries.find(entry => entry.event === 'config.change.applied' && entry.details?.backupId === configApplied.json.configuration.backupId);
+    assert.deepEqual(appliedAudit.details.settings, ['modified:sv_hostname']);
+    assert.equal(appliedAudit.details.previousSha256, configBefore.json.configuration.sha256);
+    assert.equal(appliedAudit.details.sha256, configApplied.json.configuration.sha256);
+    assert.ok(auditEntries.some(entry => entry.event === 'config.change.restored' && entry.details?.instanceId === 'public-01'));
+    assert.ok(!JSON.stringify(auditEntries.filter(entry => entry.event?.startsWith('config.change.'))).includes('Edited through schema'), 'Config audit must not carry values');
 
     // Restart only our isolated backend: registry and legacy state must survive.
     child.kill(); await closed; await startBackend();

@@ -82,7 +82,7 @@ export function InstanceCredentialEditor({ instance, request, de }) {
   function submit(event, kind, credentialKind) { event.preventDefault(); void action(kind, credentialKind); }
   return <details style={{ marginTop: 12 }}>
     <summary>{de ? 'Zugangsdaten – verschlüsselter Tresor' : 'Credentials – encrypted vault'}</summary>
-    <p>{de ? 'Gespeicherte Zugangsdaten sind noch nicht an die Runtime angebunden. „Gespeichert“ bedeutet nicht verbunden oder registriert.' : 'Stored credentials are not wired to the runtime yet. “Stored” does not mean connected or registered.'}</p>
+    <p>{de ? 'RCON-Passwort und Master-Token werden beim nächsten Start kurzlebig an den Dedicated Core übergeben (Tresor muss entsperrt sein). Der Master-Token ist optional und blockiert den Start nie. Das Join-Passwort ist noch nicht an die Runtime angebunden. „Gespeichert“ bedeutet nicht verbunden oder registriert.' : 'The RCON password and master token are passed briefly to the Dedicated Core on the next start (vault must be unlocked). The master token is optional and never blocks the start. The join password is not wired to the runtime yet. “Stored” does not mean connected or registered.'}</p>
     <button disabled={busy} onClick={() => action('load')}>{de ? 'Status laden / aktualisieren' : 'Load / refresh status'}</button>
     {error && <p role="alert">{error}</p>}
     {message && <p role="status">{message}</p>}

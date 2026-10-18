@@ -105,6 +105,25 @@ test('configuration changes and restores are blocked while the owned instance is
   assert.equal((await manager.changeConfiguration('public-01', { expectedSha256: before.sha256, entries })).verified, true);
 });
 
+test('config activation tracks which fingerprint the running instance uses and flags external edits', async t => {
+  const { manager } = await fixture(t);
+  assert.equal((await manager.configuration('public-01')).activation.state, 'STOPPED');
+  const before = await manager.configuration('public-01');
+  await manager.launch('public-01');
+  const active = await manager.configuration('public-01');
+  assert.deepEqual([active.activation.state, active.activation.activeSha256], ['ACTIVE', before.sha256]);
+  assert.equal((await manager.configuration('public-02')).activation.state, 'STOPPED', 'Sibling activation must stay independent');
+  const instance = manager.store.get('public-01');
+  await fs.writeFile(instance.configPath, (await fs.readFile(instance.configPath, 'utf8')).replace(/set sv_hostname "[^"]*"/, 'set sv_hostname "Edited outside CONTROL"'));
+  const edited = await manager.configuration('public-01');
+  assert.deepEqual([edited.activation.state, edited.activation.restartRequired], ['RESTART_REQUIRED', true]);
+  await manager.launch('public-01', true);
+  assert.equal((await manager.configuration('public-01')).activation.state, 'ACTIVE');
+  await manager.stop('public-01');
+  const stopped = await manager.configuration('public-01');
+  assert.deepEqual([stopped.activation.state, stopped.activation.changedSinceLastStart], ['STOPPED', false]);
+});
+
 test('runtime events carry per-run identity and unexpected exit without raw arguments', async t => {
   const { manager, children, events } = await fixture(t);
   const state = await manager.launch('public-01');
