@@ -180,6 +180,15 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     assert.equal(exposed.status, 200, exposed.json.error);
     assert.deepEqual(exposed.json.network, { scope: 'PUBLIC', publicAddress: '203.0.113.7' });
     assert.equal((await request('/api/instances/public-02/network', { scope: 'LOOPBACK' })).json.network.scope, 'LOOPBACK');
+    // B3 dependency layer: matrix is public diagnostics, settings are validated, nothing starts B3.
+    const b3Matrix = await request('/api/b3/dependencies/matrix');
+    assert.equal(b3Matrix.status, 200, b3Matrix.json.error);
+    assert.ok(b3Matrix.json.matrix.some(entry => entry.id === 'python' && entry.requirement === '>= 2.7, < 3'));
+    const b3Invalid = await request('/api/b3/environment', { pythonPath: 'python' });
+    assert.deepEqual([b3Invalid.status, b3Invalid.json.code], [400, 'B3_PYTHON_PATH_INVALID']);
+    const b3Check = await request('/api/b3/dependencies/check', {});
+    assert.equal(b3Check.status, 200, b3Check.json.error);
+    assert.equal(b3Check.json.dependencies.overall, 'BLOCKED', 'unconfigured B3 environment is blocked, never assumed ready');
     // Plugin manager: discovery is empty, malformed requests use fixed codes.
     const pluginList = await request('/api/instances/public-02/plugins');
     assert.equal(pluginList.status, 200, pluginList.json.error);

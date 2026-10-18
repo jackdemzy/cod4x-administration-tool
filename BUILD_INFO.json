@@ -1,15 +1,15 @@
 {
-  "version": "4.18.8",
-  "block": "Plugin Manager",
-  "base": "4.18.7",
+  "version": "4.18.9",
+  "block": "eBc-B3 Audit + Dependency Layer",
+  "base": "4.18.8",
   "nativeExecutable": "cod4x18_dedrun.exe",
   "platform": "windows + linux",
-  "validation": "preflight-4.18.8",
+  "validation": "preflight-4.18.9",
   "verifiedCore": "manifest + executable SHA-256 fingerprint",
-  "fix": "Per-instance CoD4x plugin manager: discovery of <home>/plugins/<name>.dll|.so with SHA-256, operator approval pinning the hash, install from a local file without overwrite, enable/disable and catalog-validated plugin dvars (b3hide: b3Prefix/b3Hide/b3HideLvl) only while stopped, +loadPlugin before server.cfg, launch blocked fail-closed on hash mismatch or missing enabled plugin, removal archives to plugins/.removed, runtime load state from plugin_handler.c messages, version via allowlisted RCON pluginInfo, approvals never cloned, audit plugin.installed/approved/enabled/disabled/configured/removed.",
-  "buildStatus": "development-block-10-plugin-gate-pass",
-  "notes": "4.18.8 Windows source preflight with the Plugin Discovery + Enable/Disable + Integrity gate against the UDP test double using inert test files. No real b3hide.dll/.so was loaded by a real cod4x18_dedrun. Linux/WSL preflight and native lifecycle gates were not run for this block. Development source, not a release or installer certification. No live deployment.",
+  "fix": "Static audit of kristiandz/ebc-b3 @ d44c05e (B3 1.10.10, Python 2.7 only, PyMySQL/dateutil, cod4x parser, b3.xml format, SQL schema incl. destructive eBc promod dump, b3hide via auth extplugin, CoD4x 21.x status format risk) in docs/EBC-B3-AUDIT.md plus machine-readable dependency matrix and checks: fixed isolated interpreter import probe (shell:false, -E, empty cwd), static source inspection with audited CRLF-safe hashes, destructive SQL block list, B3 environment settings, API, audit events and UI. B3 is never started.",
+  "buildStatus": "development-block-11-b3-audit-gate-pass",
+  "notes": "4.18.9 Windows source preflight with the eBc-B3 Audit + Dependency Matrix gate. Real Python 2.7, MySQL and a native CoD4x 21.x status-format check were not available and remain open for Blocks 12/14. Linux/WSL preflight and native lifecycle gates were not run for this block. Development source, not a release or installer certification. No live deployment.",
   "linuxExecutable": "cod4x18_dedrun",
   "clientExecutable": "iw3mp.exe",
-  "architecture": "Shared Runtime with Windows and Linux adapters; schema-based Config Engine; per-instance RCON, master status, master list verification and plugin manager; per-instance network exposure"
+  "architecture": "Shared Runtime with Windows and Linux adapters; schema-based Config Engine; per-instance RCON, master status, master list verification and plugin manager; per-instance network exposure; eBc-B3 dependency layer"
 }
