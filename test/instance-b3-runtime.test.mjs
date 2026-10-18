@@ -25,6 +25,16 @@ test('B3 runtime view shows crash, health and RCON reachability without fetching
   const running = render('B3RuntimeView', { de: false, b3: { runtime: { status: 'RUNNING', pid: 4711, exitCode: null, running: true }, health: { status: 'HEALTHY', uptimeSec: 12, rcon: 'UNREACHABLE' }, output: 'B3 v1.10.10' } });
   assert.match(running, /PID: 4711/);
   assert.match(running, /server unreachable \(B3 keeps running\)/);
+  const ok = value => ({ ok: value, state: value ? 'OK' : 'X' });
+  const dashboard = render('B3Dashboard', { de: true, dashboard: { status: 'RUNNING', health: 'HEALTHY', version: { label: 'eBc/B3', b3: '1.10.10', commit: '9096624' }, parser: 'Cod4XParser v0.4', database: 'sqlite:CONNECTED', rcon: 'OFFLINE',
+    checks: { python: ok(true), b3: ok(true), mysql: { ok: null, state: 'SQLITE (MySQL: Block 14)' }, parser: ok(true), rcon: ok(false), cod4x: ok(false) }, diagnosis: ['COD4X_OFFLINE', 'RCON_OFFLINE'], primary: 'COD4X_OFFLINE', rconCause: 'COD4X_OFFLINE', publist: 'SUPPRESSED' } });
+  assert.match(dashboard, /keine Meldung an bigbrotherbot\.net/);
+  for (const label of ['Status', 'Version', 'Parser', 'Database', 'RCON']) assert.match(dashboard, new RegExp(`<th>${label}</th>`));
+  assert.match(dashboard, /eBc\/B3 1\.10\.10 @ 9096624/);
+  for (const [label, sign] of [['Python', '✓'], ['MySQL', '–'], ['RCON', '✗'], ['CoD4X', '✗']]) assert.match(dashboard, new RegExp(`<td>${label}</td><td>${sign}</td>`));
+  assert.match(dashboard, /COD4X_OFFLINE<\/strong> \(Hauptursache\)/);
+  assert.match(dashboard, /Folge von CoD4X offline/);
   const panel = render('InstanceB3Runtime', { de: true, instance: { id: 'x' }, request: () => { throw new Error('SSR must not fetch'); } });
   assert.match(panel, /unabhängig vom CoD4x-Server/);
+  for (const button of ['Start', 'Stop', 'Restart', 'Logs', 'Config']) assert.match(panel, new RegExp(`>${button}</button>`));
 });

@@ -109,3 +109,12 @@ Ausgeführt in WSL `COD4X-Test` (Ubuntu 24.04, Python 2.7.18 via pyenv, PyMySQL 
 - **Startbedingungen**, die CONTROL erfüllt: Die Spiel-Logdatei muss existieren (sonst `critical` → Exit 220), CONTROL legt sie leer an ohne vorhandene Inhalte anzutasten. Das Plugin `admin` ist Pflicht. Ein `autodoc`-Abschnitt ohne Ziel erzeugt einen Traceback im `documentationBuilder` und wird deshalb weggelassen.
 - **Startargumente:** `python2.7 -B -E b3_run.py --config <instance>/b3/b3.xml`, ohne `-r` (CONTROL verwaltet Neustarts selbst). `-B`, weil frühe Commits `.pyc` im Repository führen und B3 sonst den Quellbaum verändert.
 - Für den Lebenszyklus-Test nutzt die Minimalkonfiguration SQLite (`b3/storage/sqlite.py` legt das Schema selbst an). MySQL-Anbindung, RCON-Passwort und das Statusformat gegen einen echten CoD4x 21.x bleiben für Block 14/16 offen.
+
+## Nachtrag Block 13 (2026-10-19): B3 neben einem echten CoD4x-Server
+
+Ausgeführt in WSL mit echtem CoD4x-21.2-Linux-Core (nur `127.0.0.1`, `dedicated 1`) und eBc-B3 `9096624` (`scripts/verify-4.18.11-b3-dashboard-native.mjs`).
+
+- **`publist` ist ein Pflicht-Plugin** (`b3/config.py` `MUST_HAVE_PLUGINS`) und wird immer geladen, auch wenn es nicht konfiguriert ist (`b3/parser.py` lädt es nach). Es meldet Serverdaten per unverschlüsseltem HTTP an `http://www.bigbrotherbot.net/master/serverping.php`, außer `public_ip` ist exakt `127.0.0.1` (`b3/plugins/publist/__init__.py` `onStartup`). CONTROL setzt deshalb `public_ip` immer auf `127.0.0.1`, auch bei öffentlich gebundenen Instanzen. `rcon_ip` ist ein eigener Wert. Im Dashboard wird `publist: SUPPRESSED` angezeigt.
+- **Log-Format:** Bei `log_level 9` gibt es keine `RCON: received`-Zeilen (`verbose2`). RCON-Antworten erscheinen als `DEBUG 'Get cvar <name> = [<antwort>]'`, gesendete Befehle als `VERBOSE "RCON sending …"`. Ohne Server-Passwort antwortet CoD4x mit „No rconpassword set on server or password is shorter than 8 characters.“. B3 läuft trotzdem weiter und liest Spielereignisse.
+- **B3 schreibt beim Start in den Server-Chat** (`say … www.bigbrotherbot.net v1.10.10 [eBc]`, `say [ONLINE]`) und setzt die CVAR `_B3`. Das ist erwartetes B3-Verhalten.
+- Der Client-Datensatz „World“ wird mit leerem Feld `password` in die Datenbank geschrieben und bei `DEBUG` geloggt. Die CONTROL-Logansicht blendet solche Zeilen aus. Die Auswertung für das Dashboard läuft auf dem Rohtext und gibt nur feste Zustandscodes weiter.

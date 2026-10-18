@@ -1,3 +1,9 @@
+## 4.18.11 B3 Manager note
+
+4.18.11 implements roadmap Block 13: a B3 manager dashboard per instance with status, version (eBc/B3 1.10.10 @ 9096624), parser, database and RCON, health checks for Python, B3, MySQL, parser, RCON and CoD4X, Start/Stop/Restart and redacted Logs and Config views. The diagnosis separates Python missing/incompatible, B3 missing/incompatible, dependency missing, CoD4X offline, database offline, parser offline and RCON offline and names the root cause first (a stopped server explains a failing RCON). Evidence comes from the dependency check, the B3 process, the instance server state and B3's own log (classified on the raw text, only codes are returned).
+
+Native check in WSL with a real CoD4x 21.2 Linux core and real eBc-B3 passed. It also showed that B3's must-have `publist` plugin reports servers to bigbrotherbot.net unless `public_ip` is `127.0.0.1`, so CONTROL always writes `127.0.0.1` there. MySQL (Block 14) and the RCON password for B3 (Block 16) are still open. Development source, not a release.
+
 ## 4.18.10 B3 Runtime note
 
 4.18.10 implements roadmap Block 12. Each instance can run eBc-B3 as its own process (`python2.7 -B -E b3_run.py --config <home>/b3/b3.xml`, detached, `shell:false`, without B3's own `-r` restart mode). CONTROL starts, stops and restarts it, verifies the PID (on Linux via `/proc` argv, owner and start time), detects crashes and lost processes, re-identifies a running B3 after a backend restart and reports health from B3's own log (ready marker, errors, RCON reachability). B3 and the CoD4x server never depend on each other: a B3 crash leaves the server running, a server stop or restart leaves B3 running. B3 only starts when the Block 11 dependency check is satisfied.

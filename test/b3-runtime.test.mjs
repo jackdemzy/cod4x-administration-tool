@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { B3Runtime, b3LaunchArguments, identityMatches } from '../lib/b3-runtime.mjs';
+import { B3Runtime, b3LaunchArguments, identityMatches, currentRunSection } from '../lib/b3-runtime.mjs';
 import { b3Paths, renderB3Config, prepareB3Runtime, gameLogPath } from '../lib/b3-config.mjs';
 import { createFakeB3Processes } from './support/fake-b3-process.mjs';
 
@@ -108,6 +108,21 @@ test('health separates process state, B3 readiness, errors and RCON reachability
   await runtime.stop();
 });
 
+test('regression: health only judges the current run section of the appended b3.log', async t => {
+  const { runtime, launch, paths } = await fixture(t);
+  await runtime.start(launch);
+  // Previous run: ready, then a traceback. New run: started, not yet reading.
+  await fs.writeFile(paths.logFile, [
+    "x BOT 'Starting Cod4XParser v0.4 for server 127.0.0.1:1 (autorestart = True)'", "x BOT 'Start reading game events'", 'Traceback (most recent call last):',
+    "x ERROR \"RCON: too many tries: aborting ('status')\"",
+    "x BOT 'Starting Cod4XParser v0.4 for server 127.0.0.1:1 (autorestart = True)'",
+  ].join('\n') + '\n');
+  const health = await runtime.health();
+  assert.deepEqual([health.status, health.ready, health.errors, health.rcon], ['STARTING', false, false, 'NO_RECENT_ERRORS']);
+  assert.ok(!currentRunSection('a\nx Starting Cod4XParser v0.4 for server y\nb').startsWith('a'));
+  await runtime.stop();
+});
+
 test('minimal B3 config: cod4x parser, SQLite, instance game log, no autodoc, no credentials; game log never truncated', async t => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-b3-config-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
@@ -119,7 +134,7 @@ test('minimal B3 config: cod4x parser, SQLite, instance game log, no autodoc, no
   const prepared = await prepareB3Runtime(instance, 'logs/games_mp.log');
   assert.equal(await fs.readFile(prepared.gameLog, 'utf8'), 'existing line\n');
   const xml = await fs.readFile(prepared.config, 'utf8');
-  for (const expected of ['<set name="parser">cod4x</set>', '<set name="database">sqlite://', '<set name="port">28965</set>', '<set name="rcon_password"></set>', '<plugin name="admin"']) assert.ok(xml.includes(expected), expected);
+  for (const expected of ['<set name="public_ip">127.0.0.1</set>', '<set name="parser">cod4x</set>', '<set name="database">sqlite://', '<set name="port">28965</set>', '<set name="rcon_password"></set>', '<plugin name="admin"']) assert.ok(xml.includes(expected), expected);
   assert.ok(!xml.includes('name="autodoc"'));
   assert.ok(xml.includes(prepared.gameLog.replace(/&/g, '&amp;')));
   assert.match(renderB3Config({ instance: { port: 1 }, paths: b3Paths({ homePath: '/a&b' }), gameLog: '/a&b/main/logs/g.log' }), /\/a&amp;b\/main/);

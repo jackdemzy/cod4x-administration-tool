@@ -42,6 +42,69 @@ test('B3 lifecycle is independent of the CoD4x lifecycle in both directions', as
   await assert.rejects(manager.archive('b3-a'), { code: 'B3_RUNNING' });
 });
 
+test('B3 manager dashboard: health checks, root cause, logs and redacted config view', async t => {
+  const { manager, b3Service, create, store, environment } = await fixture(t);
+  await create('b3-dash');
+  let board = await b3Service.dashboard('b3-dash');
+  assert.deepEqual([board.status, board.diagnosis], ['STOPPED', ['COD4X_OFFLINE']]);
+  await manager.launch('b3-dash');
+  await b3Service.start('b3-dash');
+  const logFile = path.join(store.get('b3-dash').homePath, 'b3', 'b3.log');
+  await fs.writeFile(logFile, "x BOT 'Starting Cod4XParser v0.4 for server 127.0.0.1:1 (autorestart = True)'\nx BOT 'Using database file: /x/b3.db'\nx VERBOSE2 \"RCON: received 'print\\nmap: mp_backlot'\"\nx BOT 'Start reading game events'\n");
+  board = await b3Service.dashboard('b3-dash', { fresh: true });
+  assert.deepEqual(Object.fromEntries(Object.entries(board.checks).map(([key, value]) => [key, value.ok])), { python: true, b3: true, mysql: null, database: true, parser: true, rcon: true, cod4x: true });
+  assert.deepEqual([board.diagnosis, board.parser, board.version.commit], [[], 'Cod4XParser v0.4', '9096624']);
+  // Server stop: B3 keeps running, the dashboard names CoD4X as root cause.
+  await manager.stop('b3-dash');
+  await fs.appendFile(logFile, "x ERROR \"RCON: too many tries: aborting ('status')\"\n");
+  board = await b3Service.dashboard('b3-dash');
+  assert.deepEqual([board.status, board.diagnosis, board.primary, board.rconCause], ['RUNNING', ['COD4X_OFFLINE', 'RCON_OFFLINE'], 'COD4X_OFFLINE', 'COD4X_OFFLINE']);
+  // Regression (Block 13 native run): the answer contains "rconpassword"; the
+  // redacted logs view hides that line, but the dashboard must still classify it.
+  await manager.launch('b3-dash');
+  await fs.appendFile(logFile, "261019 01:07:28 DEBUG    'Get cvar fs_game = [No rconpassword set on server or password is shorter than 8 characters.\\n]'\n");
+  board = await b3Service.dashboard('b3-dash');
+  assert.deepEqual([board.rcon, board.primary, board.checks.cod4x.ok], ['AUTH_FAILED', 'RCON_OFFLINE', true]);
+  assert.ok(!(await b3Service.logs('b3-dash')).b3Log.includes('rconpassword'), 'logs view stays redacted');
+  await manager.stop('b3-dash');
+  // Dashboards reuse a recent dependency check; starts always re-check.
+  const before = environment.checks;
+  await b3Service.dashboard('b3-dash'); await b3Service.dashboard('b3-dash');
+  assert.equal(environment.checks, before);
+  const logs = await b3Service.logs('b3-dash');
+  assert.match(logs.b3Log, /Start reading game events/);
+  const config = await b3Service.config('b3-dash');
+  assert.deepEqual([config.exists, config.summary.parser, config.summary.databaseKind], [true, 'cod4x', 'sqlite']);
+  assert.match(config.text, /<set name="rcon_password">\[redacted\]<\/set>/);
+});
+
+test('regression: dependency checks are shared, invalidated on new paths and never cached from a stale run', async () => {
+  const { InstanceB3Service } = await import('../lib/instance-b3-service.mjs');
+  let calls = 0, release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const environment = { check: async () => { const call = ++calls; if (call === 1) await gate; return { overall: 'READY_FOR_RUNTIME_TEST', marker: call }; } };
+  const service = new InstanceB3Service({ store: { get: () => ({}) }, environment, dependencyCacheMs: 60000 });
+  const concurrent = [service.dependencies(), service.dependencies(), service.dependencies()];
+  // Settings saved while the first (old) check is still running.
+  service.invalidateDependencies();
+  const afterChange = service.dependencies();
+  release();
+  const [first, second, third] = await Promise.all(concurrent);
+  assert.equal(first, second); assert.equal(second, third);
+  assert.equal((await afterChange).marker, 2, 'a check after the change runs separately');
+  assert.equal(calls, 2, 'three concurrent callers shared one probe');
+  assert.equal((await service.dependencies()).marker, 2, 'the cache holds the post-change result, not the stale one');
+  assert.equal(calls, 2);
+});
+
+test('regression: a failing server status lookup is shown as unknown, not CoD4X offline', async t => {
+  const { b3Service, create } = await fixture(t);
+  await create('b3-unknown');
+  b3Service.serverStatus = async () => { throw Object.assign(new Error('Windows process inspection returned no result'), { code: 'RUNTIME_INSPECTION_FAILED' }); };
+  const board = await b3Service.dashboard('b3-unknown');
+  assert.deepEqual([board.checks.cod4x.ok, board.checks.cod4x.state, board.diagnosis.includes('COD4X_OFFLINE')], [null, 'UNKNOWN', false]);
+});
+
 test('B3 never starts with blocked or unaudited dependencies and keeps instances separate', async t => {
   const blocked = await fixture(t, { dependencies: { overall: 'BLOCKED', blocking: ['python'] } });
   await blocked.create('b3-x');

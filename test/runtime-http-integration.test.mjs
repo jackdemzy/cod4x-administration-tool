@@ -193,6 +193,10 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     const b3Status = await request('/api/instances/public-02/b3');
     assert.equal(b3Status.status, 200, b3Status.json.error);
     assert.deepEqual([b3Status.json.b3.runtime.status, b3Status.json.b3.health.status], ['STOPPED', 'DOWN']);
+    const b3Board = await request('/api/instances/public-02/b3/dashboard');
+    assert.equal(b3Board.status, 200, b3Board.json.error);
+    assert.deepEqual(b3Board.json.b3.diagnosis.slice(0, 2), ['PYTHON_MISSING', 'B3_MISSING'], 'unconfigured environment is diagnosed, not assumed');
+    assert.equal((await request('/api/instances/public-02/b3/config')).json.config.exists, false);
     const b3Start = await request('/api/instances/public-02/b3/start', {});
     assert.deepEqual([b3Start.status, b3Start.json.code], [400, 'B3_DEPENDENCIES_BLOCKED']);
     assert.equal((await request('/api/instances/public-02')).json.instance.runtime.status, 'STOPPED', 'a blocked B3 start never touches the server');
