@@ -1,0 +1,58 @@
+name: CI
+
+# Source preflight and frontend build on every push to main and every pull request.
+# Native gates (real CoD4x core, Python 2.7 + eBc-B3, MariaDB) need local game files
+# and the WSL test environment; on CI runners they skip themselves explicitly.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Preflight (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    env:
+      # Electron binaries are only needed to package the installer, not for preflight/build.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Preflight (Linux)
+        if: runner.os == 'Linux'
+        run: npm run preflight
+
+      # test/windows-native-process-inspection.test.mjs can hit its 3 s PowerShell
+      # timeout on a cold start (fails closed). Retry once; a real failure fails twice.
+      - name: Preflight (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          npm run preflight || {
+            echo "::warning::Preflight failed once; retrying (known PowerShell cold-start timing in the native CIM inspection test)."
+            npm run preflight
+          }
+
+      - name: Build
+        run: npm run build
