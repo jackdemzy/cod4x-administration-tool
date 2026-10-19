@@ -12,6 +12,10 @@ import { prepareB3Runtime } from "../lib/b3-config.mjs";
 if (process.platform !== "linux") { console.log("SKIP native B3 lifecycle check runs on Linux only"); process.exit(0); }
 const pythonPath = process.env.B3_PYTHON || path.join(os.homedir(), ".pyenv/versions/2.7.18/bin/python2.7");
 const b3Path = process.env.B3_SOURCE || path.join(os.homedir(), "ebc-b3");
+// Hosts without a Python 2.7 / eBc-B3 setup (e.g. CI runners) skip instead of failing,
+// like the Block 13 dashboard check does for a missing CoD4x core.
+try { await fs.access(pythonPath); await fs.access(path.join(b3Path, "b3_run.py")); }
+catch { console.log("SKIP native B3 lifecycle check: Python 2.7 or eBc-B3 not found"); process.exit(0); }
 const checks = [];
 const check = (name, ok, detail = "") => checks.push([name, Boolean(ok), detail]);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
