@@ -29,6 +29,14 @@ jobs:
       # Electron binaries are only needed to package the installer, not for preflight/build.
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
+      # The default Windows TEMP is an 8.3 short path (C:\Users\RUNNER~1\...). Instance path
+      # checks compare real paths and fail closed on it, so tests get a long-name TEMP.
+      - name: Use long-path TEMP
+        shell: bash
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
