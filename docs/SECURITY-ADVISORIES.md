@@ -1,24 +1,24 @@
-# Bewertung offener Sicherheitswarnungen (Dependabot)
+# Assessment of Open Security Alerts (Dependabot)
 
-Stand: 2026-10-19 · Branch `control-4.18.11` (4.18.11) · Bewertet mit `npm audit` (GitHub Advisory Database) gegen `package-lock.json`, die auf `main` und `control-4.18.11` dieselben Abhängigkeitsversionen enthält. Abhängigkeiten wurden **nicht** geändert.
+As of: 2026-10-19 · Branch `control-4.18.11` (4.18.11) · Assessed with `npm audit` (GitHub Advisory Database) against `package-lock.json`, which pins the same dependency versions on `main` and `control-4.18.11`. Dependencies were **not** changed.
 
-GitHub meldete beim Push 2 Warnungen auf dem Default-Branch: 1 hoch, 1 mittel. `npm audit` listet 9 Einträge; 7 davon sind nur Pakete, die diese beiden Advisories weitervererben (`@electron/get`, `app-builder-lib`, `dmg-builder`, `electron-builder`, `electron-builder-squirrel-windows`, `global-agent`, `roarr`).
+On push, GitHub reported 2 alerts on the default branch: 1 high, 1 moderate. `npm audit` lists 9 entries; 7 of them are only packages that inherit these two advisories (`@electron/get`, `app-builder-lib`, `dmg-builder`, `electron-builder`, `electron-builder-squirrel-windows`, `global-agent`, `roarr`).
 
-## Übersicht
+## Overview
 
-| Advisory | Paket (installiert) | Schwere | Gepatchte Version | Ausgeliefert? | Bewertung |
+| Advisory | Package (installed) | Severity | Patched version | Shipped? | Assessment |
 |---|---|---|---|---|---|
-| [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp) / CVE-2026-93748 | `http-cache-semantics` 4.2.0 | hoch (CVSS 7.5) | keine | nein (nur Build) | im Projekt nicht ausnutzbar, Risiko akzeptiert |
-| [GHSA-hp3w-g68c-fv3c](https://github.com/advisories/GHSA-hp3w-g68c-fv3c) / CVE-2026-97058 | `sprintf-js` 1.1.3 | mittel (CVSS 5.3) | keine | nein (nur Build) | im Projekt nicht ausnutzbar, Risiko akzeptiert |
+| [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp) / CVE-2026-93748 | `http-cache-semantics` 4.2.0 | high (CVSS 7.5) | none | no (build only) | not exploitable in this project, risk accepted |
+| [GHSA-hp3w-g68c-fv3c](https://github.com/advisories/GHSA-hp3w-g68c-fv3c) / CVE-2026-97058 | `sprintf-js` 1.1.3 | moderate (CVSS 5.3) | none | no (build only) | not exploitable in this project, risk accepted |
 
-## Wo die Pakete hängen
+## Where the packages come from
 
-Beide kommen ausschließlich über das Installer-Bauwerkzeug `electron-builder` (devDependency):
+Both are pulled in exclusively by the installer build tool `electron-builder` (devDependency):
 
 ```text
 electron-builder 26.15.3
 └── app-builder-lib 26.15.3
-    └── @electron/get 3.1.0          (lädt beim Bauen Electron-Binaries herunter)
+    └── @electron/get 3.1.0          (downloads Electron binaries during the build)
         ├── got 11.8.6
         │   └── cacheable-request 7.0.4
         │       └── http-cache-semantics 4.2.0
@@ -27,35 +27,36 @@ electron-builder 26.15.3
                 └── sprintf-js 1.1.3
 ```
 
-- Der App-Code (`lib/`, `src/`, `installer-server.mjs`, `electron-main.cjs`, `electron-preload.cjs`, `scripts/`) importiert keines dieser Pakete.
-- Produktionsabhängigkeiten sind nur `adm-zip`, `express`, `react`, `react-dom` und `tar`. `npm ls http-cache-semantics sprintf-js --omit=dev` ist leer.
-- electron-builder packt keine devDependencies in den Installer. `build.files` enthält nur `dist/**`, die Electron-Einstiegsdateien, `installer-server.mjs`, `lib/**` und `package.json`.
+- The application code (`lib/`, `src/`, `installer-server.mjs`, `electron-main.cjs`, `electron-preload.cjs`, `scripts/`) imports none of these packages.
+- The only production dependencies are `adm-zip`, `express`, `react`, `react-dom` and `tar`. `npm ls http-cache-semantics sprintf-js --omit=dev` is empty.
+- electron-builder does not package devDependencies into the installer. `build.files` contains only `dist/**`, the Electron entry files, `installer-server.mjs`, `lib/**` and `package.json`.
 
-## 1. GHSA-ch52-4w7c-c8xp – `http-cache-semantics` ≤ 4.2.0 (hoch)
+## 1. GHSA-ch52-4w7c-c8xp – `http-cache-semantics` ≤ 4.2.0 (high)
 
-**Problem laut Advisory:** Bei Client-Anfragen mit `max-stale` werden aus Sicherheitsgründen geleerte Einträge eines **geteilten** Caches nicht korrekt geprüft. Ein Angreifer kann so zwischengespeicherte Antworten anderer Nutzer abrufen, etwa deren `Set-Cookie`-Sitzungsdaten.
+**Issue according to the advisory:** For client requests with `max-stale`, entries of a **shared** cache that were zeroed for security reasons are not validated correctly. An attacker can thereby retrieve cached responses belonging to other users, such as their `Set-Cookie` session data.
 
-**Bewertung für COD4X CONTROL:**
-- Das Paket läuft nur beim Bauen des Installers. `@electron/get` lädt dabei über `got`/`cacheable-request` Electron-Archive herunter. Es gibt keinen geteilten Cache, keine Fremdnutzer und keine Sitzungs-Cookies; der Angriffsweg existiert in diesem Kontext nicht.
-- Die ausgelieferte App und das CONTROL-Backend enthalten das Paket nicht.
+**Assessment for COD4X CONTROL:**
+- The package only runs while building the installer, when `@electron/get` downloads Electron archives via `got`/`cacheable-request`. There is no shared cache, no other users and no session cookies; the attack path does not exist in this context.
+- The shipped application and the CONTROL backend do not contain the package.
 
-**Warum kein Update auf 4.3.0:** `http-cache-semantics` 4.3.0 (npm, veröffentlicht am 2026-10-04) liegt formal außerhalb des Bereichs „≤ 4.2.0“. Der Vergleich der npm-Pakete 4.2.0 → 4.3.0 zeigt aber nur zwei Änderungen: den `Vary`-Abgleich (Prüfung mit `hasOwnProperty`) und einen zurückgegebenen Statuswert. **Die `max-stale`-Behandlung ist unverändert.** Das Advisory nennt keine gepatchte Version. Ein Override auf 4.3.0 würde die Warnung also zum Verschwinden bringen, ohne die Lücke nachweislich zu schließen. Darauf wurde bewusst verzichtet.
+**Why no update to 4.3.0:** `http-cache-semantics` 4.3.0 (npm, published 2026-10-04) formally lies outside the range "≤ 4.2.0". A comparison of the npm packages 4.2.0 → 4.3.0, however, shows only two changes: the `Vary` matching (check via `hasOwnProperty`) and an additional returned status value. **The `max-stale` handling is unchanged.** The advisory lists no patched version. An override to 4.3.0 would therefore make the alert disappear without demonstrably closing the vulnerability, so it was deliberately not applied.
 
-## 2. GHSA-hp3w-g68c-fv3c – `sprintf-js` ≤ 1.1.3 (mittel)
+## 2. GHSA-hp3w-g68c-fv3c – `sprintf-js` ≤ 1.1.3 (moderate)
 
-**Problem laut Advisory:** Unbegrenzte Präzisionsangaben in Format-Strings werden ungeprüft an `toFixed`/`toExponential`/`toPrecision` weitergegeben. Wer den Format-String kontrolliert, kann damit einen `RangeError` auslösen (Denial of Service).
+**Issue according to the advisory:** Unbounded precision specifiers in format strings are passed unchecked to `toFixed`/`toExponential`/`toPrecision`. Anyone who controls the format string can trigger a `RangeError` this way (denial of service).
 
-**Bewertung für COD4X CONTROL:**
-- Das Paket läuft nur beim Bauen. `roarr` (Logger von `global-agent`) formatiert damit Log-Meldungen, deren Format-Strings fest im Code stehen und nicht von außen kommen.
-- Die ausgelieferte App und das CONTROL-Backend enthalten das Paket nicht.
-- `sprintf-js` 1.1.3 ist die neueste Version; eine gepatchte gibt es nicht. Auch `@electron/get` 4.x führt `global-agent` weiterhin als optionale Abhängigkeit, ein Wechsel würde die Kette also nicht entfernen.
+**Assessment for COD4X CONTROL:**
+- The package only runs during the build. `roarr` (the logger of `global-agent`) uses it to format log messages whose format strings are fixed in code and never come from outside.
+- The shipped application and the CONTROL backend do not contain the package.
+- `sprintf-js` 1.1.3 is the latest version; no patched version exists. `@electron/get` 4.x also still lists `global-agent` as an optional dependency, so switching would not remove the chain either.
 
-## Warum nicht `npm audit fix`
+## Why not `npm audit fix`
 
-Der Probelauf (`npm audit fix --dry-run`) würde nur ältere bzw. Alpha-Komponenten des Bauwerkzeugs einspielen, u. a. `app-builder-bin 5.0.0-alpha.12`, und `@electron/rebuild` von 4.2.0 auf 4.0.1 zurückstufen. Das behebt keine der beiden Lücken nachweislich und gefährdet den Installer-Build. Auch das neueste `electron-builder` der 26er-Reihe (26.17.0, Tag `v26`) hängt weiterhin an `@electron/get ^3`.
+The dry run (`npm audit fix --dry-run`) would only install older or alpha components of the build tool, including `app-builder-bin 5.0.0-alpha.12`, and would downgrade `@electron/rebuild` from 4.2.0 to 4.0.1. This does not demonstrably fix either vulnerability and puts the installer build at risk. Even the newest `electron-builder` of the 26 line (26.17.0, tag `v26`) still depends on `@electron/get ^3`.
 
-## Empfehlung und Wiedervorlage
+## Resolution and follow-up
 
-- Keine Änderung an den Abhängigkeiten. Beide Warnungen können auf GitHub als „Risk is tolerable / vulnerable code is not actually used“ geschlossen werden, mit Verweis auf dieses Dokument. Das muss der Repository-Owner tun.
-- **Erneut prüfen, sobald** eine der beiden Advisories eine gepatchte Version nennt, `electron-builder` auf `@electron/get` ≥ 4 ohne `global-agent` umstellt oder das Bauen in einer Umgebung mit geteiltem HTTP-Cache bzw. Proxy stattfindet.
-- In Roadmap-Block 20 (Security Audit) wird diese Bewertung erneut aufgegriffen; Block 23 (Release) setzt einen frischen `npm audit` voraus.
+- No change to the dependencies.
+- Both alerts were dismissed on GitHub on 2026-10-19 by the repository owner (`jackdemzy`) with the reason "Risk is tolerable to this project" (`tolerable_risk`) and a reference to this document: alerts #48 (`http-cache-semantics`) and #49 (`sprintf-js`).
+- **Re-assess as soon as** either advisory lists a patched version, `electron-builder` switches to `@electron/get` ≥ 4 without `global-agent`, or the build runs in an environment with a shared HTTP cache or proxy.
+- This assessment will be revisited in roadmap block 20 (Security Audit); block 23 (Release) requires a fresh `npm audit`.
