@@ -50,7 +50,7 @@ const dropAll = async () => {
 let b3;
 try {
   await dropAll();
-  await service.save(instance.id, settings);
+  await service.save(instance.id, settings); await service.invalidate(instance.id); // operator enters the password for these settings
   // 1. EMPTY -> migrate -> COMPLETE (no backup needed for an empty database).
   const empty = await service.test(instance.id);
   check("Test connection OK, schema EMPTY", empty.connection === "OK" && empty.schema.state === "EMPTY", `${empty.connection} ${empty.schema?.state}`);
@@ -77,10 +77,13 @@ try {
   const auth = await service.test(instance.id);
   wrongPassword = false;
   check("Wrong password -> DB_AUTH_FAILED", auth.connection === "DB_AUTH_FAILED", auth.connection);
-  await service.save(instance.id, { ...settings, port: 1 });
+  await service.save(instance.id, { ...settings, port: 1 }); await service.invalidate(instance.id); // operator enters the password for these settings
   const unreachable = await service.test(instance.id);
+  await service.save(instance.id, { ...settings, host: "localhost" });
+  const rebind = await service.test(instance.id).catch(error => error.code);
+  check("Changed host without re-entered password -> refused before connecting", rebind === "B3_DATABASE_PASSWORD_REENTRY_REQUIRED", rebind);
   check("Wrong port -> DB_UNREACHABLE", unreachable.connection === "DB_UNREACHABLE", unreachable.connection);
-  await service.save(instance.id, settings);
+  await service.save(instance.id, settings); await service.invalidate(instance.id); // operator enters the password for these settings
   const ready = await service.test(instance.id);
   check("Retest -> B3 Ready", ready.ready === true);
   // 5. Real B3 against MySQL.

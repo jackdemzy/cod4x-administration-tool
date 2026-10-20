@@ -156,3 +156,11 @@ test('Python helper source compiles under python2.7', { skip: process.platform =
     assert.equal(result.status, 0, result.stderr);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+test('reports when the request is written so the caller can end its vault scope', async () => {
+  const { spawnImpl } = fakeSpawn({ reply: '{"ok":true,"version":"10.11","tables":{}}' });
+  const order = [];
+  const result = runDatabaseHelper({ pythonPath: python, op: 'probe', connection, password: Buffer.from(PASSWORD) }, { spawnImpl, onRequestWritten: () => order.push('written') }).then(() => order.push('done'));
+  await result;
+  assert.deepEqual(order, ['written', 'done']);
+});

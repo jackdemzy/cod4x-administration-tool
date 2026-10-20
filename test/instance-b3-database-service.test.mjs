@@ -21,11 +21,13 @@ function backupText(tables) {
 // Scripted helper: each op pops the next response for that op.
 function scriptedHelper(script) {
   const calls = [];
-  const helper = async request => {
+  const helper = async (request, options = {}) => {
+    if (scriptedHelper.inScope && !scriptedHelper.inScope()) throw new Error('helper called outside a vault scope');
+    options.onRequestWritten?.();
+    if (script.hold) await script.hold;
     calls.push({ op: request.op, statements: request.statements, target: request.target, password: request.password.toString() });
     const next = script[request.op]?.shift();
     if (!next) throw new Error(`unexpected ${request.op}`);
-    if (scriptedHelper.inScope && !scriptedHelper.inScope()) throw new Error('helper called outside a vault scope');
     if (next.after) next.after();
     if (next.error) throw Object.assign(new Error(next.error), { code: next.error, mysqlCode: next.mysqlCode ?? null });
     if (request.op === 'backup') {
@@ -53,6 +55,7 @@ async function fixture(script, action, { running = false, locked = false, passwo
   const credentials = {
     async withRuntimeCredentials(id, fn) {
       if (locked) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
+      if (vault.busyAt === vault.scopes + 1) { vault.scopes++; throw Object.assign(new Error('VAULT_OPERATION_BUSY'), { code: 'VAULT_OPERATION_BUSY' }); }
       const b3db = password ? Buffer.from(password) : null;
       const controller = new AbortController();
       vault.lease = { b3db, controller }; vault.scopes++; vault.open++;
@@ -69,7 +72,9 @@ async function fixture(script, action, { running = false, locked = false, passwo
     credentials, environment: { read: async () => ({ pythonPath: '/usr/bin/python2.7', b3Path }) },
     b3IsRunning: async () => running, onEvent: event => events.push(event), helper, now: () => new Date('2026-10-20T10:15:00.000Z'),
   });
-  try { await action({ service, calls, events, instance, root, vault }); }
+  const rawSave = service.save.bind(service);
+  service.save = async (id, input) => { const result = await rawSave(id, input); await service.invalidate(id); return result; };
+  try { await action({ service, calls, events, instance, root, vault, rawSave }); }
   finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 const file = instance => path.join(instance.homePath, 'b3', 'database.json');
@@ -318,5 +323,59 @@ test('once ready, MySQL stays enabled until the settings are removed; isBusy rep
     assert.equal(service.isBusy('server-a'), false);
     const removed = await service.remove('server-a');
     assert.deepEqual([removed.settings, removed.ready, removed.mysqlEnabled], [null, false, false]);
+  });
+});
+
+test('vault scope ends as soon as the request is written, not when the helper finishes', async () => {
+  let release;
+  const hold = new Promise(resolve => { release = resolve; });
+  await fixture({ hold, probe: [{ tables: complete() }] }, async ({ service, vault }) => {
+    await service.save('server-a', SETTINGS);
+    const running = service.test('server-a');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(vault.open, 0, 'no vault scope is held while the helper runs');
+    release();
+    assert.equal((await running).ready, true);
+  });
+});
+
+test('a busy vault aborts a migration step without recording a failed migration', async () => {
+  const { penalties, ...partial } = complete();
+  await fixture({ probe: [{ tables: partial }], backup: [{ tables: { clients: 1 } }], apply: [{ statements: 1 }] }, async ({ service, calls, events, vault, instance }) => {
+    await service.save('server-a', SETTINGS);
+    const before = await fs.readFile(file(instance), 'utf8');
+    vault.busyAt = vault.scopes + 3; // probe, backup, then the apply scope is busy
+    await assert.rejects(service.migrate('server-a'), { code: 'VAULT_OPERATION_BUSY' });
+    assert.ok(!calls.some(call => call.op === 'apply'));
+    assert.ok(!events.some(event => event.event === 'b3.database.migration_failed'));
+    assert.equal(await fs.readFile(file(instance), 'utf8'), before);
+  });
+});
+
+test('changing host, port or user requires re-entering the password before it is sent anywhere', async () => {
+  await fixture({ probe: [{ tables: complete() }, { tables: complete() }] }, async ({ service, calls, rawSave }) => {
+    await service.save('server-a', SETTINGS);
+    assert.equal((await service.test('server-a')).ready, true);
+    for (const changed of [{ host: 'evil.example' }, { port: 3307 }, { username: 'other' }]) {
+      await rawSave('server-a', { ...SETTINGS, ...changed });
+      await assert.rejects(service.test('server-a'), { code: 'B3_DATABASE_PASSWORD_REENTRY_REQUIRED' });
+      assert.equal(await service.connectionFor('server-a', Buffer.from(PASSWORD)), null);
+      assert.equal((await service.read('server-a')).passwordBound, false);
+    }
+    assert.equal(calls.length, 1, 'the password never reached the changed target');
+    await rawSave('server-a', { ...SETTINGS, database: 'b3_other' });
+    await rawSave('server-a', SETTINGS);
+    await service.invalidate('server-a'); // password entered again
+    assert.equal((await service.read('server-a')).passwordBound, true);
+    assert.equal((await service.test('server-a')).ready, true);
+  });
+});
+
+test('a password stored before the settings must be entered again', async () => {
+  await fixture({}, async ({ service, calls, rawSave }) => {
+    await rawSave('server-a', SETTINGS);
+    await assert.rejects(service.test('server-a'), { code: 'B3_DATABASE_PASSWORD_REENTRY_REQUIRED' });
+    await assert.rejects(service.migrate('server-a'), { code: 'B3_DATABASE_PASSWORD_REENTRY_REQUIRED' });
+    assert.equal(calls.length, 0);
   });
 });
