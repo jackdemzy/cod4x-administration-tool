@@ -67,6 +67,8 @@ test('maps MySQL error codes', () => {
   assert.equal(classifyDatabaseError(2013), 'DB_UNREACHABLE');
   assert.equal(classifyDatabaseError('TIMEOUT'), 'DB_UNREACHABLE');
   assert.equal(classifyDatabaseError(1045), 'DB_AUTH_FAILED');
+  // MariaDB answers an unknown user over TCP with 1698 (seen against MariaDB 10.11).
+  assert.equal(classifyDatabaseError(1698), 'DB_AUTH_FAILED');
   assert.equal(classifyDatabaseError(1044), 'DB_ACCESS_DENIED');
   assert.equal(classifyDatabaseError(1049), 'DB_NOT_FOUND');
   assert.equal(classifyDatabaseError('DRIVER_MISSING'), 'DB_DRIVER_MISSING');
