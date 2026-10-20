@@ -459,3 +459,31 @@ test('C5: missing columns of an OUTDATED schema are persisted', async () => {
     assert.deepEqual((await service.read('server-a')).lastCheck.missingColumns, { clients: ['login'] });
   });
 });
+
+// --- Block 15: query entry point for the admin service ----------------------------
+test('query requires B3 Ready and forwards only the catalog name and params', async () => {
+  await fixture({ probe: [{ tables: complete() }] }, async ({ service, calls }) => {
+    await service.save('server-a', SETTINGS);
+    await assert.rejects(service.query('server-a', 'players', { search: '', limit: 50, offset: 0 }), { code: 'B3_DATABASE_NOT_READY' });
+    await service.test('server-a');
+    service.helper = (inner => async (request, options) => { calls.push({ op: request.op, name: request.name, params: request.params }); options?.onRequestWritten?.(); return { total: 0, rows: [] }; })(service.helper);
+    assert.deepEqual(await service.query('server-a', 'players', { search: 'x', limit: 50, offset: 0 }), { total: 0, rows: [] });
+    assert.deepEqual(calls.at(-1), { op: 'query', name: 'players', params: { search: 'x', limit: 50, offset: 0 } });
+  });
+});
+
+test('query writes run under the instance lock; a changed host needs the password again', async () => {
+  let release;
+  const hold = new Promise(resolve => { release = resolve; });
+  await fixture({ probe: [{ tables: complete() }] }, async ({ service, rawSave }) => {
+    await service.save('server-a', SETTINGS);
+    await service.test('server-a');
+    service.helper = async (request, options) => { options?.onRequestWritten?.(); await hold; return { affected: 1 }; };
+    const write = service.query('server-a', 'unban', { clientId: 7 }, { write: true });
+    await assert.rejects(service.query('server-a', 'liftWarning', { penaltyId: 1 }, { write: true }), { code: 'B3_DATABASE_BUSY' });
+    release();
+    assert.deepEqual(await write, { affected: 1 });
+    await rawSave('server-a', { ...SETTINGS, host: 'evil.example' });
+    await assert.rejects(service.query('server-a', 'players', { search: '', limit: 50, offset: 0 }), { code: /B3_DATABASE_PASSWORD_REENTRY_REQUIRED|B3_DATABASE_NOT_READY/ });
+  });
+});
