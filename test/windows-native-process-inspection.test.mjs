@@ -9,7 +9,8 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { createRuntimeManager } from '../lib/runtime-manager.mjs';
 
-test('real Windows tasklist/CIM inspection returns path, command line and creation time for an owned helper', { skip: process.platform !== 'win32', timeout: 15000 }, async () => {
+test('real Windows tasklist/CIM inspection returns path, command line and creation time for an owned helper', { skip: process.platform !== 'win32', timeout: 45_000 }, async () => {
+  // Two inspections, each up to 3 s tasklist + 10 s PowerShell, plus spawn and cleanup.
   // Not a Dedicated Core. Only the helper created here may be terminated.
   const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', 'cod4x-process-inspection-test'], { windowsHide: true, stdio: 'ignore' });
   const closed = once(child, 'close');
