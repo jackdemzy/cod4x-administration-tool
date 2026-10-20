@@ -2274,7 +2274,7 @@ async function b3ServerStatus(id) {
 // Block 14: per-instance B3 database (settings, test, verified backup, migration).
 // Events carry codes only, never the password or DSN.
 // Block 15: B3 in-game administration on B3's own database (masked unless config.manage).
-const b3AdminService = new InstanceB3AdminService({ store: instanceStore, database: { read: id => b3DatabaseService.read(id), query: (...args) => b3DatabaseService.query(...args), withStartGuard: (id, action) => b3DatabaseService.withStartGuard(id, action) },
+const b3AdminService = new InstanceB3AdminService({ store: instanceStore, rcon: { findOnline: id => rconService.findOnline(id), kick: (id, target, actor) => rconService.kick(id, target, actor) }, database: { read: id => b3DatabaseService.read(id), query: (...args) => b3DatabaseService.query(...args), withStartGuard: (id, action) => b3DatabaseService.withStartGuard(id, action) },
   environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit("info", entry.event, entry) });
 const b3DatabaseService = new InstanceB3DatabaseService({ store: instanceStore, credentials: credentialService, environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, entry) });
 const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
@@ -2384,6 +2384,9 @@ function rconRoute(action) {
   };
 }
 app.get("/api/instances/:id/rcon", requirePermission("server.manage"), rconRoute(async req => ({ rcon: rconService.status(req.params.id) })));
+// Block 15b: online players (masked unless config.manage) and the verified live kick.
+app.get("/api/instances/:id/rcon/online", requirePermission("diagnostics.read"), rconRoute(async req => ({ online: await rconService.online(req.params.id, { full: hasPermission(req.auth.role, "config.manage") }) })));
+app.post("/api/instances/:id/rcon/kick", requirePermission("server.manage"), rconRoute(async req => ({ kick: await rconService.kick(req.params.id, { slot: req.body?.slot, playerid: req.body?.playerid, name: req.body?.name, reason: req.body?.reason }, req.auth.username) })));
 app.post("/api/instances/:id/rcon/connect", requirePermission("server.manage"), rconRoute(async req => ({ rcon: await rconService.connect(req.params.id, req.auth.username) })));
 app.post("/api/instances/:id/rcon/command", requirePermission("server.manage"), rconRoute(async req => {
   if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).join(",") !== "command") throw Object.assign(new Error("RCON_COMMAND_BLOCKED"), { code: "RCON_COMMAND_BLOCKED" });
@@ -2468,7 +2471,8 @@ app.get("/api/instances/:id/b3/admin/admins", requirePermission("diagnostics.rea
 app.get("/api/instances/:id/b3/admin/penalties", requirePermission("diagnostics.read"), instanceRoute(async req => ({ penalties: await b3AdminService.penalties(req.params.id, { type: req.query.type, status: req.query.status, offset: queryInt(req.query.offset) }, adminView(req)) })));
 app.get("/api/instances/:id/b3/admin/groups", requirePermission("diagnostics.read"), instanceRoute(async req => ({ groups: await b3AdminService.groups(req.params.id) })));
 app.get("/api/instances/:id/b3/admin/commands", requirePermission("diagnostics.read"), instanceRoute(async req => ({ commands: await b3AdminService.commands(req.params.id) })));
-app.post("/api/instances/:id/b3/admin/players/:clientId/ban", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.addBan(req.params.id, queryInt(req.params.clientId), { kind: req.body?.kind, durationMinutes: req.body?.durationMinutes, reason: req.body?.reason }, req.auth.username) })));
+app.post("/api/instances/:id/b3/admin/players/:clientId/ban", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.addBan(req.params.id, queryInt(req.params.clientId), { kind: req.body?.kind, durationMinutes: req.body?.durationMinutes, reason: req.body?.reason, kick: req.body?.kick === true }, req.auth.username) })));
+app.post("/api/instances/:id/b3/admin/players/:clientId/kick", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.kick(req.params.id, queryInt(req.params.clientId), typeof req.body?.reason === "string" ? req.body.reason : "", req.auth.username) })));
 app.post("/api/instances/:id/b3/admin/players/:clientId/unban", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.unban(req.params.id, queryInt(req.params.clientId), req.auth.username) })));
 app.post("/api/instances/:id/b3/admin/players/:clientId/group", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.setGroup(req.params.id, queryInt(req.params.clientId), req.body?.groupId, req.auth.username) })));
 app.post("/api/instances/:id/b3/admin/penalties/:penaltyId/lift", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.liftWarning(req.params.id, queryInt(req.params.penaltyId), req.auth.username) })));

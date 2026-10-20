@@ -221,6 +221,11 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
       const notReady = await request(`/api/instances/public-02/b3/admin/${route}`);
       assert.deepEqual([notReady.status, notReady.json.code], [400, 'B3_DATABASE_NOT_READY'], route);
     }
+    // Block 15b: live kick.
+    const badKick = await request('/api/instances/public-02/rcon/kick', { slot: 99, playerid: '1' });
+    assert.deepEqual([badKick.status, badKick.json.code], [400, 'RCON_KICK_INVALID']);
+    const offlineKick = await request('/api/instances/public-02/rcon/kick', { slot: 3, playerid: '1234567890' });
+    assert.deepEqual([offlineKick.status, offlineKick.json.code], [409, 'RCON_SERVER_NOT_RUNNING']);
     const badQuery = await request('/api/instances/public-02/b3/admin/players?offset=-1');
     assert.deepEqual([badQuery.status, badQuery.json.code], [400, 'B3_ADMIN_INPUT_INVALID']);
     assert.equal((await request('/api/instances/public-02')).json.instance.runtime.status, 'STOPPED', 'a blocked B3 start never touches the server');
@@ -334,7 +339,11 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
       const allowed = await fetch(`${url}${route}`, { headers: { Authorization: `Bearer ${viewerToken}` } });
       assert.equal(allowed.status, 400, `viewer may read ${route} (fails only on the missing database)`);
     }
-    for (const route of ['players/7/ban', 'players/7/unban', 'players/7/group', 'penalties/2/lift']) {
+    const viewerOnline = await fetch(`${url}/api/instances/public-02/rcon/online`, { headers: { Authorization: `Bearer ${viewerToken}` } });
+    assert.equal(viewerOnline.status, 409, 'viewer may read the online list (server is not running)');
+    const viewerKick = await fetch(`${url}/api/instances/public-02/rcon/kick`, { method: 'POST', headers: { Origin: 'null', Authorization: `Bearer ${viewerToken}`, 'Content-Type': 'application/json' }, body: '{"slot":1,"playerid":"1"}' });
+    assert.equal(viewerKick.status, 403);
+    for (const route of ['players/7/ban', 'players/7/unban', 'players/7/group', 'players/7/kick', 'penalties/2/lift']) {
       const denied = await fetch(`${url}/api/instances/public-02/b3/admin/${route}`, { method: 'POST', headers: { Origin: 'null', Authorization: `Bearer ${viewerToken}`, 'Content-Type': 'application/json' }, body: '{}' });
       assert.equal(denied.status, 403, route);
     }
