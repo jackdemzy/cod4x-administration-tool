@@ -35,6 +35,14 @@ Second review:
 - The b3db password is bound to the host, port and user it was entered for. After a change of these settings it is not sent anywhere until it is entered again (`B3_DATABASE_PASSWORD_REENTRY_REQUIRED`), so the write-only vault secret cannot be read out by pointing the test at another server.
 - Review suggestions, all with tests: B3 start holds the database service's per-instance lock across the readiness check, `b3.xml` and the spawn, so no migration can start in between (and vice versa); a `MIGRATION_IN_PROGRESS` marker is stored before the first SQL, so a backend crash mid-migration fails closed (restored if nothing ran); removing the database settings is refused while B3 runs; a backup that finished right before a vault lock is still verified and reported; every code of the flow has a German and English message (`lib/b3-database-messages.mjs`); the gate exercises the helper launch and the backup-before-SQL rule directly instead of matching source text; the credential editor's stop-the-server banner names only the server credentials.
 
+PR review (Codex), all with regression tests:
+
+- Backups use the driver's `literal()` (PyMySQL, MySQLdb); `mysql.connector` is refused with `DB_BACKUP_DRIVER_UNSUPPORTED` instead of failing obscurely.
+- A b3db password change is awaited before the credential request returns; a test or migration that started before the change can no longer store a stale `ready`.
+- With MySQL, `b3.xml` and the B3 spawn happen inside the verified vault scope; a lock before the scope is confirmed stops B3 and restores the previous `b3.xml`.
+- The wizard's settings form remounts with the saved values once they load.
+- Missing columns of an OUTDATED schema are persisted and shown.
+
 ### Also in this version
 
 - Windows process inspection gives a cold PowerShell start 10 s instead of 3 s (PR #6); stop/recovery no longer abort on slow hosts.

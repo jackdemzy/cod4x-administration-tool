@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { EBC_CONFIRMATION } from './b3-database.mjs';
-import { B3_DATABASE_MESSAGES } from './b3-database-messages.mjs';
+import { B3_DATABASE_MESSAGES, databaseFormKey } from './b3-database-messages.mjs';
 
 // Block 14 wizard: settings -> test -> schema -> backup + migration -> B3 Ready.
 // The password is never entered here; it lives in the vault (credential editor, kind b3db).
@@ -41,7 +41,7 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
     <summary>{de ? 'B3 Datenbank (MySQL/MariaDB)' : 'B3 database (MySQL/MariaDB)'}</summary>
     <p>{de ? 'Ablauf: Verbindung testen → Schema prüfen → Backup → Migration → B3 Ready. Vor jeder Änderung an einer nicht leeren Datenbank wird ein geprüftes Backup erstellt.' : 'Flow: test connection → check schema → backup → migration → B3 Ready. A verified backup is taken before any change to a non-empty database.'}</p>
     {error && <p role="alert">{say(error, de)}</p>}
-    <form onSubmit={event => { event.preventDefault(); void save(); }}>
+    <form key={databaseFormKey(database?.settings)} onSubmit={event => { event.preventDefault(); void save(); }}>
       {field('host', 'Host', database?.settings?.host ?? '127.0.0.1')}
       {field('port', 'Port', database?.settings?.port ?? 3306)}
       {field('database', de ? 'Datenbank' : 'Database', database?.settings?.database)}
@@ -54,6 +54,7 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
       : check.connection !== 'OK' ? say(check.connection, de)
       : `${de ? 'Verbunden. Schema' : 'Connected. Schema'}: ${schema}${check.code ? ` – ${say(check.code, de)}` : ''}`}</p>
     {check?.missingTables?.length > 0 && <p>{de ? 'Fehlende Tabellen: ' : 'Missing tables: '}{check.missingTables.join(', ')}</p>}
+    {Object.keys(check?.missingColumns || {}).length > 0 && <p>{de ? 'Fehlende Spalten: ' : 'Missing columns: '}{Object.entries(check.missingColumns).map(([table, columns]) => `${table} (${columns.join(', ')})`).join('; ')}</p>}
     <fieldset disabled={busy} style={{ marginTop: 8 }}>
       <label><input type="checkbox" checked={ebc} onChange={event => setEbc(event.target.checked)} /> {de ? 'eBc-Promod-Statistikschema einspielen (optional)' : 'Install eBc promod statistics schema (optional)'}</label>
       <p>{de ? 'Warnung: löscht player_core und prestige_log und legt sie neu an. Zum Bestätigen exakt eingeben: ' : 'Warning: drops player_core and prestige_log and recreates them. To confirm, type exactly: '}<code>{EBC_CONFIRMATION}</code></p>

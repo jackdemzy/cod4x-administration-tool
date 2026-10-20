@@ -31,3 +31,14 @@ test('b3db can change while the game server runs; server credentials still need 
   await assert.rejects(running.value.changeCredential('server-a', 'rcon', { value: 'x', expectedSha256: 'y' }), { code: 'INSTANCE_RUNTIME_BUSY' });
   assert.deepEqual(running.changed, [['server-a', 'b3db']]);
 });
+
+test('C2: changeCredential waits for the credential-changed hook and reports its failure', async () => {
+  let finished = false;
+  const slow = manager();
+  slow.value.onCredentialChanged = async () => { await new Promise(resolve => setTimeout(resolve, 20)); finished = true; };
+  await slow.value.changeCredential('server-a', 'b3db', { value: 'x', expectedSha256: 'y' });
+  assert.equal(finished, true);
+  const failing = manager();
+  failing.value.onCredentialChanged = async () => { throw Object.assign(new Error('B3_DATABASE_STATE_INVALID'), { code: 'B3_DATABASE_STATE_INVALID' }); };
+  await assert.rejects(failing.value.changeCredential('server-a', 'b3db', { value: 'x', expectedSha256: 'y' }), { code: 'B3_DATABASE_STATE_INVALID' });
+});

@@ -197,3 +197,21 @@ test('S1: B3 start runs inside the database start guard', async t => {
   b3Service.database.withStartGuard = async () => { throw Object.assign(new Error('B3_DATABASE_BUSY'), { code: 'B3_DATABASE_BUSY' }); };
   await assert.rejects(b3Service.start('b3-start-guard'), { code: 'B3_DATABASE_BUSY' });
 });
+
+test('C3: a vault lock after the credential callback stops B3 and restores the previous b3.xml', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-scope');
+  const config = path.join(store.get('b3-scope').homePath, 'b3', 'b3.xml');
+  await b3Service.start('b3-scope'); await b3Service.stop('b3-scope');
+  const before = await fs.readFile(config, 'utf8');
+  b3Service.database = { read: async () => ({ ready: true, mysqlEnabled: true }), withStartGuard: async (id, fn) => fn(), connectionFor: async (id, buffer) => ({ dsn: `mysql://b3:${buffer.toString()}@127.0.0.1:3306/b3` }) };
+  b3Service.credentials = { async withRuntimeCredentials(id, fn) {
+    const b3db = Buffer.from('Db-Secret-Pass!9');
+    await fn({ b3db }, new AbortController().signal);
+    b3db.fill(0);
+    throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' }); // locked before the scope verified
+  } };
+  await assert.rejects(b3Service.start('b3-scope'), { code: 'VAULT_LOCKED' });
+  assert.equal((await b3Service.status('b3-scope')).runtime.running, false, 'B3 must not keep running');
+  assert.equal(await fs.readFile(config, 'utf8'), before, 'b3.xml restored');
+});
