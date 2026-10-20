@@ -199,6 +199,20 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     assert.equal((await request('/api/instances/public-02/b3/config')).json.config.exists, false);
     const b3Start = await request('/api/instances/public-02/b3/start', {});
     assert.deepEqual([b3Start.status, b3Start.json.code], [400, 'B3_DEPENDENCIES_BLOCKED']);
+    // Block 14: B3 database wizard API.
+    const dbInitial = await request('/api/instances/public-02/b3/database');
+    assert.equal(dbInitial.status, 200, dbInitial.json.error);
+    assert.deepEqual([dbInitial.json.database.settings, dbInitial.json.database.ready], [null, false]);
+    const dbInvalid = await request('/api/instances/public-02/b3/database', { host: 'a/b', database: 'b3', username: 'b3' });
+    assert.deepEqual([dbInvalid.status, dbInvalid.json.code], [400, 'B3_DATABASE_SETTINGS_INVALID']);
+    const dbSaved = await request('/api/instances/public-02/b3/database', { host: '127.0.0.1', port: 3306, database: 'b3', username: 'b3' });
+    assert.equal(dbSaved.status, 200, dbSaved.json.error);
+    assert.deepEqual(dbSaved.json.database.settings, { host: '127.0.0.1', database: 'b3', username: 'b3', port: 3306 });
+    assert.ok(!JSON.stringify(dbSaved.json).includes('password"'), 'settings never carry a password');
+    for (const route of ['/api/instances/public-02/b3/database/test', '/api/instances/public-02/b3/database/migrate']) {
+      const blocked = await request(route, {});
+      assert.deepEqual([blocked.status, blocked.json.code], [400, 'B3_PYTHON_NOT_CONFIGURED'], route);
+    }
     assert.equal((await request('/api/instances/public-02')).json.instance.runtime.status, 'STOPPED', 'a blocked B3 start never touches the server');
     // Plugin manager: discovery is empty, malformed requests use fixed codes.
     const pluginList = await request('/api/instances/public-02/plugins');
@@ -267,7 +281,7 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     assert.equal(rejectedStart.status, 400);
     assert.equal(rejectedStart.json.code, 'VERIFIED_CORE_BLOCKED');
     assert.equal((await request('/api/instances/public-02')).json.instance.runtime.status, 'STOPPED');
-    const auditEntries = (await request('/api/audit?limit=100')).json.events;
+    const auditEntries = (await request('/api/audit?limit=500')).json.events;
     const createAudit = auditEntries.find(entry => entry.details?.correlationId === created.json.correlationId);
     assert.equal(createAudit.details.route, '/api/instances');
     assert.equal(createAudit.details.instanceId, 'public-01');
@@ -306,6 +320,10 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     const viewerToken = (await viewerLogin.json()).token;
     const viewerDenied = await fetch(`${url}/api/credentials/vault`, { headers: { Authorization: `Bearer ${viewerToken}` } });
     assert.equal(viewerDenied.status, 403);
+    for (const [route, method] of [['/api/instances/public-02/b3/database', 'GET'], ['/api/instances/public-02/b3/database', 'POST'], ['/api/instances/public-02/b3/database/test', 'POST'], ['/api/instances/public-02/b3/database/migrate', 'POST']]) {
+      const denied = await fetch(`${url}${route}`, { method, headers: { Origin: 'null', Authorization: `Bearer ${viewerToken}`, 'Content-Type': 'application/json' }, body: method === 'POST' ? '{}' : undefined });
+      assert.equal(denied.status, 403, `${method} ${route}`);
+    }
     const viewerConfigBefore = await request('/api/instances/public-01/config');
     const viewerConfigDenied = await fetch(`${url}/api/instances/public-01/config`, { method: 'PUT', headers: { Origin: 'null', Authorization: `Bearer ${viewerToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedSha256: viewerConfigBefore.json.configuration.sha256, entries: edited }) });
     assert.equal(viewerConfigDenied.status, 403);
