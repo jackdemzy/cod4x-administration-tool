@@ -105,8 +105,12 @@ try {
   check("Set group (B3 stopped) -> B3 loads group_bits 16", b3Sees(clientId).groupBits === 16);
   const missing = await admin.addBan(instance.id, 999999, { kind: "Ban", reason: "x" }, "native").then(() => "added", error => error.code);
   check("Ban for an unknown player is refused", missing === "B3_ADMIN_CLIENT_NOT_FOUND", missing);
-  const tricky = await admin.players(instance.id, { search: "%_'\\" });
-  check("Search with LIKE/quote characters is literal and safe", tricky.total === 0);
+  await raw("apply", { statements: [`INSERT INTO clients (ip, connections, guid, pbid, name, auto_login, mask_level, group_bits, greeting, time_add, time_edit) VALUES ('203.0.113.78', 1, 'NATIVEPCTGUID0000002', '', 'Pct%_Name', 0, 0, 1, '', ${now}, ${now})`] });
+  const literal = await admin.players(instance.id, { search: "%_" });
+  const quoted = await admin.players(instance.id, { search: "%_'\\" });
+  check("Search treats %, _, quote and backslash literally", literal.total === 1 && literal.rows[0].name === "Pct%_Name" && quoted.total === 0, `${literal.total}/${quoted.total}`);
+  const byGuid = await admin.players(instance.id, { search: "GUID00001" }); // only in the GUID, not in any name
+  check("Masked search does not match GUIDs (full search does)", byGuid.total === 0 && (await admin.players(instance.id, { search: "GUID00001" }, { full: true })).total === 1);
   const admins = await admin.admins(instance.id);
   check("Admins view lists the promoted player", admins.rows.some(row => row.id === clientId && row.group === "Admin"));
   const commands = await admin.commands(instance.id);

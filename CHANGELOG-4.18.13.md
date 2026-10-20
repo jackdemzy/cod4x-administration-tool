@@ -15,7 +15,17 @@ Design: `docs/superpowers/specs/2026-10-20-b3-admin-design.md`. Plan: `docs/supe
 
 ### Native check
 
-`scripts/verify-4.18.13-b3-admin-native.mjs` passed 15/15 against the MariaDB test database `b3_control_test`. Every action was verified with eBc-B3's own `MysqlStorage`: an added TempBan counts for `getClientPenalties(('Ban','TempBan'))`, lifting it removes it, a lifted warning no longer counts, a set group is what `getClient()` loads; a ban id on the warning route and a ban for an unknown player are refused; LIKE/quote characters in the search are literal.
+`scripts/verify-4.18.13-b3-admin-native.mjs` passed 16/16 against the MariaDB test database `b3_control_test`. Every action was verified with eBc-B3's own `MysqlStorage`: an added TempBan counts for `getClientPenalties(('Ban','TempBan'))`, lifting it removes it, a lifted warning no longer counts, a set group is what `getClient()` loads; a ban id on the warning route and a ban for an unknown player are refused; a player named `Pct%_Name` is found exactly by `%_` (LIKE characters literal) and a masked search never matches GUIDs.
+
+### Review before the PR (superpowers:requesting-code-review)
+
+All important findings and several minor ones fixed with regression tests:
+
+- Viewers can use the panel: readiness and B3 state come from the new `GET …/b3/admin/status` (diagnostics.read) instead of the config.manage-only database route.
+- Masked callers search by name only (`playersByName`); a GUID substring search plus the total would have let them rebuild masked GUIDs.
+- Penalties are paged in the UI with a total; every load refreshes readiness and B3 state; a Refresh button was added.
+- Kicks are stored by B3 with `time_expire = -1` and are shown as events, never as active or expired.
+- "Lift ban" reports when there was no active ban; a write that committed right before a vault lock is still audited (`outcome: committed_vault_locked`); ids up to the MySQL INT limit are accepted; the ban dialog only closes on success.
 
 ### Roadmap
 

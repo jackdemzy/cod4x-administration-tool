@@ -11,7 +11,7 @@ const GROUPS = [
 ];
 
 test('query catalog validates names, parameters and defaults', () => {
-  assert.deepEqual([...ADMIN_QUERIES].sort(), ['addBan', 'admins', 'groups', 'liftWarning', 'penalties', 'player', 'players', 'setGroup', 'unban']);
+  assert.deepEqual([...ADMIN_QUERIES].sort(), ['addBan', 'admins', 'groups', 'liftWarning', 'penalties', 'player', 'players', 'playersByName', 'setGroup', 'unban']);
   assert.deepEqual(validateAdminQuery('players', {}), { search: '', limit: 50, offset: 0 });
   assert.deepEqual(validateAdminQuery('players', { search: '50%_x', offset: 100 }), { search: '50%_x', limit: 50, offset: 100 });
   assert.deepEqual(validateAdminQuery('penalties', { type: 'Permanent', status: 'active' }), { type: 'Permanent', status: 'active', limit: 50, offset: 0 });
@@ -61,4 +61,17 @@ test('commands come from the real eBc-B3 plugin_admin.ini', async () => {
   assert.deepEqual(find('warns'), { command: 'warns', alias: null, level: 40, group: 'Admin' });
   assert.ok(commands.length >= 60);
   assert.ok(!commands.some(entry => entry.command === 'settings' || entry.command.startsWith('#')));
+});
+
+// --- Review fixes ------------------------------------------------------------------
+test('R2/R9: name-only search for masked callers; ids up to the MySQL INT limit', () => {
+  assert.ok(ADMIN_QUERIES.includes('playersByName'));
+  assert.deepEqual(validateAdminQuery('playersByName', { search: 'abc' }), { search: 'abc', limit: 50, offset: 0 });
+  assert.deepEqual(validateAdminQuery('player', { clientId: 2 ** 31 - 1 }), { clientId: 2 ** 31 - 1 });
+  assert.equal(code(() => validateAdminQuery('player', { clientId: 2 ** 31 })), 'B3_ADMIN_INPUT_INVALID');
+});
+
+test('R6: kicks are events, never active or expired', () => {
+  assert.equal(penaltyStatus({ type: 'Kick', inactive: 0, time_expire: -1 }, 1000), 'kick');
+  assert.equal(penaltyStatus({ type: 'Ban', inactive: 0, time_expire: -1 }, 1000), 'active');
 });

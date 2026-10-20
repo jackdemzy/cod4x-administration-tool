@@ -31,7 +31,7 @@ const rejected = await runDatabaseHelper({ pythonPath, op: "query", name: "playe
 // Masking: a viewer never receives a full IP or GUID.
 const IP = "203.0.113.77", GUID = "ABCDEF0123456789FACE", OLD_IP = "198.51.100.23";
 const client = [7, "Tester", GUID, IP, 16, 1, 1, 2];
-const answers = { groups: { rows: [[16, "Admin", "admin", 40]] }, players: { total: 1, rows: [client] }, admins: { rows: [client] }, player: { client, aliases: [], ips: [[OLD_IP, 1, 1, 2]] }, penalties: { total: 1, rows: [[1, "Ban", 7, "Tester", GUID, 0, 0, 0, "r", 1, -1]] } };
+const answers = { groups: { rows: [[16, "Admin", "admin", 40]] }, players: { total: 1, rows: [client] }, playersByName: { total: 1, rows: [client] }, admins: { rows: [client] }, player: { client, aliases: [], ips: [[OLD_IP, 1, 1, 2]] }, penalties: { total: 1, rows: [[1, "Ban", 7, "Tester", GUID, 0, 0, 0, "r", 1, -1]] } };
 const service = new InstanceB3AdminService({ store: { get: () => ({}) }, database: { read: async () => ({ ready: true }), query: async (id, name) => structuredClone(answers[name]), withStartGuard: async (id, fn) => fn() }, environment: { read: async () => ({}) }, b3IsRunning: async () => false });
 const masked = JSON.stringify([await service.players("x", {}), await service.admins("x"), await service.player("x", 7), await service.penalties("x", {})]);
 const full = JSON.stringify(await service.players("x", {}, { full: true }));
@@ -41,7 +41,7 @@ const checks = [
   ["query sends only a catalog name and bound params, never SQL", request.op === "query" && request.name === "players" && request.params.search === injection && !/SELECT|UPDATE|INSERT|DELETE/i.test(JSON.stringify(request)) && rejected],
   ["the helper's query table matches the catalog", ADMIN_QUERIES.every(name => new RegExp(`'${name}': q_`).test(helperSource))],
   ["viewers never receive a full IP or GUID", ![IP, GUID, OLD_IP].some(secret => masked.includes(secret)) && full.includes(IP) && full.includes(GUID)],
-  ["reads need diagnostics.read, full values config.manage", ["players", "players/:clientId", "admins", "penalties", "groups", "commands"].every(p => route("get", p, "diagnostics.read")) && server.includes('const adminView = req => ({ full: hasPermission(req.auth.role, "config.manage") });')],
+  ["reads need diagnostics.read, full values config.manage", ["status", "players", "players/:clientId", "admins", "penalties", "groups", "commands"].every(p => route("get", p, "diagnostics.read")) && server.includes('const adminView = req => ({ full: hasPermission(req.auth.role, "config.manage") });')],
   ["actions need server.manage", ["players/:clientId/ban", "players/:clientId/unban", "players/:clientId/group", "penalties/:penaltyId/lift"].every(p => route("post", p, "server.manage"))],
   ["set group refuses while B3 runs inside the start guard", read("lib/instance-b3-admin-service.mjs").includes("if (await this.b3IsRunning(id)) fail('B3_RUNNING');")],
 ];

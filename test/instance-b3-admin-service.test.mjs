@@ -19,6 +19,7 @@ async function fixture(action, { ready = true, running = false, responses = {} }
   const answers = {
     groups: { rows: GROUPS },
     players: { total: 1, rows: [CLIENT] },
+    playersByName: { total: 1, rows: [CLIENT] },
     admins: { rows: [CLIENT] },
     player: { client: CLIENT, aliases: [['OldName', 3, NOW - 9000, NOW - 8000]], ips: [[OLD_IP, 2, NOW - 9000, NOW - 8000]] },
     penalties: { total: 2, rows: [[1, 'TempBan', 7, 'Tester', GUID, 0, 10, 0, 'Wallhack', NOW - 100, NOW + 500], [2, 'Warning', 7, 'Tester', GUID, 3, 0, 0, 'Spam', NOW - 50, NOW]] },
@@ -105,4 +106,33 @@ test('commands come from plugin_admin.ini with group names; a missing file is re
     await fs.writeFile(path.join(b3Path, 'b3', 'conf', 'plugin_admin.ini'), Buffer.alloc(65 * 1024, 0x61));
     await assert.rejects(service.commands('server-a'), { code: 'B3_ADMIN_COMMANDS_UNAVAILABLE' });
   });
+});
+
+// --- Review fixes ------------------------------------------------------------------
+test('R1/R4: status is readable with diagnostics.read and reports fresh readiness and B3 state', async () => {
+  await fixture(async ({ service }) => assert.deepEqual(await service.status('server-a'), { ready: true, b3Running: false }));
+  await fixture(async ({ service }) => assert.deepEqual(await service.status('server-a'), { ready: false, b3Running: true }), { ready: false, running: true });
+});
+
+test('R2: masked callers search by name only; full callers also by GUID', async () => {
+  await fixture(async ({ service, calls }) => {
+    await service.players('server-a', { search: 'FACE' });
+    await service.players('server-a', { search: 'FACE' }, { full: true });
+    assert.deepEqual(calls.filter(call => call.name.startsWith('players')).map(call => call.name), ['playersByName', 'players']);
+  }, { responses: { playersByName: { total: 0, rows: [] } } });
+});
+
+test('R6: kicks have the status kick', async () => {
+  await fixture(async ({ service }) => {
+    const { rows } = await service.penalties('server-a', {});
+    assert.equal(rows[0].status, 'kick');
+  }, { responses: { penalties: { total: 1, rows: [[3, 'Kick', 7, 'Tester', GUID, 0, 0, 0, 'AFK', NOW - 5, -1]] } } });
+});
+
+test('R7: a write that committed before a vault lock is still audited', async () => {
+  const locked = Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED', helperResult: { id: 99 } });
+  await fixture(async ({ service, events }) => {
+    await assert.rejects(service.addBan('server-a', 7, { kind: 'Ban', reason: 'x' }, 'admin1'), { code: 'VAULT_LOCKED' });
+    assert.deepEqual(events.at(-1), { event: 'b3.admin.ban_added', instanceId: 'server-a', actor: 'admin1', clientId: 7, kind: 'Ban', durationMinutes: 0, outcome: 'committed_vault_locked' });
+  }, { responses: { addBan: locked } });
 });

@@ -71,3 +71,36 @@ test('every admin code has a German and an English message', { skip }, async () 
     assert.ok(Array.isArray(B3_ADMIN_MESSAGES[code]) && B3_ADMIN_MESSAGES[code].length === 2, code);
   }
 });
+
+// --- Review fixes ------------------------------------------------------------------
+test('R1/R4: loading works for a viewer and refreshes readiness and B3 state', { skip }, async () => {
+  const { loadAdminView } = await import('../lib/b3-admin-messages.mjs');
+  const seen = [];
+  const call = async route => {
+    seen.push(route);
+    if (/\/b3\/database$|\/b3$/.test(route)) throw new Error('HTTP 403');
+    if (route === '/api/rbac/me') return { permissions: ['diagnostics.read'] };
+    if (route.endsWith('/b3/admin/status')) return { status: { ready: true, b3Running: false } };
+    if (route.endsWith('/b3/admin/groups')) return { groups: { rows: groups } };
+    if (route.includes('/b3/admin/players')) return { players: { total: 1, offset: 0, limit: 50, rows: [player] } };
+    throw new Error(`unexpected ${route}`);
+  };
+  const state = await loadAdminView(call, '/api/instances/x', { tab: 'players', search: '', filter: { type: 'any', status: 'active' }, offset: 0, withPermissions: true });
+  assert.deepEqual([state.ready, state.b3Running, state.permissions], [true, false, { manage: false, full: false }]);
+  assert.equal(state.players.rows[0].name, 'Tester');
+  assert.ok(!seen.some(route => /\/b3\/database$/.test(route)));
+});
+
+test('R3: penalties are paged with a total', { skip }, async () => {
+  const rows = Array.from({ length: 50 }, (_, index) => ({ id: index + 1, type: 'Ban', permanent: true, clientId: 7, name: `P${index}`, guid: '…FACE', reason: 'x', since: 1, until: null, status: 'active' }));
+  const html = await view(base({ tab: 'penalties', penalties: { total: 120, offset: 50, limit: 50, rows } }));
+  assert.match(html, /51–100 \/ 120/);
+  assert.match(html, /aria-label="Vorherige Seite"/);
+  assert.match(html, /aria-label="Nächste Seite"/);
+});
+
+test('R5: lifting without an active ban says so', { skip }, async () => {
+  const { actionMessage } = await import('../lib/b3-admin-messages.mjs');
+  assert.equal(actionMessage('unban', { affected: 0 }, true), 'Kein aktiver Ban für diesen Spieler.');
+  assert.equal(actionMessage('unban', { affected: 2 }, true), '2 Ban(s) aufgehoben.');
+});

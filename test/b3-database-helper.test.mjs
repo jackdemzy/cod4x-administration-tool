@@ -274,3 +274,34 @@ sys.stdout.write(json.dumps(out))
     assert.equal(out.unknown, 'QUERY_INVALID');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+test('R2/R6: name-only player search and kicks excluded from active/expired (Python)', { skip: process.platform === 'linux' && spawnSync(realPython, ['-V']).status === 0 ? false : 'Python 2.7 not available' }, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-helper-admin2-'));
+  try {
+    const file = path.join(dir, 'admin2.py');
+    await fs.writeFile(file, DATABASE_HELPER.replace(/\nmain\(\)\s*$/, '\n') + String.raw`
+class Cursor(object):
+    def __init__(self, results):
+        self.results = list(results); self.executed = []; self.rowcount = 0
+    def execute(self, sql, params=None):
+        self.executed.append([sql, list(params) if params is not None else None])
+    def fetchone(self):
+        return self.results.pop(0) if self.results else None
+    def fetchall(self):
+        return self.results.pop(0) if self.results else []
+out = {}
+cur = Cursor([(0,), []])
+QUERIES['playersByName'](cur, {'search': 'ab', 'limit': 50, 'offset': 0}, 1000)
+out['byName'] = [entry[0] for entry in cur.executed]
+cur = Cursor([(0,), []])
+QUERIES['penalties'](cur, {'type': 'any', 'status': 'active', 'limit': 50, 'offset': 0}, 1000)
+out['active'] = cur.executed[0][0]
+sys.stdout.write(json.dumps(out))
+`);
+    const run = spawnSync(realPython, [file], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const out = JSON.parse(run.stdout);
+    for (const sql of out.byName) { assert.ok(!/guid/i.test(sql.split('FROM')[1]), sql); assert.match(sql, /name LIKE %s/); }
+    assert.match(out.active, /p\.type <> 'Kick'/);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
