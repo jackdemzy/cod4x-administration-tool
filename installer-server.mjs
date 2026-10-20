@@ -36,6 +36,7 @@ import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
 import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
 import { InstanceB3DatabaseService } from "./lib/instance-b3-database-service.mjs";
+import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
@@ -2272,6 +2273,9 @@ async function b3ServerStatus(id) {
 }
 // Block 14: per-instance B3 database (settings, test, verified backup, migration).
 // Events carry codes only, never the password or DSN.
+// Block 15: B3 in-game administration on B3's own database (masked unless config.manage).
+const b3AdminService = new InstanceB3AdminService({ store: instanceStore, database: { read: id => b3DatabaseService.read(id), query: (...args) => b3DatabaseService.query(...args), withStartGuard: (id, action) => b3DatabaseService.withStartGuard(id, action) },
+  environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit("info", entry.event, entry) });
 const b3DatabaseService = new InstanceB3DatabaseService({ store: instanceStore, credentials: credentialService, environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, entry) });
 const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
 instanceManager = new ServerInstanceManager({
@@ -2455,6 +2459,18 @@ app.get("/api/instances/:id/b3/database", requirePermission("config.manage"), in
 app.post("/api/instances/:id/b3/database", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.save(req.params.id, req.body) })));
 app.post("/api/instances/:id/b3/database/remove", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.remove(req.params.id) })));
 app.post("/api/instances/:id/b3/database/test", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.test(req.params.id) })));
+const adminView = req => ({ full: hasPermission(req.auth.role, "config.manage") });
+const queryInt = value => (value === undefined ? undefined : /^\d{1,7}$/.test(String(value)) ? Number(value) : -1);
+app.get("/api/instances/:id/b3/admin/players", requirePermission("diagnostics.read"), instanceRoute(async req => ({ players: await b3AdminService.players(req.params.id, { search: typeof req.query.search === "string" ? req.query.search : undefined, offset: queryInt(req.query.offset) }, adminView(req)) })));
+app.get("/api/instances/:id/b3/admin/players/:clientId", requirePermission("diagnostics.read"), instanceRoute(async req => ({ player: await b3AdminService.player(req.params.id, queryInt(req.params.clientId), adminView(req)) })));
+app.get("/api/instances/:id/b3/admin/admins", requirePermission("diagnostics.read"), instanceRoute(async req => ({ admins: await b3AdminService.admins(req.params.id, adminView(req)) })));
+app.get("/api/instances/:id/b3/admin/penalties", requirePermission("diagnostics.read"), instanceRoute(async req => ({ penalties: await b3AdminService.penalties(req.params.id, { type: req.query.type, status: req.query.status, offset: queryInt(req.query.offset) }, adminView(req)) })));
+app.get("/api/instances/:id/b3/admin/groups", requirePermission("diagnostics.read"), instanceRoute(async req => ({ groups: await b3AdminService.groups(req.params.id) })));
+app.get("/api/instances/:id/b3/admin/commands", requirePermission("diagnostics.read"), instanceRoute(async req => ({ commands: await b3AdminService.commands(req.params.id) })));
+app.post("/api/instances/:id/b3/admin/players/:clientId/ban", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.addBan(req.params.id, queryInt(req.params.clientId), { kind: req.body?.kind, durationMinutes: req.body?.durationMinutes, reason: req.body?.reason }, req.auth.username) })));
+app.post("/api/instances/:id/b3/admin/players/:clientId/unban", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.unban(req.params.id, queryInt(req.params.clientId), req.auth.username) })));
+app.post("/api/instances/:id/b3/admin/players/:clientId/group", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.setGroup(req.params.id, queryInt(req.params.clientId), req.body?.groupId, req.auth.username) })));
+app.post("/api/instances/:id/b3/admin/penalties/:penaltyId/lift", requirePermission("server.manage"), instanceRoute(async req => ({ result: await b3AdminService.liftWarning(req.params.id, queryInt(req.params.penaltyId), req.auth.username) })));
 app.post("/api/instances/:id/b3/database/migrate", requirePermission("server.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.migrate(req.params.id, { ebcOptIn: req.body?.ebcOptIn === true, confirmation: typeof req.body?.confirmation === "string" ? req.body.confirmation : undefined }) })));
 // Logical deletion is recoverable: move owned home to .trash, never recursively erase it.
 app.delete("/api/instances/:id", requirePermission("server.manage"), instanceRoute(async req => ({ archive: await instanceManager.archive(req.params.id) })));
