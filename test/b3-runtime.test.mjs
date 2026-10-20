@@ -139,3 +139,16 @@ test('minimal B3 config: cod4x parser, SQLite, instance game log, no autodoc, no
   assert.ok(xml.includes(prepared.gameLog.replace(/&/g, '&amp;')));
   assert.match(renderB3Config({ instance: { port: 1 }, paths: b3Paths({ homePath: '/a&b' }), gameLog: '/a&b/main/logs/g.log' }), /\/a&amp;b\/main/);
 });
+
+test('b3.xml uses the MySQL DSN when given, SQLite otherwise; the header says when it holds credentials', async t => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-b3-config-mysql-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const instance = { id: 'cfg', homePath: home, port: 28965 };
+  const dsn = 'mysql://b3:Pa&ss<1>@127.0.0.1:3306/b3';
+  const mysql = await fs.readFile((await prepareB3Runtime(instance, 'logs/games_mp.log', { databaseDsn: dsn })).config, 'utf8');
+  assert.ok(mysql.includes('<set name="database">mysql://b3:Pa&amp;ss&lt;1&gt;@127.0.0.1:3306/b3</set>'));
+  assert.ok(!mysql.includes('contains no credentials'));
+  if (process.platform !== 'win32') assert.equal((await fs.stat(path.join(home, 'b3', 'b3.xml'))).mode & 0o777, 0o600);
+  const sqlite = await fs.readFile((await prepareB3Runtime(instance, 'logs/games_mp.log')).config, 'utf8');
+  assert.ok(sqlite.includes('<set name="database">sqlite://') && sqlite.includes('contains no credentials'));
+});

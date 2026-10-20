@@ -74,10 +74,16 @@ test('config summary never returns credentials and the config view is redacted',
 });
 
 test('dashboard distinguishes every roadmap failure cause and orders the root cause first', () => {
-  const healthy = buildB3Dashboard({ dependencies: deps(), ...running, log: { ...parseB3Log(startup), rcon: { state: 'CONNECTED' } }, config: { parser: 'cod4x', databaseKind: 'sqlite' }, server: serverUp });
+  const healthyInput = { dependencies: deps(), ...running, log: { ...parseB3Log(startup), rcon: { state: 'CONNECTED' } }, config: { parser: 'cod4x', databaseKind: 'sqlite' }, server: serverUp };
+  const healthy = buildB3Dashboard(healthyInput);
   assert.deepEqual(Object.fromEntries(Object.entries(healthy.checks).map(([key, value]) => [key, value.ok])), { python: true, b3: true, mysql: null, database: true, parser: true, rcon: true, cod4x: true });
   assert.deepEqual([healthy.diagnosis, healthy.version.commit, healthy.parser, healthy.database], [[], '9096624', 'Cod4XParser v0.4', 'sqlite:CONNECTED']);
-  assert.match(healthy.checks.mysql.state, /SQLITE \(MySQL: Block 14\)/);
+  assert.match(healthy.checks.mysql.state, /SQLITE \(MySQL: NOT_SET_UP\)/);
+  assert.ok(!JSON.stringify(healthy).includes('Block 14'));
+  const prepared = buildB3Dashboard({ ...healthyInput, database: { ready: true, lastCheck: { code: null } } });
+  assert.equal(prepared.checks.mysql.state, 'SQLITE (MySQL: READY, restart B3)');
+  const failing = buildB3Dashboard({ ...healthyInput, database: { ready: false, lastCheck: { code: 'DB_AUTH_FAILED' } } });
+  assert.equal(failing.checks.mysql.state, 'SQLITE (MySQL: DB_AUTH_FAILED)');
   const cases = [
     ['PYTHON_MISSING', { dependencies: deps({ python: { status: 'MISSING' } }) }],
     ['PYTHON_INCOMPATIBLE', { dependencies: deps({ python: { status: 'INCOMPATIBLE', found: '3.11.5' } }) }],

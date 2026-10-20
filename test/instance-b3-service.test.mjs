@@ -129,3 +129,36 @@ test('B3 never starts with blocked or unaudited dependencies and keeps instances
   assert.ok(configTwo.includes(`<set name="port">${store.get('b3-two').port}</set>`));
   assert.ok(configOne.includes(path.join(store.get('b3-one').homePath, 'b3', 'b3.db').replace(/\\/g, '/')) && !configOne.includes(store.get('b3-two').homePath));
 });
+
+test('B3 start writes the MySQL DSN only when the database is ready; locked vault keeps the previous b3.xml', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-db');
+  const config = path.join(store.get('b3-db').homePath, 'b3', 'b3.xml');
+  let ready = false, locked = false;
+  const password = 'Db-Secret-Pass!9';
+  b3Service.database = {
+    read: async () => ({ ready }),
+    connectionFor: async (id, buffer) => (ready ? { dsn: `mysql://b3:${buffer.toString()}@127.0.0.1:3306/b3` } : null),
+  };
+  b3Service.credentials = {
+    async withRuntimeCredentials(id, fn) {
+      if (locked) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
+      const b3db = Buffer.from(password);
+      try { return await fn({ b3db }); } finally { b3db.fill(0); }
+    },
+  };
+  await b3Service.start('b3-db');
+  assert.match(await fs.readFile(config, 'utf8'), /<set name="database">sqlite:\/\//);
+  await b3Service.stop('b3-db');
+  ready = true;
+  await b3Service.start('b3-db');
+  const xml = await fs.readFile(config, 'utf8');
+  assert.ok(xml.includes(`<set name="database">mysql://b3:${password}@127.0.0.1:3306/b3</set>`));
+  const view = await b3Service.config('b3-db');
+  assert.ok(!JSON.stringify(view).includes(password));
+  assert.equal(view.summary.databaseKind, 'mysql');
+  await b3Service.stop('b3-db');
+  locked = true;
+  await assert.rejects(b3Service.start('b3-db'), { code: 'VAULT_LOCKED' });
+  assert.equal(await fs.readFile(config, 'utf8'), xml);
+});
