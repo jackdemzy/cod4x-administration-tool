@@ -193,3 +193,84 @@ test('C1: the unsupported backup driver code reaches the operator', async () => 
   const { spawnImpl } = fakeSpawn({ reply: JSON.stringify({ ok: false, error: { code: 'BACKUP_DRIVER_UNSUPPORTED' } }) });
   await rejects(runDatabaseHelper({ pythonPath: python, op: 'backup', target: path.resolve('x.sql'), connection, password: Buffer.from(PASSWORD) }, { spawnImpl }), 'DB_BACKUP_DRIVER_UNSUPPORTED');
 });
+
+// --- Block 15: named, parameter-bound admin queries ------------------------------
+test('query sends only a catalog name and params, never SQL', async () => {
+  const { spawnImpl, calls } = fakeSpawn({ reply: '{"ok":true,"total":0,"rows":[]}' });
+  const result = await runDatabaseHelper({ pythonPath: python, op: 'query', name: 'players', params: { search: "x'; DROP TABLE clients; --", limit: 50, offset: 0 }, connection, password: Buffer.from(PASSWORD) }, { spawnImpl });
+  assert.deepEqual(result, { total: 0, rows: [] });
+  const request = JSON.parse(calls[0].stdin());
+  assert.deepEqual([request.op, request.name], ['query', 'players']);
+  assert.ok(!/SELECT|UPDATE|INSERT/i.test(JSON.stringify(request)));
+  for (const bad of [{ name: 'players; DROP', params: {} }, { name: 'players', params: [] }, { name: 'players', params: null }]) {
+    await rejects(runDatabaseHelper({ pythonPath: python, op: 'query', ...bad, connection, password: Buffer.from(PASSWORD) }, { spawnImpl }), 'DB_HELPER_FAILED');
+  }
+});
+
+test('admin helper errors map to B3_ADMIN codes', async () => {
+  for (const [reported, expected] of [['CLIENT_NOT_FOUND', 'B3_ADMIN_CLIENT_NOT_FOUND'], ['GROUP_NOT_FOUND', 'B3_ADMIN_GROUP_NOT_FOUND'], ['PENALTY_NOT_FOUND', 'B3_ADMIN_PENALTY_NOT_FOUND'], ['QUERY_INVALID', 'B3_ADMIN_INPUT_INVALID']]) {
+    const { spawnImpl } = fakeSpawn({ reply: JSON.stringify({ ok: false, error: { code: reported } }) });
+    await rejects(runDatabaseHelper({ pythonPath: python, op: 'query', name: 'players', params: {}, connection, password: Buffer.from(PASSWORD) }, { spawnImpl }), expected);
+  }
+});
+
+test('Python admin queries bind every value and check existence before writing', { skip: process.platform === 'linux' && spawnSync(realPython, ['-V']).status === 0 ? false : 'Python 2.7 not available' }, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-helper-admin-'));
+  try {
+    const file = path.join(dir, 'admin.py');
+    await fs.writeFile(file, DATABASE_HELPER.replace(/\nmain\(\)\s*$/, '\n') + String.raw`
+class Cursor(object):
+    def __init__(self, results):
+        self.results = list(results); self.executed = []; self.rowcount = 1; self.lastrowid = 99
+    def execute(self, sql, params=None):
+        self.executed.append([sql, list(params) if params is not None else None])
+    def fetchone(self):
+        return self.results.pop(0) if self.results else None
+    def fetchall(self):
+        return self.results.pop(0) if self.results else []
+out = {}
+cur = Cursor([(3,), [(1, 'Name', 'GUID', '1.2.3.4', 0, 5, 10, 20)]])
+QUERIES['players'](cur, {'search': "50%_x'", 'limit': 50, 'offset': 0}, 1000)
+out['players'] = cur.executed
+cur = Cursor([None])
+try:
+    QUERIES['addBan'](cur, {'clientId': 7, 'kind': 'TempBan', 'durationMinutes': 10, 'reason': 'r'}, 1000)
+except Exception as exc:
+    out['addBanMissing'] = [error_code(exc), len(cur.executed)]
+cur = Cursor([(7,)])
+QUERIES['addBan'](cur, {'clientId': 7, 'kind': 'TempBan', 'durationMinutes': 10, 'reason': "it's"}, 1000)
+out['addBan'] = cur.executed[-1]
+cur = Cursor([None])
+try:
+    QUERIES['liftWarning'](cur, {'penaltyId': 5}, 1000)
+except Exception as exc:
+    out['liftWarning'] = [error_code(exc), cur.executed[0][0]]
+cur = Cursor([(7,), None])
+try:
+    QUERIES['setGroup'](cur, {'clientId': 7, 'groupId': 4}, 1000)
+except Exception as exc:
+    out['setGroup'] = [error_code(exc), len(cur.executed)]
+cur = Cursor([(0,), []])
+QUERIES['penalties'](cur, {'type': 'Permanent', 'status': 'active', 'limit': 10, 'offset': 0}, 1000)
+out['penalties'] = cur.executed
+out['unknown'] = 'QUERY_INVALID' if QUERIES.get('dropAll') is None else 'present'
+sys.stdout.write(json.dumps(out))
+`);
+    const run = spawnSync(realPython, [file], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const out = JSON.parse(run.stdout);
+    const like = String.raw`%50\%\_x'%`; // % and _ escaped for LIKE, quote left to parameter binding
+    for (const [sql, params] of out.players) { assert.ok(!sql.includes('50'), sql); assert.deepEqual(params.slice(0, 3), ["50%_x'", like, like]); }
+    assert.deepEqual(out.players[1][1].slice(3), [50, 0]);
+    assert.deepEqual(out.addBanMissing, ['CLIENT_NOT_FOUND', 1]);
+    assert.ok(/^INSERT INTO penalties/.test(out.addBan[0]) && !out.addBan[0].includes("it's"));
+    assert.deepEqual(out.addBan[1], ['TempBan', 7, 10, "it's", 1000, 1000, 1600]);
+    assert.equal(out.liftWarning[0], 'PENALTY_NOT_FOUND');
+    assert.match(out.liftWarning[1], /type = 'Warning'/);
+    assert.deepEqual(out.setGroup, ['GROUP_NOT_FOUND', 2]);
+    assert.match(out.penalties[1][0], /p\.type = 'Ban'/);
+    assert.match(out.penalties[1][0], /p\.time_expire > %s/);
+    assert.deepEqual(out.penalties[1][1], [1000, 10, 0]);
+    assert.equal(out.unknown, 'QUERY_INVALID');
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
