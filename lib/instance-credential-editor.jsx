@@ -52,7 +52,7 @@ export function InstanceCredentialEditor({ instance, request, de }) {
         if (['initialize', 'unlock'].includes(kind)) await call(`/api/credentials/vault/${kind}`, { passphrase: value });
         else if (kind === 'lock') await call('/api/credentials/vault/lock', {});
         else {
-          if (!unlocked || active || !credentials.sha256) throw Object.assign(new Error('Credential operation blocked'), { code: active ? 'INSTANCE_RUNTIME_BUSY' : 'VAULT_LOCKED' });
+          if (!unlocked || (active && credentialKind !== 'b3db') || !credentials.sha256) throw Object.assign(new Error('Credential operation blocked'), { code: unlocked ? 'INSTANCE_RUNTIME_BUSY' : 'VAULT_LOCKED' });
           const body = { expectedSha256: credentials.sha256 };
           if (kind === 'save') body.value = value;
           await call(`${route}/${credentialKind}${kind === 'remove' ? '/remove' : ''}`, body);
@@ -64,7 +64,8 @@ export function InstanceCredentialEditor({ instance, request, de }) {
       const current = (await call(route)).credentials;
       if (!mounted.current || generation !== revision.current) return;
       setCredentials(current);
-      if (kind === 'save' || kind === 'remove') setMessage(de ? 'Verschlüsselt gespeichert und geprüft. Noch nicht im Server aktiv.' : 'Encrypted, saved and verified. Not active in the server yet.');
+      if ((kind === 'save' || kind === 'remove') && credentialKind === 'b3db') setMessage(de ? 'Verschlüsselt gespeichert. Die B3-Datenbank bitte erneut testen.' : 'Encrypted and saved. Please test the B3 database again.');
+      else if (kind === 'save' || kind === 'remove') setMessage(de ? 'Verschlüsselt gespeichert und geprüft. Noch nicht im Server aktiv.' : 'Encrypted, saved and verified. Not active in the server yet.');
       else if (kind === 'initialize') setMessage(de ? 'Tresor angelegt. Zum Bearbeiten entsperren.' : 'Vault created. Unlock to edit.');
       else if (kind === 'unlock') setMessage(de ? 'Tresor entsperrt.' : 'Vault unlocked.');
       else if (kind === 'lock') setMessage(de ? 'Tresor gesperrt.' : 'Vault locked.');
@@ -95,10 +96,10 @@ export function InstanceCredentialEditor({ instance, request, de }) {
     <button disabled={busy || !unlocked} onClick={() => action('lock')}>{de ? 'Tresor sperren' : 'Lock vault'}</button>
     {active && <p>{de ? 'Server vor Änderungen an Zugangsdaten vollständig stoppen.' : 'Fully stop the server before changing credentials.'}</p>}
     {KINDS.map(kind => <form key={kind} onSubmit={event => submit(event, 'save', kind)} style={{ marginTop: 10 }}>
-      <label>{labels[kind]} <input ref={input => { secrets.current[kind] = input; }} type="password" autoComplete="new-password" minLength={kind === 'master' ? 32 : 8} maxLength={kind === 'master' ? 32 : kind === 'join' ? 64 : 128} required disabled={busy || !unlocked || active} /></label>
+      <label>{labels[kind]} <input ref={input => { secrets.current[kind] = input; }} type="password" autoComplete="new-password" minLength={kind === 'master' ? 32 : 8} maxLength={kind === 'master' ? 32 : kind === 'join' ? 64 : 128} required disabled={busy || !unlocked || (active && kind !== 'b3db')} /></label>
       <span> {credentials?.[kind]?.configured === true ? (de ? 'Gespeichert' : 'Stored') : credentials?.[kind]?.configured === false ? (de ? 'Nicht eingerichtet' : 'Not configured') : (de ? 'Unbekannt' : 'Unknown')}</span>
-      <button type="submit" disabled={busy || !unlocked || active}>{de ? 'Verschlüsselt speichern' : 'Save encrypted'}</button>
-      <button type="button" disabled={busy || !unlocked || active || credentials?.[kind]?.configured !== true} onClick={() => action('remove', kind)}>{de ? 'Entfernen' : 'Remove'}</button>
+      <button type="submit" disabled={busy || !unlocked || (active && kind !== 'b3db')}>{de ? 'Verschlüsselt speichern' : 'Save encrypted'}</button>
+      <button type="button" disabled={busy || !unlocked || (active && kind !== 'b3db') || credentials?.[kind]?.configured !== true} onClick={() => action('remove', kind)}>{de ? 'Entfernen' : 'Remove'}</button>
     </form>)}
   </details>;
 }

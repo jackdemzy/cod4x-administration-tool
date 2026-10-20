@@ -73,6 +73,8 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
     </fieldset>
     {state?.b3Running && <p>{de ? 'B3 läuft – Migration erst nach dem Stoppen von B3.' : 'B3 is running – stop B3 before migrating.'}</p>}
     <button disabled={busy || !migratable || state?.b3Running || (ebc && phrase !== EBC_CONFIRMATION)} onClick={() => migrate()}>{de ? 'Migration starten' : 'Start migration'}</button>
+    {database?.mysqlEnabled && !database?.ready && <p role="alert">{de ? 'B3 nutzt MySQL, die Datenbank ist aber nicht bereit: B3 startet erst nach erfolgreichem Test wieder.' : 'B3 uses MySQL but the database is not ready: B3 starts again only after a successful test.'}</p>}
+    {database?.settings && <button disabled={busy || state?.b3Running} onClick={() => run(() => call(`${base}/b3/database/remove`, {}))}>{de ? 'DB-Einstellungen entfernen (B3 nutzt wieder SQLite)' : 'Remove database settings (B3 uses SQLite again)'}</button>}
     {database?.ready && <p role="status"><strong>B3 Ready</strong> – {de ? 'B3 nutzt MySQL ab dem nächsten Start.' : 'B3 uses MySQL from its next start.'}</p>}
     {check?.backup && <p>{de ? 'Backup: ' : 'Backup: '}<code>{check.backup.path}</code> (SHA-256 <code>{check.backup.sha256}</code>)</p>}
   </details>;

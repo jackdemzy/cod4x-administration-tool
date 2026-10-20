@@ -213,6 +213,9 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
       const blocked = await request(route, {});
       assert.deepEqual([blocked.status, blocked.json.code], [400, 'B3_PYTHON_NOT_CONFIGURED'], route);
     }
+    const dbRemoved = await request('/api/instances/public-02/b3/database/remove', {});
+    assert.equal(dbRemoved.status, 200, dbRemoved.json.error);
+    assert.deepEqual([dbRemoved.json.database.settings, dbRemoved.json.database.mysqlEnabled], [null, false]);
     assert.equal((await request('/api/instances/public-02')).json.instance.runtime.status, 'STOPPED', 'a blocked B3 start never touches the server');
     // Plugin manager: discovery is empty, malformed requests use fixed codes.
     const pluginList = await request('/api/instances/public-02/plugins');
@@ -320,7 +323,7 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     const viewerToken = (await viewerLogin.json()).token;
     const viewerDenied = await fetch(`${url}/api/credentials/vault`, { headers: { Authorization: `Bearer ${viewerToken}` } });
     assert.equal(viewerDenied.status, 403);
-    for (const [route, method] of [['/api/instances/public-02/b3/database', 'GET'], ['/api/instances/public-02/b3/database', 'POST'], ['/api/instances/public-02/b3/database/test', 'POST'], ['/api/instances/public-02/b3/database/migrate', 'POST']]) {
+    for (const [route, method] of [['/api/instances/public-02/b3/database', 'GET'], ['/api/instances/public-02/b3/database', 'POST'], ['/api/instances/public-02/b3/database/test', 'POST'], ['/api/instances/public-02/b3/database/migrate', 'POST'], ['/api/instances/public-02/b3/database/remove', 'POST']]) {
       const denied = await fetch(`${url}${route}`, { method, headers: { Origin: 'null', Authorization: `Bearer ${viewerToken}`, 'Content-Type': 'application/json' }, body: method === 'POST' ? '{}' : undefined });
       assert.equal(denied.status, 403, `${method} ${route}`);
     }

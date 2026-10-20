@@ -2453,6 +2453,7 @@ app.post("/api/instances/:id/b3/stop", requirePermission("server.manage"), insta
 app.post("/api/instances/:id/b3/restart", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id, true) })));
 app.get("/api/instances/:id/b3/database", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.read(req.params.id) })));
 app.post("/api/instances/:id/b3/database", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.save(req.params.id, req.body) })));
+app.post("/api/instances/:id/b3/database/remove", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.remove(req.params.id) })));
 app.post("/api/instances/:id/b3/database/test", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.test(req.params.id) })));
 app.post("/api/instances/:id/b3/database/migrate", requirePermission("server.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.migrate(req.params.id, { ebcOptIn: req.body?.ebcOptIn === true, confirmation: typeof req.body?.confirmation === "string" ? req.body.confirmation : undefined }) })));
 // Logical deletion is recoverable: move owned home to .trash, never recursively erase it.
