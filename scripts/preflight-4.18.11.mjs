@@ -79,7 +79,7 @@ if (version.status !== 0) {
   console.error("4.18.11 version consistency FAIL");
   process.exit(version.status || 1);
 }
-const behavior = spawnSync(process.execPath, ["--test", "test/instance-console-log.test.mjs", "test/windows-runtime-process-guard.test.mjs", "test/base-game-manager.test.mjs", "test/runtime-layout.test.mjs", "test/runtime-basegame-state.test.mjs", "test/runtime-http-integration.test.mjs", "test/server-instance-store.test.mjs", "test/server-instance-runtime.test.mjs", "test/windows-process-ownership.test.mjs", "test/windows-native-process-inspection.test.mjs"], { encoding: "utf8" });
+const behavior = spawnSync(process.execPath, ["--test", "test/instance-console-log.test.mjs", "test/windows-runtime-process-guard.test.mjs", "test/base-game-manager.test.mjs", "test/runtime-layout.test.mjs", "test/runtime-basegame-state.test.mjs", "test/runtime-http-integration.test.mjs", "test/server-instance-store.test.mjs", "test/server-instance-runtime.test.mjs", "test/windows-process-ownership.test.mjs", "test/windows-native-process-inspection.test.mjs", "test/windows-process-inspection-timeout.test.mjs"], { encoding: "utf8" });
 process.stdout.write(behavior.stdout || "");
 process.stderr.write(behavior.stderr || "");
 if (behavior.status !== 0) {
