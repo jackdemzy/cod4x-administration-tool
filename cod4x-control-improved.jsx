@@ -8,6 +8,7 @@ import { InstancePluginManager } from "./lib/instance-plugin-manager.jsx";
 import { B3DependencyPanel } from "./lib/b3-dependency-panel.jsx";
 import { InstanceB3Runtime } from "./lib/instance-b3-runtime.jsx";
 import { InstanceB3Database } from "./lib/instance-b3-database.jsx";
+import { InstanceB3Admin } from "./lib/instance-b3-admin.jsx";
 
 /**
  * COD4X CONTROL — CoD4x 21.5 Admin Panel
@@ -1359,6 +1360,7 @@ function ServerInstancesPanel({lang,executablePath,baseGamePath,platform,cod4x})
       <InstancePluginManager instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceB3Runtime instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceB3Database instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
+      <InstanceB3Admin instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <div style={{display:"flex",gap:7,flexWrap:"wrap",marginTop:8}}>
         <button style={buttonStyle} disabled={busy||active||instance.platform!==hostPlatform} onClick={()=>request(`/api/instances/${instance.id}/start`,"POST")}>Start</button>
         <button style={buttonStyle} disabled={busy||!active} onClick={()=>request(`/api/instances/${instance.id}/stop`,"POST")}>Stop</button>
