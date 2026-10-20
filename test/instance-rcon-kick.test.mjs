@@ -6,8 +6,9 @@ const HEADER = 'map     : mp_crash\n\nnum score ping playerid            steamid
 const row = (slot, playerid, name, address = '203.0.113.7:28960') => `${String(slot).padStart(3)}     0   48 ${playerid.padEnd(19)} 7654321           ${name}^7                            0 ${address.padEnd(52)} 1234 25000\n`;
 const status = (...rows) => HEADER + rows.join('');
 
-function service({ statuses = [], running = true, kickError = null } = {}) {
+function service({ statuses = [], running = true, kickError = null, lockAfterScopes = Infinity } = {}) {
   const kicks = [], audits = [], commands = [];
+  const vault = { scopes: 0 };
   const client = {
     async execute(password, command) { commands.push(command); if (command !== 'status') throw new Error('unexpected'); return { text: statuses.shift() ?? status(), latencyMs: 1, packets: 1 }; },
     async kick(password, slot, reason) { kicks.push({ slot, reason, password: password.toString() }); if (kickError) throw Object.assign(new Error(kickError), { code: kickError }); return { text: '', latencyMs: 1 }; },
@@ -16,12 +17,12 @@ function service({ statuses = [], running = true, kickError = null } = {}) {
   const rcon = new InstanceRconService({
     resolveInstance: id => ({ id, port: 28960 }),
     runtimeFor: async () => ({ reconcileRuntimeState: async () => {}, state: running ? { status: 'RUNNING', pid: 42, runId: 'run-1' } : { status: 'STOPPED', pid: null, runId: null } }),
-    credentialService: { withRuntimeCredentials: async (id, fn) => fn({ rcon: Buffer.from('Kick-Rcon-123') }, new AbortController().signal) },
+    credentialService: { withRuntimeCredentials: async (id, fn) => { if (++vault.scopes > lockAfterScopes) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' }); return fn({ rcon: Buffer.from('Kick-Rcon-123') }, new AbortController().signal); } },
     audit: (level, event, details) => audits.push({ level, event, ...details }),
     clientFactory: () => client,
     sleep: async () => {},
   });
-  return { rcon, kicks, audits, commands };
+  return { rcon, kicks, audits, commands, vault };
 }
 
 test('kick verifies the target, kicks the slot and confirms it left', async () => {
@@ -79,4 +80,44 @@ test('a kick can be verified by exact name alone, never by nothing', async () =>
   ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf'))] });
   await assert.rejects(ctx.rcon.kick('srv', { slot: 3, name: 'Wolfgang' }, 'a'), { code: 'RCON_KICK_TARGET_CHANGED' });
   await assert.rejects(service().rcon.kick('srv', { slot: 3, playerid: '…7890' }, 'a'), { code: 'RCON_KICK_INVALID' });
+});
+
+// --- Review fixes -----------------------------------------------------------------
+test('R2: a kick without a server reply is still confirmed by status', async () => {
+  const ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf')), status()], kickError: 'RCON_TIMEOUT' });
+  assert.deepEqual(await ctx.rcon.kick('srv', { slot: 3, playerid: '1234567890' }, 'a'), { kicked: true, slot: 3 });
+});
+
+test('R2: each confirmation uses its own short vault scope; a lock after sending reports NOT_CONFIRMED', async () => {
+  let ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf')), status(row(3, '1234567890', 'Wolf')), status()] });
+  await ctx.rcon.kick('srv', { slot: 3, playerid: '1234567890' }, 'a');
+  assert.equal(ctx.vault.scopes, 3, 'check+kick in one scope, then one scope per confirmation');
+  ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf'))], lockAfterScopes: 1 });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 3, playerid: '1234567890' }, 'a'), { code: 'RCON_KICK_NOT_CONFIRMED' });
+  assert.equal(ctx.kicks.length, 1);
+});
+
+test('R8: a status reply without the player header never counts as confirmation', async () => {
+  const ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf')), 'map     : mp_crash\n', 'map     : mp_crash\n', 'map     : mp_crash\n'] });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 3, playerid: '1234567890' }, 'a'), { code: 'RCON_KICK_NOT_CONFIRMED' });
+});
+
+test('R1/R9: findOnline is cached briefly and ignores ZMBI and CNCT rows', async () => {
+  const ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf'), row(4, '2222222222', 'Joiner').replace('   48 ', ' CNCT '), row(5, '3333333333', 'Gone').replace('   48 ', ' ZMBI '))] });
+  assert.deepEqual([...(await ctx.rcon.findOnline('srv')).entries()], [['1234567890', 3]]);
+  await ctx.rcon.findOnline('srv');
+  assert.equal(ctx.commands.length, 1, 'second lookup within the cache window sends nothing');
+});
+
+test('R6: IPv6 addresses are masked without losing the prefix', async () => {
+  const ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf', '[2001:db8::7]:28960'))] });
+  assert.equal((await ctx.rcon.online('srv')).players[0].address, '2001:db8::x');
+});
+
+test('R11: non-string JSON fields are refused before any I/O', async () => {
+  const ctx = service();
+  for (const target of [{ slot: '3', playerid: '1' }, { slot: 3, playerid: 5 }, { slot: 3, name: 5 }, { slot: 3, playerid: '1', reason: 5 }, { slot: 3.5, playerid: '1' }]) {
+    await assert.rejects(ctx.rcon.kick('srv', target, 'a'), { code: 'RCON_KICK_INVALID' }, JSON.stringify(target));
+  }
+  assert.equal(ctx.commands.length, 0);
 });

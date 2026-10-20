@@ -31,3 +31,8 @@ test('kick buttons and a bounded reason field only with server.manage', { skip }
   assert.equal((html.match(/>Kicken<\/button>/g) || []).length, 2);
   assert.match(html, /maxLength="126"|maxlength="126"/i);
 });
+
+test('R4: kick reasons are not shown pre-filled for a slot after a reload', { skip }, async () => {
+  const { reasonsAfterLoad } = await import('../lib/online-players-state.mjs');
+  assert.deepEqual(reasonsAfterLoad({ 3: 'Cheating' }), {});
+});

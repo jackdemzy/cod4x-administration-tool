@@ -116,3 +116,12 @@ test('15b: online B3 players get a kick button; the ban dialog offers kick now',
   assert.equal(actionMessage('ban', { id: 1, kick: 'kicked' }, true), 'Ban gespeichert, Spieler gekickt.');
   assert.equal(actionMessage('ban', { id: 1, kick: 'not_online' }, true), 'Ban gespeichert; Spieler ist nicht online.');
 });
+
+test('R5: kicks from B3 rows ask first; ban-and-kick passes the ban reason when it is a valid kick reason', { skip }, async () => {
+  const { kickReasonFromBan } = await import('../lib/b3-admin-messages.mjs');
+  assert.equal(kickReasonFromBan('Wallhack'), 'Wallhack');
+  assert.equal(kickReasonFromBan('50% aimbot; obvious'), '');
+  assert.equal(kickReasonFromBan('x'.repeat(200)), '');
+  const online = await view(base({ players: { total: 1, offset: 0, limit: 50, rows: [{ ...player, online: { slot: 3 } }] }, kickFor: { ...player, online: { slot: 3 } } }));
+  assert.match(online, /Tester jetzt vom Server kicken\?/);
+});

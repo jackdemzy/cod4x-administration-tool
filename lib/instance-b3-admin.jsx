@@ -53,7 +53,7 @@ export function InstanceB3Admin({ instance, request, de, initial = null }) {
     <td>{player.guid}</td><td>{player.ip}</td><td>{player.group ?? '—'}</td><td>{player.connections}</td><td>{when(player.lastSeen)}</td>
     {manage && <td>
       <button disabled={busy} onClick={() => patch({ banFor: player })}>{de ? 'Bannen' : 'Ban'}</button>
-      {player.online && <button disabled={busy} title={`Slot ${player.online.slot}`} onClick={() => act('kick', `players/${player.id}/kick`, { reason: '' })}>{de ? 'Kicken' : 'Kick'}</button>}
+      {player.online && <button disabled={busy} title={`Slot ${player.online.slot}`} onClick={() => patch({ kickFor: player })}>{de ? 'Kicken' : 'Kick'}</button>}
       <button disabled={busy} onClick={() => act('unban', `players/${player.id}/unban`, {})}>{de ? 'Ban aufheben' : 'Lift ban'}</button>
       <select aria-label={de ? 'Gruppe' : 'Group'} disabled={busy || state.b3Running} defaultValue="" onChange={event => patch({ groupFor: { player, groupId: Number(event.target.value) } })}>
         <option value="" disabled>{de ? 'Gruppe…' : 'Group…'}</option>
@@ -97,6 +97,11 @@ export function InstanceB3Admin({ instance, request, de, initial = null }) {
         <p>{de ? 'Aliase' : 'Aliases'}: {state.detail.aliases.map(entry => `${entry.alias} (${entry.used}×)`).join(', ') || '—'}</p>
         <p>{de ? 'IP-Historie' : 'IP history'}: {state.detail.ips.map(entry => `${entry.ip} (${entry.used}×, ${when(entry.lastSeen)})`).join(', ') || '—'}</p>
         <button onClick={() => patch({ detail: null })}>{de ? 'Schließen' : 'Close'}</button>
+      </section>}
+      {manage && state.kickFor && <section role="dialog">
+        <p>{de ? `${state.kickFor.name} jetzt vom Server kicken?` : `Kick ${state.kickFor.name} from the server now?`}</p>
+        <button disabled={busy} onClick={() => act('kick', `players/${state.kickFor.id}/kick`, { reason: '' }).then(() => patch({ kickFor: null }))}>{de ? 'Ja, kicken' : 'Yes, kick'}</button>
+        <button onClick={() => patch({ kickFor: null })}>{de ? 'Abbrechen' : 'Cancel'}</button>
       </section>}
       {manage && state.banFor && <form onSubmit={event => { event.preventDefault(); const minutes = ban.kind === 'TempBan' ? Number(ban.amount) * UNITS[ban.unit] : undefined;
         void act('ban', `players/${state.banFor.id}/ban`, { kind: ban.kind, ...(minutes ? { durationMinutes: minutes } : {}), reason: ban.reason, kick: ban.kick })

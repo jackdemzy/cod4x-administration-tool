@@ -15,4 +15,14 @@ Design: `docs/superpowers/specs/2026-10-20-live-kick-design.md`. Plan: `docs/sup
 
 ### Native check
 
-`scripts/verify-4.18.14-kick-native.mjs` passed 7/7 against the real CoD4x 21.2 Linux core with two bots (`developer 1`, `developer_script 1`, `scr_testclients 2`): both bots listed; a wrong playerid and a wrong name were refused without kicking; slot 1 was kicked and confirmed, only bot0 remained; an empty slot was refused; the console still blocked `clientkick 0`, `kick all` and `onlykick 0`; the audit carried slots only.
+`scripts/verify-4.18.14-kick-native.mjs` passed 8/8 against the real CoD4x 21.2 Linux core with two bots (`developer 1`, `developer_script 1`, `scr_testclients 2`): both bots listed; a wrong playerid and a wrong name were refused without kicking; slot 1 was kicked and confirmed, only bot0 remained; an empty slot was refused; the console still blocked `clientkick 0`, `kick all` and `onlykick 0`; eBc-B3's own cod4x parser reads the CoD4x playerid column as guid (basis of the B3 kick); the audit carried slots only.
+
+### Review before the PR (superpowers:requesting-code-review)
+
+Important findings fixed with regression tests:
+
+- The B3 list views no longer query RCON on every load: `findOnline` is cached for 3 s with a short timeout and ignores connecting (CNCT) and dropped (ZMBI) clients.
+- A kick that gets no RCON reply is still confirmed by `status`; check + kick share one short vault scope and each confirmation has its own (pauses happen outside the vault); a failure after the kick was sent is reported as `RCON_KICK_NOT_CONFIRMED`, and a `status` reply without the player table never counts as confirmation.
+- The assumption B3 guid = CoD4x playerid is now proven natively with eBc-B3's own cod4x parser.
+
+Minor fixes: typed kick reasons are cleared on reload (slots are reused), B3 kicks ask for confirmation, ban-and-kick shows the ban reason to the player when CoD4x can carry it, IPv6 addresses are masked per group, tests for non-string JSON fields. The kick reason rule lives in the browser-safe `lib/kick-reason.mjs`.

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { InstanceRconService } from "../lib/instance-rcon-service.mjs";
 
 // Native Block 15b check on Linux with the real CoD4x core: two bots
@@ -50,6 +50,13 @@ try {
   const consoleBlocked = [];
   for (const input of ["clientkick 0", "kick all", "onlykick 0"]) consoleBlocked.push(await rcon.execute("kick-native", input, "native").then(() => "sent", error => error.code));
   check("RCON console still blocks kick commands; bot0 stays", consoleBlocked.every(code => code === "RCON_COMMAND_BLOCKED") && (await names()).includes("0:bot0"), consoleBlocked.join(","));
+  // B3 kick / ban-and-kick match B3 guid = CoD4x playerid: prove it with eBc-B3's own parser.
+  const python = process.env.B3_PYTHON || path.join(os.homedir(), ".pyenv/versions/2.7.18/bin/python2.7");
+  const b3Path = process.env.B3_SOURCE || path.join(os.homedir(), "ebc-b3");
+  const parsed = spawnSync(python, ["-E", "-c", "import sys; sys.path.insert(0, sys.argv[1]); from b3.parsers.cod4x import Cod4XParser; m = Cod4XParser._regPlayer.match(sys.argv[2].strip()); print(m.group('guid') + ' ' + m.group('slot'))",
+    b3Path, "  3    12   48 1234567890          7654321           ^1Big ^7Bad Wolf 42^7                       0 203.0.113.7:28960                                     1234 25000"], { encoding: "utf8" });
+  if (parsed.status === 0) check("eBc-B3's cod4x parser reads the CoD4x playerid column as guid", parsed.stdout.trim() === "1234567890 3", parsed.stdout.trim());
+  else console.log("SKIP eBc-B3 guid mapping check: Python 2.7 or eBc-B3 not found");
   check("Kick audit carries slots only", audits.filter(entry => entry.event === "rcon.kick").length === 4 && !/bot0|bot1|Native kick test|127\.0\.0\.1/.test(JSON.stringify(audits.filter(entry => entry.event === "rcon.kick"))));
 } catch (error) {
   check("Unexpected error", false, `${error.code || ""} ${error.message}`);

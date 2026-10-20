@@ -159,6 +159,8 @@ test('kick action resolves guid and slot; offline players are refused', async ()
   await fixture(async ({ service }) => {
     assert.deepEqual(await service.kick('server-a', 7, 'AFK', 'admin1'), { kicked: true, slot: 5 });
     assert.deepEqual(rcon.kicks, [{ id: 'server-a', target: { slot: 5, playerid: GUID, reason: 'AFK' }, actor: 'admin1' }]);
+    await service.addBan('server-a', 7, { kind: 'Ban', reason: 'Wallhack', kick: true }, 'admin1');
+    assert.equal(rcon.kicks.at(-1).target.reason, 'Wallhack', 'ban-and-kick shows the ban reason to the player');
   }, { rcon });
   await fixture(async ({ service }) => {
     await assert.rejects(service.kick('server-a', 7, '', 'admin1'), { code: 'RCON_KICK_NOT_ONLINE' });
