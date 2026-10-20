@@ -165,3 +165,38 @@ test('credential mutations reject unsupported kinds, invalid values, unknown ins
   assert.equal((await service.instanceStatus('server-b')).rcon.configured, false);
   service.lock();
 }));
+
+test('b3db accepts a DB password and rejects @', () => fixture(async service => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  let snapshot = await service.status();
+  for (const value of ['pass@word1', 'pass word1', 'short']) {
+    await assert.rejects(service.set('server-a', 'b3db', { value, expectedSha256: snapshot.sha256 }), error => {
+      assert.equal(error.code, 'CREDENTIAL_INVALID'); assert.ok(!error.message.includes(value)); return true;
+    });
+  }
+  snapshot = await service.set('server-a', 'b3db', { value: 'Db-Pass:/x+1', expectedSha256: snapshot.sha256 });
+  const status = await service.instanceStatus('server-a');
+  assert.equal(status.b3db.configured, true);
+  assert.ok(!JSON.stringify(status).includes('Db-Pass'));
+  service.lock();
+}));
+
+test('b3db is returned in the runtime credential scope and wiped afterwards', () => fixture(async service => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  await service.set('server-a', 'b3db', { value: 'Db-Pass-123!', expectedSha256: (await service.status()).sha256 });
+  let supplied;
+  await service.withRuntimeCredentials('server-a', async credentials => { supplied = credentials; assert.equal(credentials.b3db.toString(), 'Db-Pass-123!'); });
+  assert.ok(supplied.b3db.every(value => value === 0));
+  await service.withRuntimeCredentials('server-b', async credentials => assert.equal(credentials.b3db, null));
+  service.lock();
+}));
+
+test('decoding an existing vault without b3db still works', () => fixture(async (service, root, resolveInstance) => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  await service.set('server-a', 'rcon', { value: 'Old-Rcon-123!', expectedSha256: (await service.status()).sha256 });
+  const restarted = new InstanceCredentialService({ dataRoot: root, resolveInstance });
+  await restarted.unlock(passphrase);
+  const status = await restarted.instanceStatus('server-a');
+  assert.deepEqual([status.rcon.configured, status.b3db.configured], [true, false]);
+  restarted.lock(); service.lock();
+}));
