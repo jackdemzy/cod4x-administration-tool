@@ -1,6 +1,6 @@
 # Entwicklungsstand vor dem ersten GitHub-Upload
 
-Status: 2026-10-20. Version 4.18.12. COD4X CONTROL / COD4X Administration Tool is still in development. Block 14 (B3 Database) is implemented from the approved design (docs/superpowers/specs/2026-10-20-b3-database-design.md) with TDD and passed two whole-branch reviews (superpowers:requesting-code-review); all important findings are fixed with regression tests. Block 13 (B3 Manager) was reviewed with /engineering:code-review.
+Status: 2026-10-20. Version 4.18.13. COD4X CONTROL / COD4X Administration Tool is still in development. Block 15 (B3 In-Game Administration) is implemented from the approved design (docs/superpowers/specs/2026-10-20-b3-admin-design.md) with TDD; the review before the PR is pending. Next: Block 15b (live kick).
 
 Last run: node scripts/preflight-4.18.12.mjs on Windows, exit 0 (278 tests: 270 PASS / 0 FAIL / 8 SKIP), and in WSL COD4X-Test (Node 18), exit 0 (278 tests: 259 PASS / 0 FAIL / 19 SKIP, including the native MySQL check). The native B3 database check (scripts/verify-4.18.12-b3-database-native.mjs) passed 15/15 in WSL against the dedicated MariaDB 10.11 test database b3_control_test (Python 2.7.18, PyMySQL 0.10.1, eBc-B3 9096624), including a real B3 start against MySQL.
 
