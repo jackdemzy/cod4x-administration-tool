@@ -54,3 +54,19 @@ test('secret CVAR values are redacted from arguments, process info and output', 
   const first = redactRuntimeOutput('x +set rcon_password Redact-');
   assert.ok(!redactRuntimeOutput(first + 'Me-123 +map\n').includes('Me-123'));
 });
+
+// --- Block 15b: separate, verified kick packet; the console stays closed --------
+import { buildKickPacket, validKickReason } from '../lib/rcon-protocol.mjs';
+test('kick packet carries only a numeric slot and a checked reason', () => {
+  const password = Buffer.from('Kick-Rcon-123');
+  assert.equal(buildKickPacket(password, 7, 'Cheating').subarray(4).toString('latin1'), 'rcon Kick-Rcon-123 clientkick 7 Cheating');
+  assert.equal(buildKickPacket(password, 0, '').subarray(4).toString('latin1'), 'rcon Kick-Rcon-123 clientkick 0');
+  assert.equal(buildKickPacket(password, 63).subarray(4).toString('latin1'), 'rcon Kick-Rcon-123 clientkick 63');
+  for (const slot of [64, -1, 1.5, 'all', '7', null]) assert.throws(() => buildKickPacket(password, slot, ''), { code: 'RCON_KICK_INVALID' }, String(slot));
+  for (const reason of ['"x"', 'a;b', '50%', 'a/b', 'a\b', 'line\nbreak', 'x'.repeat(127), 'ümlaut']) assert.throws(() => validKickReason(reason), { code: 'RCON_KICK_INVALID' }, reason);
+  assert.equal(validKickReason('  AFK too long  '), 'AFK too long');
+});
+
+test('the console allowlist still rejects every kick form', () => {
+  for (const input of ['clientkick 0', 'kick all', 'kick 1', 'onlykick 1', 'clientkick 0 reason']) assert.throws(() => normalizeRconCommand(input), { code: 'RCON_COMMAND_BLOCKED' }, input);
+});

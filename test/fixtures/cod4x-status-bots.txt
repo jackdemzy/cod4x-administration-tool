@@ -1,0 +1,12 @@
+hostname: ^5CoD4Host
+version : CoD4 X - linux-i386-custom build 1154 May  1 2022
+udp/ip  : 127.0.0.1:28976
+os      : linux
+type    : dedicated server
+map     : mp_backlot
+
+num score ping playerid            steamid           name                             lastmsg address                                              qport rate
+--- ----- ---- ------------------- ----------------- -------------------------------- ------- ---------------------------------------------------- ----- -----
+  0     0    0 0                   0                 bot0^7                                   0 bot                                                  35692 100000
+  1     0    0 0                   0                 bot1^7                                   0 bot                                                  15598 100000
+
