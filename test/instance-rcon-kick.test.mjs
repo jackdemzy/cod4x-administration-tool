@@ -72,3 +72,11 @@ test('findOnline maps unique playerids to slots and never throws', async () => {
   assert.deepEqual([...(await rcon.findOnline('srv')).entries()], [['1234567890', 3]]);
   assert.equal(await service({ running: false }).rcon.findOnline('srv'), null);
 });
+
+test('a kick can be verified by exact name alone, never by nothing', async () => {
+  let ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf')), status()] });
+  assert.deepEqual(await ctx.rcon.kick('srv', { slot: 3, name: 'Wolf' }, 'a'), { kicked: true, slot: 3 });
+  ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf'))] });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 3, name: 'Wolfgang' }, 'a'), { code: 'RCON_KICK_TARGET_CHANGED' });
+  await assert.rejects(service().rcon.kick('srv', { slot: 3, playerid: '…7890' }, 'a'), { code: 'RCON_KICK_INVALID' });
+});

@@ -9,6 +9,7 @@ import { B3DependencyPanel } from "./lib/b3-dependency-panel.jsx";
 import { InstanceB3Runtime } from "./lib/instance-b3-runtime.jsx";
 import { InstanceB3Database } from "./lib/instance-b3-database.jsx";
 import { InstanceB3Admin } from "./lib/instance-b3-admin.jsx";
+import { InstanceOnlinePlayers } from "./lib/instance-online-players.jsx";
 
 /**
  * COD4X CONTROL — CoD4x 21.5 Admin Panel
@@ -1356,6 +1357,7 @@ function ServerInstancesPanel({lang,executablePath,baseGamePath,platform,cod4x})
       <InstanceConfigEditor instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceCredentialEditor instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceRconConsole instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
+      <InstanceOnlinePlayers instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceMasterStatus instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstancePluginManager instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceB3Runtime instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
