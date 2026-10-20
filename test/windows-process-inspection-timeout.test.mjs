@@ -22,4 +22,7 @@ test('Windows process inspection allows a slow PowerShell cold start', async () 
   const powershell = calls.find(call => call.file === 'powershell.exe');
   assert.ok(powershell, 'PowerShell CIM inspection was not called');
   assert.ok(powershell.options.timeout >= 10_000, `PowerShell timeout ${powershell.options.timeout} ms is too short for a cold start`);
+  // Upper bound: stop/recovery hold the instance lock while inspecting.
+  assert.ok(powershell.options.timeout <= 15_000, `PowerShell timeout ${powershell.options.timeout} ms would hold the instance lock too long`);
+  assert.equal(calls.find(call => call.file === 'tasklist.exe')?.options.timeout, 3000);
 });

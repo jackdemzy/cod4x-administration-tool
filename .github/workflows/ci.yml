@@ -47,20 +47,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Preflight (Linux)
-        if: runner.os == 'Linux'
+      - name: Preflight
         run: npm run preflight
-
-      # test/windows-native-process-inspection.test.mjs can hit its 3 s PowerShell
-      # timeout on a cold start (fails closed). Retry once; a real failure fails twice.
-      - name: Preflight (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          npm run preflight || {
-            echo "::warning::Preflight failed once; retrying (known PowerShell cold-start timing in the native CIM inspection test)."
-            npm run preflight
-          }
 
       - name: Build
         run: npm run build
