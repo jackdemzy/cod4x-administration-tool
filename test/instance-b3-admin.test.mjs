@@ -48,7 +48,7 @@ test('set group is disabled while B3 runs, with the reason', { skip }, async () 
 test('the ban dialog says when the ban takes effect', { skip }, async () => {
   const html = await view(base({ banFor: player }));
   assert.match(html, /wirkt beim nächsten Connect/);
-  assert.match(html, /verbundener Spieler wird nicht gekickt/);
+  assert.match(html, /ohne Kick spielt ein gerade verbundener Spieler weiter/);
 });
 
 test('player detail shows aliases and IP history', { skip }, async () => {
@@ -103,4 +103,16 @@ test('R5: lifting without an active ban says so', { skip }, async () => {
   const { actionMessage } = await import('../lib/b3-admin-messages.mjs');
   assert.equal(actionMessage('unban', { affected: 0 }, true), 'Kein aktiver Ban für diesen Spieler.');
   assert.equal(actionMessage('unban', { affected: 2 }, true), '2 Ban(s) aufgehoben.');
+});
+
+test('15b: online B3 players get a kick button; the ban dialog offers kick now', { skip }, async () => {
+  const online = await view(base({ players: { total: 1, offset: 0, limit: 50, rows: [{ ...player, online: { slot: 3 } }] } }));
+  assert.match(online, />Kicken<\/button>/);
+  const offline = await view(base({ players: { total: 1, offset: 0, limit: 50, rows: [{ ...player, online: false }] } }));
+  assert.ok(!offline.includes('>Kicken</button>'));
+  assert.match(await view(base({ banFor: player })), /Spieler sofort kicken/);
+  const { B3_ADMIN_MESSAGES, actionMessage } = await import('../lib/b3-admin-messages.mjs');
+  for (const code of ['RCON_KICK_NOT_ONLINE', 'RCON_KICK_TARGET_CHANGED', 'RCON_KICK_INVALID', 'RCON_KICK_NOT_CONFIRMED', 'RCON_UNAVAILABLE', 'RCON_SERVER_NOT_RUNNING']) assert.equal(B3_ADMIN_MESSAGES[code]?.length, 2, code);
+  assert.equal(actionMessage('ban', { id: 1, kick: 'kicked' }, true), 'Ban gespeichert, Spieler gekickt.');
+  assert.equal(actionMessage('ban', { id: 1, kick: 'not_online' }, true), 'Ban gespeichert; Spieler ist nicht online.');
 });

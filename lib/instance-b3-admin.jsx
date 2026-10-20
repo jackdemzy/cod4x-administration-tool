@@ -14,7 +14,7 @@ export function InstanceB3Admin({ instance, request, de, initial = null }) {
   const [search, setSearch] = useState(''), [filter, setFilter] = useState({ type: 'any', status: 'active' });
   // The search and filter that produced the shown page (reloads after actions reuse them).
   const view = useRef({ search: '', filter: { type: 'any', status: 'active' }, offset: 0 });
-  const [ban, setBan] = useState({ kind: 'TempBan', amount: 1, unit: 'days', reason: '' });
+  const [ban, setBan] = useState({ kind: 'TempBan', amount: 1, unit: 'days', reason: '', kick: true });
   const mounted = useRef(true);
   const base = `/api/instances/${encodeURIComponent(instance.id)}`;
   const patch = values => { if (mounted.current) setState(current => ({ ...current, ...values })); };
@@ -53,6 +53,7 @@ export function InstanceB3Admin({ instance, request, de, initial = null }) {
     <td>{player.guid}</td><td>{player.ip}</td><td>{player.group ?? '—'}</td><td>{player.connections}</td><td>{when(player.lastSeen)}</td>
     {manage && <td>
       <button disabled={busy} onClick={() => patch({ banFor: player })}>{de ? 'Bannen' : 'Ban'}</button>
+      {player.online && <button disabled={busy} title={`Slot ${player.online.slot}`} onClick={() => act('kick', `players/${player.id}/kick`, { reason: '' })}>{de ? 'Kicken' : 'Kick'}</button>}
       <button disabled={busy} onClick={() => act('unban', `players/${player.id}/unban`, {})}>{de ? 'Ban aufheben' : 'Lift ban'}</button>
       <select aria-label={de ? 'Gruppe' : 'Group'} disabled={busy || state.b3Running} defaultValue="" onChange={event => patch({ groupFor: { player, groupId: Number(event.target.value) } })}>
         <option value="" disabled>{de ? 'Gruppe…' : 'Group…'}</option>
@@ -98,14 +99,15 @@ export function InstanceB3Admin({ instance, request, de, initial = null }) {
         <button onClick={() => patch({ detail: null })}>{de ? 'Schließen' : 'Close'}</button>
       </section>}
       {manage && state.banFor && <form onSubmit={event => { event.preventDefault(); const minutes = ban.kind === 'TempBan' ? Number(ban.amount) * UNITS[ban.unit] : undefined;
-        void act('ban', `players/${state.banFor.id}/ban`, { kind: ban.kind, ...(minutes ? { durationMinutes: minutes } : {}), reason: ban.reason })
+        void act('ban', `players/${state.banFor.id}/ban`, { kind: ban.kind, ...(minutes ? { durationMinutes: minutes } : {}), reason: ban.reason, kick: ban.kick })
           .then(ok => { if (ok) { patch({ banFor: null }); setBan(current => ({ ...current, reason: '' })); } }); }}>
         <h4>{de ? 'Bannen' : 'Ban'}: {state.banFor.name}</h4>
         <select aria-label={de ? 'Art' : 'Kind'} value={ban.kind} onChange={event => setBan({ ...ban, kind: event.target.value })}><option value="TempBan">TempBan</option><option value="Ban">{de ? 'Permanent' : 'Permanent'}</option></select>
         {ban.kind === 'TempBan' && <><input type="number" min="1" aria-label={de ? 'Dauer' : 'Duration'} value={ban.amount} onChange={event => setBan({ ...ban, amount: event.target.value })} />
           <select aria-label={de ? 'Einheit' : 'Unit'} value={ban.unit} onChange={event => setBan({ ...ban, unit: event.target.value })}><option value="minutes">{de ? 'Minuten' : 'minutes'}</option><option value="hours">{de ? 'Stunden' : 'hours'}</option><option value="days">{de ? 'Tage' : 'days'}</option></select></>}
         <input aria-label={de ? 'Grund' : 'Reason'} maxLength={255} required value={ban.reason} onChange={event => setBan({ ...ban, reason: event.target.value })} />
-        <p>{de ? 'Der Ban wirkt beim nächsten Connect; ein gerade verbundener Spieler wird nicht gekickt.' : 'The ban applies on the next connect; a connected player is not kicked.'}</p>
+        <label><input type="checkbox" checked={ban.kick} onChange={event => setBan({ ...ban, kick: event.target.checked })} /> {de ? 'Spieler sofort kicken (falls online)' : 'Kick the player now (if online)'}</label>
+        <p>{de ? 'Der Ban wirkt beim nächsten Connect; ohne Kick spielt ein gerade verbundener Spieler weiter.' : 'The ban applies on the next connect; without a kick, a connected player keeps playing.'}</p>
         <button type="submit" disabled={busy}>{de ? 'Ban speichern' : 'Save ban'}</button>
         <button type="button" onClick={() => patch({ banFor: null })}>{de ? 'Abbrechen' : 'Cancel'}</button>
       </form>}
