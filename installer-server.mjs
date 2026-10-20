@@ -35,6 +35,7 @@ import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
 import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
 import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
+import { InstanceB3DatabaseService } from "./lib/instance-b3-database-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
@@ -2269,13 +2270,18 @@ async function b3ServerStatus(id) {
   try { await new RconClient({ port: status.port, timeoutMs: 800 }).probe(); return { status: "RUNNING", reachable: true }; }
   catch { return { status: "RUNNING", reachable: false }; }
 }
-const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
+// Block 14: per-instance B3 database (settings, test, verified backup, migration).
+// Events carry codes only, never the password or DSN.
+const b3DatabaseService = new InstanceB3DatabaseService({ store: instanceStore, credentials: credentialService, environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, entry) });
+const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
 instanceManager = new ServerInstanceManager({
   store: instanceStore,
   credentialService,
   rconService,
   masterService,
   b3Service,
+  // A changed or removed b3db password requires a new database test.
+  onCredentialChanged: (id, kind) => { if (kind === "b3db") b3DatabaseService.invalidate(id).catch(() => {}); },
   legacyRuntime: defaultRuntime,
   runtimeFactory: (instance, options) => createRuntimeManager({
     ...runtimeDependencies,
@@ -2304,7 +2310,7 @@ function instanceRoute(action, status = 200) {
       res.status(status).json({ ok: true, correlationId, ...result });
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
-      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING"].includes(error.code) ? 409 : error.code === "INSTANCE_NETWORK_CONFIRMATION_REQUIRED" ? 428 : 400;
+      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
       res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
     }
   };
@@ -2445,6 +2451,10 @@ app.get("/api/instances/:id/b3/config", requirePermission("config.manage"), inst
 app.post("/api/instances/:id/b3/start", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id) })));
 app.post("/api/instances/:id/b3/stop", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.stop(req.params.id) })));
 app.post("/api/instances/:id/b3/restart", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id, true) })));
+app.get("/api/instances/:id/b3/database", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.read(req.params.id) })));
+app.post("/api/instances/:id/b3/database", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.save(req.params.id, req.body) })));
+app.post("/api/instances/:id/b3/database/test", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.test(req.params.id) })));
+app.post("/api/instances/:id/b3/database/migrate", requirePermission("server.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.migrate(req.params.id, { ebcOptIn: req.body?.ebcOptIn === true, confirmation: typeof req.body?.confirmation === "string" ? req.body.confirmation : undefined }) })));
 // Logical deletion is recoverable: move owned home to .trash, never recursively erase it.
 app.delete("/api/instances/:id", requirePermission("server.manage"), instanceRoute(async req => ({ archive: await instanceManager.archive(req.params.id) })));
 
