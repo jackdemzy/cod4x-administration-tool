@@ -24,7 +24,8 @@ test('credential editor renders only password inputs, never renders supplied cre
 }, async () => {
   const render = await renderer();
   const html = render({ instance: { id: 'test', rcon: { value: 'private-test-secret' }, master: { value: 'private-master-secret' }, runtime: { status: 'STOPPED' } }, de: true, request: () => { throw new Error('SSR must not fetch'); } });
-  assert.equal((html.match(/type="password"/g) || []).length, 4);
+  assert.equal((html.match(/type="password"/g) || []).length, 5);
+  assert.match(html, /B3-Datenbank-Passwort/);
   assert.ok(!html.includes('private-test-secret')); assert.ok(!html.includes('private-master-secret'));
   assert.match(html, /noch nicht an die Runtime angebunden/);
   assert.match(html, /autocomplete="new-password"/i);

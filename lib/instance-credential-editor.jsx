@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 // Only invalidation callbacks live here, never credentials or passphrases.
 const editors = new Set();
-const KINDS = ['rcon', 'master', 'join'];
+const KINDS = ['rcon', 'master', 'join', 'b3db'];
 const ERROR_CODES = new Set(['VAULT_LOCKED', 'VAULT_CONFLICT', 'VAULT_EXISTS', 'VAULT_OPERATION_BUSY', 'VAULT_UNLOCK_FAILED',
   'VAULT_PASSPHRASE_INVALID', 'CREDENTIAL_INVALID', 'INSTANCE_RUNTIME_BUSY', 'INSTANCE_OPERATION_BUSY']);
 
@@ -14,7 +14,7 @@ export function InstanceCredentialEditor({ instance, request, de }) {
   const revision = useRef(0);
   const active = Boolean(instance.runtime?.pid || instance.runtime?.recoveryBlocked || ['STARTING', 'RUNNING', 'STOPPING'].includes(instance.runtime?.status));
   const unlocked = credentials?.initialized === true && credentials.locked === false;
-  const labels = { rcon: 'RCON', master: de ? 'Master-Token' : 'Master token', join: de ? 'Join-Passwort' : 'Join password' };
+  const labels = { rcon: 'RCON', master: de ? 'Master-Token' : 'Master token', join: de ? 'Join-Passwort' : 'Join password', b3db: de ? 'B3-Datenbank-Passwort' : 'B3 database password' };
   function clearInputs() {
     if (passphrase.current) passphrase.current.value = '';
     for (const input of Object.values(secrets.current)) if (input) input.value = '';
