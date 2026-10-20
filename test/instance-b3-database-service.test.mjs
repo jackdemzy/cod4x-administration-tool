@@ -379,3 +379,57 @@ test('a password stored before the settings must be entered again', async () => 
     assert.equal(calls.length, 0);
   });
 });
+
+// --- Second review suggestions -------------------------------------------------
+test('S1: B3 start and migration exclude each other through the start guard', async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await fixture({ probe: [{ tables: complete() }] }, async ({ service }) => {
+    await service.save('server-a', SETTINGS);
+    const starting = service.withStartGuard('server-a', async () => { await gate; return 'started'; });
+    await assert.rejects(service.migrate('server-a'), { code: 'B3_DATABASE_BUSY' });
+    release();
+    assert.equal(await starting, 'started');
+    const migrating = service.test('server-a');
+    await assert.rejects(service.withStartGuard('server-a', async () => 'started'), { code: 'B3_DATABASE_BUSY' });
+    await migrating;
+  });
+});
+
+test('S2: an in-progress marker is stored before the first SQL runs', async () => {
+  const { penalties, ...partial } = complete();
+  let seen;
+  await fixture({ probe: [{ tables: partial }, { tables: complete() }], backup: [{ tables: { clients: 1 } }], apply: [{ statements: 1 }] }, async ({ service, instance }) => {
+    await service.save('server-a', SETTINGS);
+    service.helper = (inner => async (request, options) => {
+      if (request.op === 'apply') seen = JSON.parse(await fs.readFile(file(instance), 'utf8')).lastCheck;
+      return inner(request, options);
+    })(service.helper);
+    await service.migrate('server-a');
+    assert.deepEqual([seen.code, seen.ready], ['MIGRATION_IN_PROGRESS', false]);
+    assert.match(seen.backup.path, /b3-20261020T101500Z\.sql$/);
+    assert.equal((await service.read('server-a')).ready, true);
+  });
+});
+
+test('S3: removing the settings is refused while B3 runs', async () => {
+  await fixture({}, async ({ service }) => {
+    await service.save('server-a', SETTINGS);
+    await assert.rejects(service.remove('server-a'), { code: 'B3_RUNNING' });
+    assert.ok((await service.read('server-a')).settings);
+  }, { running: true });
+});
+
+test('S4: a vault lock right after a successful backup still reports the verified backup', async () => {
+  const { penalties, ...partial } = complete();
+  let vault;
+  await fixture({ probe: [{ tables: partial }], backup: [{ tables: { clients: 1 }, after: () => vault.lockNow() }] }, async context => {
+    vault = context.vault;
+    const { service, events } = context;
+    await service.save('server-a', SETTINGS);
+    const error = await service.migrate('server-a').catch(e => e);
+    assert.equal(error.code, 'VAULT_LOCKED');
+    assert.match(error.backup?.path || '', /b3-20261020T101500Z\.sql$/);
+    assert.ok(events.some(event => event.event === 'b3.database.backup_created' && event.backupSha256 === error.backup.sha256));
+  });
+});

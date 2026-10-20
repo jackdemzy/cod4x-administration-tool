@@ -60,3 +60,17 @@ test('renders no password input or value', { skip }, async () => {
   assert.match(html, /value="127\.0\.0\.1"/);
   assert.match(html, /Noch nicht getestet/);
 });
+
+test('S5: every code of the database flow has a German and an English message', { skip }, async () => {
+  const { B3_DATABASE_MESSAGES } = await import('../lib/b3-database-messages.mjs');
+  for (const code of ['DB_UNREACHABLE', 'DB_AUTH_FAILED', 'DB_ACCESS_DENIED', 'DB_NOT_FOUND', 'DB_DRIVER_MISSING', 'DB_ERROR', 'DB_HELPER_FAILED', 'DB_HELPER_TIMEOUT',
+    'SCHEMA_PARTIAL', 'SCHEMA_OUTDATED', 'MIGRATION_FAILED', 'MIGRATION_IN_PROGRESS', 'BACKUP_FAILED', 'VAULT_LOCKED', 'VAULT_OPERATION_BUSY', 'B3_DATABASE_BUSY',
+    'B3_DATABASE_PASSWORD_MISSING', 'B3_DATABASE_PASSWORD_REENTRY_REQUIRED', 'B3_DATABASE_SETTINGS_INVALID', 'B3_DATABASE_NOT_CONFIGURED', 'B3_DATABASE_NOT_READY',
+    'B3_SQL_HASH_MISMATCH', 'B3_SQL_UNSAFE', 'EBC_CONFIRMATION_REQUIRED', 'B3_RUNNING', 'B3_PYTHON_NOT_CONFIGURED', 'B3_SOURCE_NOT_CONFIGURED']) {
+    const message = B3_DATABASE_MESSAGES[code];
+    assert.ok(Array.isArray(message) && message.length === 2 && message.every(text => typeof text === 'string' && text.length > 5), code);
+  }
+  const render = await renderer();
+  const html = render('InstanceB3Database', { de: true, instance: { id: 'x' }, request: noFetch, initial: state({ connection: 'OK', schema: 'PARTIAL', code: 'MIGRATION_IN_PROGRESS', ready: false }) });
+  assert.match(html, /Migration lief/);
+});

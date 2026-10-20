@@ -33,6 +33,7 @@ Second review:
 
 - The vault scope (exclusive across all instances) now ends as soon as the helper request is written to stdin; the request buffer is wiped at that point. A long backup or apply no longer blocks RCON and server starts, and a busy vault (`VAULT_OPERATION_BUSY`) is never reported as a failed migration.
 - The b3db password is bound to the host, port and user it was entered for. After a change of these settings it is not sent anywhere until it is entered again (`B3_DATABASE_PASSWORD_REENTRY_REQUIRED`), so the write-only vault secret cannot be read out by pointing the test at another server.
+- Review suggestions, all with tests: B3 start holds the database service's per-instance lock across the readiness check, `b3.xml` and the spawn, so no migration can start in between (and vice versa); a `MIGRATION_IN_PROGRESS` marker is stored before the first SQL, so a backend crash mid-migration fails closed (restored if nothing ran); removing the database settings is refused while B3 runs; a backup that finished right before a vault lock is still verified and reported; every code of the flow has a German and English message (`lib/b3-database-messages.mjs`); the gate exercises the helper launch and the backup-before-SQL rule directly instead of matching source text; the credential editor's stop-the-server banner names only the server credentials.
 
 ### Also in this version
 
