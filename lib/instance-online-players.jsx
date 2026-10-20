@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { B3_ADMIN_MESSAGES } from './b3-admin-messages.mjs';
+import { reasonsAfterLoad } from './online-players-state.mjs';
 
 // Block 15b: players connected right now (RCON status) with a verified live kick.
 // Works without B3. Ids and addresses arrive masked unless the user has config.manage.
@@ -25,7 +26,7 @@ export function InstanceOnlinePlayers({ instance, request, de, initial = null })
   const load = async (withPermissions = false) => {
     const permissions = withPermissions ? { manage: (await call('/api/rbac/me')).permissions?.includes('server.manage') === true } : state.permissions;
     const { online } = await call(`${base}/rcon/online`);
-    if (mounted.current) setState({ permissions, online });
+    if (mounted.current) { setState({ permissions, online }); setReasons(reasonsAfterLoad()); }
   };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // The slot is checked against the name (and the id when unmasked) right before the kick.

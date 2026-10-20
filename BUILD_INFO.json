@@ -8,7 +8,7 @@
   "verifiedCore": "manifest + executable SHA-256 fingerprint",
   "fix": "Live kick of a connected player via RCON: an online list from CoD4x status (masked unless config.manage), kick from it or from online B3 player rows (B3 guid = CoD4x playerid), and ban-and-kick. Only `clientkick <slot> [reason]` with a 0-63 slot is sent, through a separate verified path: status right before the kick must still show the expected player (playerid and/or exact name), status afterwards must show the slot free (or ZMBI). The RCON console allowlist is unchanged and still blocks every kick form.",
   "buildStatus": "development-block-15b-live-kick-gate-pass",
-  "notes": "4.18.14 Windows and WSL source preflights with the Live Kick gate. Native check scripts/verify-4.18.14-kick-native.mjs passed 7/7 against the real CoD4x 21.2 Linux core with two bots (developer mode): wrong target refused, slot 1 kicked and confirmed, empty slot refused, console still blocked. Development source, not a release or installer certification. No live deployment.",
+  "notes": "4.18.14 Windows and WSL source preflights with the Live Kick gate. Native check scripts/verify-4.18.14-kick-native.mjs passed 8/8 against the real CoD4x 21.2 Linux core with two bots (developer mode): wrong target refused, slot 1 kicked and confirmed, empty slot refused, console still blocked. Development source, not a release or installer certification. No live deployment.",
   "linuxExecutable": "cod4x18_dedrun",
   "clientExecutable": "iw3mp.exe",
   "architecture": "Shared Runtime with Windows and Linux adapters; schema-based Config Engine; per-instance RCON, master status, master list verification, plugin manager and B3 runtime; per-instance network exposure; eBc-B3 dependency layer"
