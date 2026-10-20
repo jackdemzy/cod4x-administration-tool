@@ -528,6 +528,12 @@ B3 bleibt für die eigentliche In-Game-Administration zuständig.
 
 ---
 
+## Block 15b – Live Kick (addendum 2026-10-20)
+
+Kick a connected player immediately: slot mapping via RCON `status`, only `clientkick` unblocked in the RCON allowlist, `server.manage`, confirmation and audit.
+
+---
+
 ## Block 16 – eBc-B3 / CoD4X Plugin Integration
 
 Integration:
@@ -545,6 +551,10 @@ CoD4X
 ```
 
 CONTROL generiert und validiert die notwendige B3/CoD4X-Konfiguration.
+
+---
+
+Addendum (2026-10-20): B3 plugin management (create from template or upload, enable/disable, config, hash + trust confirmation + audit) is planned with/after this block.
 
 ---
 

@@ -1105,6 +1105,25 @@ CONTROL ist Management-Layer.
 
 ---
 
+# BLOCK 15b – Live Kick (addendum 2026-10-20)
+
+## Goal
+
+Operators can kick a connected player immediately from CONTROL. An admin tool needs this; Block 15 only manages B3's stored data (bans take effect on the next connect).
+
+## Scope
+
+- Map the player to the current server slot via RCON `status` (name, GUID, slot) right before the action; refuse if the mapping is ambiguous or the player is not connected.
+- Open the RCON boundary from Block 7 for exactly one command: `clientkick <slot>` (optionally with a reason). All other kick/ban commands stay blocked.
+- Permission `server.manage`, explicit confirmation in the UI, audit event without IP/GUID.
+- Optional: "ban and kick" combines a Block 15 ban with an immediate kick.
+
+## Gate
+
+**Live kick of a connected player via RCON PASS (slot verified, nothing else unblocked)**
+
+---
+
 # BLOCK 16 – eBc-B3 / CoD4X Plugin Integration
 
 ## Ziel
@@ -1140,6 +1159,16 @@ CONTROL erzeugt und validiert:
 ## Gate
 
 **CoD4X → b3hide → B3 → RCON/Parser End-to-End PASS**
+
+---
+
+## Addendum (2026-10-20): B3 plugin management
+
+Planned with/after this block, because b3.xml plugin entries are generated here.
+
+- Discover B3 plugins (bundled and `extplugins/`), enable/disable them in b3.xml, edit their config files, show versions and hashes.
+- Create own plugins from a template (`__init__.py` with plugin class, example command, config file) or upload a plugin file.
+- A B3 plugin is arbitrary Python code inside the B3 process: every new or changed plugin needs an explicit trust confirmation, a pinned hash and an audit entry; it is loaded only on a B3 restart. CONTROL never executes plugin code itself.
 
 ---
 
