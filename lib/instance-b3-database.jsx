@@ -16,6 +16,9 @@ const MESSAGES = {
   SCHEMA_OUTDATED: ['Schema veraltet (Spalten fehlen) – keine automatische Migration.', 'Schema outdated (columns missing) – no automatic migration.'],
   MIGRATION_FAILED: ['Migration fehlgeschlagen – Backup verwenden.', 'Migration failed – use the backup.'],
   BACKUP_FAILED: ['Backup nicht prüfbar – Migration abgebrochen, nichts geändert.', 'Backup unverifiable – migration aborted, nothing changed.'],
+  B3_DATABASE_PASSWORD_REENTRY_REQUIRED: ['Host, Port oder Benutzer wurden geändert: B3-Datenbank-Passwort unter „Zugangsdaten“ neu eingeben.', 'Host, port or user changed: enter the B3 database password again under “Credentials”.'],
+  VAULT_OPERATION_BUSY: ['Tresor gerade belegt – bitte erneut versuchen.', 'Vault busy – please try again.'],
+  VAULT_LOCKED: ['Tresor gesperrt.', 'Vault locked.'],
 };
 const say = (code, de) => MESSAGES[code]?.[de ? 0 : 1] || code;
 
@@ -60,7 +63,7 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
       {field('username', de ? 'Benutzer' : 'Username', database?.settings?.username)}
       <button type="submit" disabled={busy}>{de ? 'Einstellungen speichern' : 'Save settings'}</button>
     </form>
-    <p>{de ? 'Passwort: ' : 'Password: '}{database?.passwordConfigured === true ? (de ? 'im Tresor hinterlegt' : 'stored in the vault') : database?.passwordConfigured === false ? (de ? 'fehlt – unter „Zugangsdaten“ als B3-Datenbank-Passwort setzen' : 'missing – set it under “Credentials” as B3 database password') : (de ? 'unbekannt (Tresor gesperrt?)' : 'unknown (vault locked?)')}</p>
+    <p>{de ? 'Passwort: ' : 'Password: '}{database?.passwordConfigured === true && database?.passwordBound === false ? say('B3_DATABASE_PASSWORD_REENTRY_REQUIRED', de) : database?.passwordConfigured === true ? (de ? 'im Tresor hinterlegt' : 'stored in the vault') : database?.passwordConfigured === false ? (de ? 'fehlt – unter „Zugangsdaten“ als B3-Datenbank-Passwort setzen' : 'missing – set it under “Credentials” as B3 database password') : (de ? 'unbekannt (Tresor gesperrt?)' : 'unknown (vault locked?)')}</p>
     <button disabled={busy || !database?.settings} onClick={() => run(() => call(`${base}/b3/database/test`, {}))}>{de ? 'Verbindung testen' : 'Test connection'}</button>
     <p role="status">{!check ? (de ? 'Noch nicht getestet.' : 'Not tested yet.')
       : check.connection !== 'OK' ? say(check.connection, de)
