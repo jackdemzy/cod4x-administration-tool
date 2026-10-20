@@ -100,4 +100,4 @@ if (rcon.status !== 0) {
   console.error("RCON behavior checks FAIL");
   process.exit(rcon.status || 1);
 }
-console.log("4.18.12 source preflight PASS (native lifecycle and native core RCON / real master registration/listing / native plugin load / native B3-with-server / native MySQL gates remain separate)");
+console.log("4.18.12 source preflight PASS (native lifecycle and native core RCON / real master registration/listing / native plugin load / native B3-with-server gates remain separate; the native MySQL check runs when a test database is configured)");

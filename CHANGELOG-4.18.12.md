@@ -18,6 +18,11 @@ Design: `docs/superpowers/specs/2026-10-20-b3-database-design.md`. Plan: `docs/s
 
 - MariaDB 10.11 answers an unknown user over TCP with error 1698, not 1045. It is mapped to `DB_AUTH_FAILED`.
 
+### Native check
+
+`scripts/verify-4.18.12-b3-database-native.mjs` passed 14/14 in WSL COD4X-Test against the dedicated test database `b3_control_test` (MariaDB 10.11, Python 2.7.18, PyMySQL 0.10.1, eBc-B3 9096624):
+EMPTY -> migration -> COMPLETE without backup; existing data plus a dropped table -> SCHEMA_PARTIAL -> verified 0600 backup containing the data -> only the missing table created; eBc opt-in refused without the exact phrase and applied after a backup; wrong password -> DB_AUTH_FAILED; wrong port -> DB_UNREACHABLE; a real B3 start logged "Successfully established a connection with MySQL database" with no password in b3.log, B3 output or events.
+
 ### Also in this version
 
 - Windows process inspection gives a cold PowerShell start 10 s instead of 3 s (PR #6); stop/recovery no longer abort on slow hosts.
