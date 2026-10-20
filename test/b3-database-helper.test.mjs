@@ -164,3 +164,32 @@ test('reports when the request is written so the caller can end its vault scope'
   await result;
   assert.deepEqual(order, ['written', 'done']);
 });
+
+test('C1: backup values use the driver literal API and refuse unsupported drivers clearly', { skip: process.platform === 'linux' && spawnSync(realPython, ['-V']).status === 0 ? false : 'Python 2.7 not available' }, async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-helper-literal-'));
+  try {
+    const file = path.join(dir, 'probe.py');
+    const functions = DATABASE_HELPER.replace(/\nmain\(\)\s*$/, '\n');
+    await fs.writeFile(file, functions + [
+      'class Connector(object): pass',
+      'class MySQLdbLike(object):',
+      '    def escape(self, value, mapping): return "wrong"',
+      '    def literal(self, value): return "\'%s\'" % value',
+      'try:',
+      '    literal(Connector(), "x")',
+      '    print("no-error")',
+      'except Exception as exc:',
+      '    print(error_code(exc))',
+      'print(literal(MySQLdbLike(), "x"))',
+      'print(literal(Connector(), None))',
+    ].join('\n'));
+    const result = spawnSync(realPython, [file], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split('\n'), ['BACKUP_DRIVER_UNSUPPORTED', "'x'", 'NULL']);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('C1: the unsupported backup driver code reaches the operator', async () => {
+  const { spawnImpl } = fakeSpawn({ reply: JSON.stringify({ ok: false, error: { code: 'BACKUP_DRIVER_UNSUPPORTED' } }) });
+  await rejects(runDatabaseHelper({ pythonPath: python, op: 'backup', target: path.resolve('x.sql'), connection, password: Buffer.from(PASSWORD) }, { spawnImpl }), 'DB_BACKUP_DRIVER_UNSUPPORTED');
+});

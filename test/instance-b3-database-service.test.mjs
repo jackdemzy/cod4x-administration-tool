@@ -433,3 +433,29 @@ test('S4: a vault lock right after a successful backup still reports the verifie
     assert.ok(events.some(event => event.event === 'b3.database.backup_created' && event.backupSha256 === error.backup.sha256));
   });
 });
+
+// --- Codex review on PR #7 -----------------------------------------------------
+test('C2: a password change during a running test is never overwritten with ready', async () => {
+  let release;
+  const hold = new Promise(resolve => { release = resolve; });
+  await fixture({ hold, probe: [{ tables: complete() }] }, async ({ service, instance }) => {
+    await service.save('server-a', SETTINGS);
+    const running = service.test('server-a');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await service.invalidate('server-a'); // b3db changed while the probe runs
+    release();
+    await running;
+    const stored = JSON.parse(await fs.readFile(file(instance), 'utf8'));
+    assert.equal(stored.lastCheck?.ready ?? false, false, 'stale test result must not restore readiness');
+    assert.equal((await service.read('server-a')).ready, false);
+  });
+});
+
+test('C5: missing columns of an OUTDATED schema are persisted', async () => {
+  const outdated = { ...complete(), clients: CORE.clients.filter(column => column !== 'login') };
+  await fixture({ probe: [{ tables: outdated }] }, async ({ service }) => {
+    await service.save('server-a', SETTINGS);
+    await service.test('server-a');
+    assert.deepEqual((await service.read('server-a')).lastCheck.missingColumns, { clients: ['login'] });
+  });
+});

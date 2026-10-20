@@ -74,7 +74,7 @@ const checks = [
   ["migration refused while B3 runs", service.includes("if (await this.b3IsRunning(id)) fail('B3_RUNNING');")],
   ["database routes and permissions are wired", server.includes('app.get("/api/instances/:id/b3/database", requirePermission("config.manage")') && server.includes('app.post("/api/instances/:id/b3/database", requirePermission("config.manage")')
     && server.includes('app.post("/api/instances/:id/b3/database/test", requirePermission("config.manage")') && server.includes('app.post("/api/instances/:id/b3/database/migrate", requirePermission("server.manage")')],
-  ["b3db password change invalidates readiness", server.includes('if (kind === "b3db") b3DatabaseService.invalidate(id)')],
+  ["b3db password change invalidates readiness", server.includes('onCredentialChanged: (id, kind) => (kind === "b3db" ? b3DatabaseService.invalidate(id) : undefined)') && read("lib/server-instance-manager.mjs").includes("await this.onCredentialChanged(id, kind);")],
   ["vault kind b3db uses the DSN-safe password policy", vault.includes("'b3db'") && vault.includes("if (kind === 'b3db') return validDatabasePassword(value);")],
   ["b3.xml switches to MySQL only via connectionFor inside the vault scope", usesDsn.join(",") === "instance-b3-service.mjs" && /withRuntimeCredentials\(id, async \(credentials, signal\) => \{[\s\S]{0,300}signal\?\.aborted[\s\S]{0,300}connectionFor\(id, credentials\.b3db\)/.test(b3Service)],
   ["database operations use one short vault scope per helper call", /#helperCall\(id, request, onSent = \(\) => \{\}\) \{[\s\S]{0,500}withRuntimeCredentials\(id, async \(credentials, signal\) => \{\s*if \(signal\?\.aborted\) fail\('VAULT_LOCKED'\);/.test(service) && !service.includes("#withPassword")],

@@ -2281,7 +2281,7 @@ instanceManager = new ServerInstanceManager({
   masterService,
   b3Service,
   // A changed or removed b3db password requires a new database test.
-  onCredentialChanged: (id, kind) => { if (kind === "b3db") b3DatabaseService.invalidate(id).catch(() => {}); },
+  onCredentialChanged: (id, kind) => (kind === "b3db" ? b3DatabaseService.invalidate(id) : undefined),
   legacyRuntime: defaultRuntime,
   runtimeFactory: (instance, options) => createRuntimeManager({
     ...runtimeDependencies,

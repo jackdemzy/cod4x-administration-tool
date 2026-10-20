@@ -74,3 +74,16 @@ test('S5: every code of the database flow has a German and an English message', 
   const html = render('InstanceB3Database', { de: true, instance: { id: 'x' }, request: noFetch, initial: state({ connection: 'OK', schema: 'PARTIAL', code: 'MIGRATION_IN_PROGRESS', ready: false }) });
   assert.match(html, /Migration lief/);
 });
+
+test('C4: the settings form is keyed by the loaded settings so it remounts after loading', { skip }, async () => {
+  const { databaseFormKey } = await import('../lib/b3-database-messages.mjs');
+  assert.notEqual(databaseFormKey(null), databaseFormKey(settings));
+  assert.notEqual(databaseFormKey(settings), databaseFormKey({ ...settings, host: 'db.example' }));
+  assert.equal(databaseFormKey(settings), databaseFormKey({ ...settings }));
+});
+
+test('C5: missing columns are shown for an OUTDATED schema', { skip }, async () => {
+  const render = await renderer();
+  const html = render('InstanceB3Database', { de: true, instance: { id: 'x' }, request: noFetch, initial: state({ connection: 'OK', schema: 'OUTDATED', code: 'SCHEMA_OUTDATED', missingTables: [], missingColumns: { clients: ['login', 'password'] }, ready: false }) });
+  assert.match(html, /Fehlende Spalten: clients \(login, password\)/);
+});
