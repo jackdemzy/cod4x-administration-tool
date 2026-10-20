@@ -10,7 +10,7 @@ const IP = '203.0.113.77', GUID = 'ABCDEF0123456789FACE', OLD_IP = '198.51.100.2
 const GROUPS = [[0, 'Guest', 'guest', 0], [1, 'User', 'user', 1], [8, 'Moderator', 'mod', 20], [16, 'Admin', 'admin', 40], [128, 'Super Admin', 'superadmin', 100]];
 const CLIENT = [7, 'Tester', GUID, IP, 16, 12, NOW - 5000, NOW - 60];
 
-async function fixture(action, { ready = true, running = false, responses = {} } = {}) {
+async function fixture(action, { ready = true, running = false, responses = {}, rcon = null } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-b3-admin-'));
   const b3Path = path.join(root, 'ebc-b3');
   await fs.mkdir(path.join(b3Path, 'b3', 'conf'), { recursive: true });
@@ -37,7 +37,7 @@ async function fixture(action, { ready = true, running = false, responses = {} }
     },
     async withStartGuard(id, fn) { guarded.push(id); return fn(); },
   };
-  const service = new InstanceB3AdminService({ store: { get: () => ({ id: 'server-a' }) }, database, environment: { read: async () => ({ pythonPath: '/usr/bin/python2.7', b3Path }) },
+  const service = new InstanceB3AdminService({ store: { get: () => ({ id: 'server-a' }) }, database, rcon, environment: { read: async () => ({ pythonPath: '/usr/bin/python2.7', b3Path }) },
     b3IsRunning: async () => running, onEvent: event => events.push(event), now: () => NOW * 1000 });
   try { await action({ service, calls, events, guarded, b3Path }); }
   finally { await fs.rm(root, { recursive: true, force: true }); }
@@ -48,7 +48,7 @@ test('reads are masked without config.manage: no full IP or GUID anywhere', asyn
     const masked = [await service.players('server-a', {}), await service.admins('server-a'), await service.player('server-a', 7), await service.penalties('server-a', {})];
     for (const value of masked) for (const secret of [IP, GUID, OLD_IP]) assert.ok(!JSON.stringify(value).includes(secret), `${secret} leaked`);
     const [players, , detail, penalties] = masked;
-    assert.deepEqual(players.rows[0], { id: 7, name: 'Tester', guid: '…FACE', ip: '203.0.113.x', group: 'Admin', level: 40, connections: 12, firstSeen: NOW - 5000, lastSeen: NOW - 60 });
+    assert.deepEqual(players.rows[0], { id: 7, name: 'Tester', guid: '…FACE', ip: '203.0.113.x', group: 'Admin', level: 40, connections: 12, firstSeen: NOW - 5000, lastSeen: NOW - 60, online: null });
     assert.deepEqual(detail.ips[0], { ip: '198.51.100.x', used: 2, firstSeen: NOW - 9000, lastSeen: NOW - 8000 });
     assert.deepEqual(detail.aliases[0], { alias: 'OldName', used: 3, firstSeen: NOW - 9000, lastSeen: NOW - 8000 });
     assert.deepEqual(penalties.rows.map(row => [row.type, row.status, row.permanent]), [['TempBan', 'active', false], ['Warning', 'expired', false]]);
@@ -135,4 +135,42 @@ test('R7: a write that committed before a vault lock is still audited', async ()
     await assert.rejects(service.addBan('server-a', 7, { kind: 'Ban', reason: 'x' }, 'admin1'), { code: 'VAULT_LOCKED' });
     assert.deepEqual(events.at(-1), { event: 'b3.admin.ban_added', instanceId: 'server-a', actor: 'admin1', clientId: 7, kind: 'Ban', durationMinutes: 0, outcome: 'committed_vault_locked' });
   }, { responses: { addBan: locked } });
+});
+
+// --- Block 15b: online marking, kick and ban-and-kick ------------------------------
+function fakeRcon({ online = new Map([[GUID, 5]]), kickError = null } = {}) {
+  const kicks = [];
+  return { kicks, findOnline: async () => online, kick: async (id, target, actor) => { kicks.push({ id, target, actor }); if (kickError) throw Object.assign(new Error(kickError), { code: kickError }); return { kicked: true, slot: target.slot }; } };
+}
+
+test('players and admins are marked online by guid; unknown when RCON is unavailable', async () => {
+  const rcon = fakeRcon();
+  await fixture(async ({ service }) => {
+    assert.deepEqual((await service.players('server-a', {})).rows[0].online, { slot: 5 });
+    assert.deepEqual((await service.admins('server-a')).rows[0].online, { slot: 5 });
+  }, { rcon });
+  await fixture(async ({ service }) => assert.equal((await service.players('server-a', {})).rows[0].online, false), { rcon: fakeRcon({ online: new Map() }) });
+  await fixture(async ({ service }) => assert.equal((await service.players('server-a', {})).rows[0].online, null), { rcon: fakeRcon({ online: null }) });
+  await fixture(async ({ service }) => assert.equal((await service.players('server-a', {})).rows[0].online, null));
+});
+
+test('kick action resolves guid and slot; offline players are refused', async () => {
+  const rcon = fakeRcon();
+  await fixture(async ({ service }) => {
+    assert.deepEqual(await service.kick('server-a', 7, 'AFK', 'admin1'), { kicked: true, slot: 5 });
+    assert.deepEqual(rcon.kicks, [{ id: 'server-a', target: { slot: 5, playerid: GUID, reason: 'AFK' }, actor: 'admin1' }]);
+  }, { rcon });
+  await fixture(async ({ service }) => {
+    await assert.rejects(service.kick('server-a', 7, '', 'admin1'), { code: 'RCON_KICK_NOT_ONLINE' });
+  }, { rcon: fakeRcon({ online: new Map() }) });
+});
+
+test('ban and kick keeps the ban whatever happens to the kick', async () => {
+  for (const [rcon, expected] of [[fakeRcon(), 'kicked'], [fakeRcon({ online: new Map() }), 'not_online'], [fakeRcon({ kickError: 'RCON_KICK_TARGET_CHANGED' }), 'RCON_KICK_TARGET_CHANGED'], [fakeRcon({ online: null }), 'RCON_UNAVAILABLE']]) {
+    await fixture(async ({ service, calls }) => {
+      assert.deepEqual(await service.addBan('server-a', 7, { kind: 'Ban', reason: 'Cheating', kick: true }, 'admin1'), { id: 99, kick: expected });
+      assert.ok(calls.some(call => call.name === 'addBan'));
+    }, { rcon });
+  }
+  await fixture(async ({ service }) => assert.deepEqual(await service.addBan('server-a', 7, { kind: 'Ban', reason: 'x' }, 'admin1'), { id: 99 }), { rcon: fakeRcon() });
 });
