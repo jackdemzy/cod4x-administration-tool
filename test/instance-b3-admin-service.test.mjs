@@ -176,3 +176,12 @@ test('ban and kick keeps the ban whatever happens to the kick', async () => {
   }
   await fixture(async ({ service }) => assert.deepEqual(await service.addBan('server-a', 7, { kind: 'Ban', reason: 'x' }, 'admin1'), { id: 99 }), { rcon: fakeRcon() });
 });
+
+test('C2: a malformed kick reason is refused before anything happens', async () => {
+  const rcon = fakeRcon();
+  await fixture(async ({ service, calls }) => {
+    for (const reason of [5, {}, 'a;b']) await assert.rejects(service.kick('server-a', 7, reason, 'admin1'), { code: 'RCON_KICK_INVALID' }, String(reason));
+    assert.equal(calls.filter(call => call.name === 'player').length, 0);
+    assert.equal(rcon.kicks.length, 0);
+  }, { rcon });
+});

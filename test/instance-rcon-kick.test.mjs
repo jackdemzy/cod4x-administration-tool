@@ -121,3 +121,15 @@ test('R11: non-string JSON fields are refused before any I/O', async () => {
   }
   assert.equal(ctx.commands.length, 0);
 });
+
+// --- Codex review on PR #9 ---------------------------------------------------------
+test('C1: a renamed player with the same real playerid is not confirmed as kicked', async () => {
+  const renamed = status(row(3, '1234567890', 'Wolf_renamed'));
+  const ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf')), renamed, renamed, renamed] });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 3, playerid: '1234567890' }, 'a'), { code: 'RCON_KICK_NOT_CONFIRMED' });
+});
+
+test('C3: a reconnecting player next to their own ZMBI row is still online', async () => {
+  const ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf'), row(5, '1234567890', 'Wolf').replace('   48 ', ' ZMBI '))] });
+  assert.deepEqual([...(await ctx.rcon.findOnline('srv')).entries()], [['1234567890', 3]]);
+});

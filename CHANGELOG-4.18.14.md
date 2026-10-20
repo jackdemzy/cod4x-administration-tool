@@ -26,3 +26,9 @@ Important findings fixed with regression tests:
 - The assumption B3 guid = CoD4x playerid is now proven natively with eBc-B3's own cod4x parser.
 
 Minor fixes: typed kick reasons are cleared on reload (slots are reused), B3 kicks ask for confirmation, ban-and-kick shows the ban reason to the player when CoD4x can carry it, IPv6 addresses are masked per group, tests for non-string JSON fields. The kick reason rule lives in the browser-safe `lib/kick-reason.mjs`.
+
+### PR review (Codex)
+
+- A kick is only confirmed when the real playerid left the slot; a rename is not a departure (the name only distinguishes shared ids such as `0`).
+- The B3 kick route passes a present but malformed reason on for validation instead of dropping it.
+- `findOnline` drops CNCT/ZMBI rows before the uniqueness check, so a reconnect next to its own ZMBI row stays online.
