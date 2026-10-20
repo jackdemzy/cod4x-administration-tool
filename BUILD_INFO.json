@@ -8,7 +8,7 @@
   "verifiedCore": "manifest + executable SHA-256 fingerprint",
   "fix": "B3 in-game administration per instance on B3's own MySQL database: players (search, paging, aliases and IP history), admins, penalties (Ban/TempBan/Permanent/Kick/Warning with active/expired/lifted status as B3 computes it) and the admin command list from plugin_admin.ini. Actions on B3's data model: add Ban/TempBan, lift bans, lift warnings, set a player's group (only with B3 stopped, inside the start guard). Named, parameter-bound queries live only in the Python helper; viewers get masked IPs/GUIDs; audit events carry ids only.",
   "buildStatus": "development-block-15-b3-admin-gate-pass",
-  "notes": "4.18.13 Windows and WSL source preflights with the B3 Admin gate. Native check scripts/verify-4.18.13-b3-admin-native.mjs passed 15/15 against the MariaDB test database; every action was verified with eBc-B3's own MysqlStorage (getClientPenalties, getClient). Live kick follows as Block 15b. Development source, not a release or installer certification. No live deployment.",
+  "notes": "4.18.13 Windows and WSL source preflights with the B3 Admin gate. Native check scripts/verify-4.18.13-b3-admin-native.mjs passed 16/16 against the MariaDB test database; every action was verified with eBc-B3's own MysqlStorage (getClientPenalties, getClient). Live kick follows as Block 15b. Development source, not a release or installer certification. No live deployment.",
   "linuxExecutable": "cod4x18_dedrun",
   "clientExecutable": "iw3mp.exe",
   "architecture": "Shared Runtime with Windows and Linux adapters; schema-based Config Engine; per-instance RCON, master status, master list verification, plugin manager and B3 runtime; per-instance network exposure; eBc-B3 dependency layer"

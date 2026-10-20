@@ -2460,7 +2460,8 @@ app.post("/api/instances/:id/b3/database", requirePermission("config.manage"), i
 app.post("/api/instances/:id/b3/database/remove", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.remove(req.params.id) })));
 app.post("/api/instances/:id/b3/database/test", requirePermission("config.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.test(req.params.id) })));
 const adminView = req => ({ full: hasPermission(req.auth.role, "config.manage") });
-const queryInt = value => (value === undefined ? undefined : /^\d{1,7}$/.test(String(value)) ? Number(value) : -1);
+const queryInt = value => (value === undefined ? undefined : /^\d{1,10}$/.test(String(value)) ? Number(value) : -1);
+app.get("/api/instances/:id/b3/admin/status", requirePermission("diagnostics.read"), instanceRoute(async req => ({ status: await b3AdminService.status(req.params.id) })));
 app.get("/api/instances/:id/b3/admin/players", requirePermission("diagnostics.read"), instanceRoute(async req => ({ players: await b3AdminService.players(req.params.id, { search: typeof req.query.search === "string" ? req.query.search : undefined, offset: queryInt(req.query.offset) }, adminView(req)) })));
 app.get("/api/instances/:id/b3/admin/players/:clientId", requirePermission("diagnostics.read"), instanceRoute(async req => ({ player: await b3AdminService.player(req.params.id, queryInt(req.params.clientId), adminView(req)) })));
 app.get("/api/instances/:id/b3/admin/admins", requirePermission("diagnostics.read"), instanceRoute(async req => ({ admins: await b3AdminService.admins(req.params.id, adminView(req)) })));
