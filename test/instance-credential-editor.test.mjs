@@ -33,3 +33,12 @@ test('credential editor renders only password inputs, never renders supplied cre
   assert.match(html, /Status laden/);
   assert.ok((html.match(/disabled=""/g) || []).length >= 8);
 });
+
+test('S7: the stop-the-server banner names only the server credentials', {
+  skip: nativeCompilerAvailable ? false : 'Shared Windows dependencies do not contain native Linux esbuild; UI renderer verified on Windows separately',
+}, async () => {
+  const render = await renderer();
+  const html = render({ instance: { id: 'test', runtime: { status: 'RUNNING', pid: 42 } }, de: true, request: () => { throw new Error('SSR must not fetch'); } });
+  assert.match(html, /RCON-Passwort, Master-Token und Join-Passwort/);
+  assert.match(html, /B3-Datenbank-Passwort kann bei laufendem Server geändert werden/);
+});

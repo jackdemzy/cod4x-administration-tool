@@ -1,25 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { EBC_CONFIRMATION } from './b3-database.mjs';
+import { B3_DATABASE_MESSAGES } from './b3-database-messages.mjs';
 
 // Block 14 wizard: settings -> test -> schema -> backup + migration -> B3 Ready.
 // The password is never entered here; it lives in the vault (credential editor, kind b3db).
-const MESSAGES = {
-  DB_UNREACHABLE: ['Datenbank nicht erreichbar (Host/Port prüfen).', 'Database unreachable (check host/port).'],
-  DB_AUTH_FAILED: ['Anmeldung abgelehnt: Benutzer oder Passwort falsch.', 'Login rejected: wrong user or password.'],
-  DB_ACCESS_DENIED: ['Keine Rechte auf diese Datenbank.', 'No privileges on this database.'],
-  DB_NOT_FOUND: ['Datenbank existiert nicht.', 'Database does not exist.'],
-  DB_DRIVER_MISSING: ['MySQL-Treiber für Python fehlt (PyMySQL).', 'MySQL driver for Python missing (PyMySQL).'],
-  DB_ERROR: ['Datenbankfehler.', 'Database error.'],
-  DB_HELPER_FAILED: ['Prüfprogramm fehlgeschlagen.', 'Check helper failed.'],
-  DB_HELPER_TIMEOUT: ['Zeitüberschreitung bei der Prüfung.', 'Check timed out.'],
-  SCHEMA_PARTIAL: ['Tabellen fehlen – Migration ergänzt sie.', 'Tables missing – migration adds them.'],
-  SCHEMA_OUTDATED: ['Schema veraltet (Spalten fehlen) – keine automatische Migration.', 'Schema outdated (columns missing) – no automatic migration.'],
-  MIGRATION_FAILED: ['Migration fehlgeschlagen – Backup verwenden.', 'Migration failed – use the backup.'],
-  BACKUP_FAILED: ['Backup nicht prüfbar – Migration abgebrochen, nichts geändert.', 'Backup unverifiable – migration aborted, nothing changed.'],
-  B3_DATABASE_PASSWORD_REENTRY_REQUIRED: ['Host, Port oder Benutzer wurden geändert: B3-Datenbank-Passwort unter „Zugangsdaten“ neu eingeben.', 'Host, port or user changed: enter the B3 database password again under “Credentials”.'],
-  VAULT_OPERATION_BUSY: ['Tresor gerade belegt – bitte erneut versuchen.', 'Vault busy – please try again.'],
-  VAULT_LOCKED: ['Tresor gesperrt.', 'Vault locked.'],
-};
+const MESSAGES = B3_DATABASE_MESSAGES;
 const say = (code, de) => MESSAGES[code]?.[de ? 0 : 1] || code;
 
 export function InstanceB3Database({ instance, request, de, initial = null }) {

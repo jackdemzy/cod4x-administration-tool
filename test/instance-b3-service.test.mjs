@@ -184,3 +184,16 @@ test('B3 start refuses a stale MySQL setup, a running migration and a vault lock
   await assert.rejects(b3Service.start('b3-guard'), { code: 'VAULT_LOCKED' });
   assert.equal(await fs.readFile(config, 'utf8'), before, 'b3.xml untouched');
 });
+
+test('S1: B3 start runs inside the database start guard', async t => {
+  const { b3Service, create } = await fixture(t);
+  await create('b3-start-guard');
+  const guarded = [];
+  b3Service.database = { read: async () => ({ ready: false, mysqlEnabled: false }), isBusy: () => false,
+    withStartGuard: async (id, fn) => { guarded.push(id); return fn(); } };
+  await b3Service.start('b3-start-guard');
+  assert.deepEqual(guarded, ['b3-start-guard']);
+  await b3Service.stop('b3-start-guard');
+  b3Service.database.withStartGuard = async () => { throw Object.assign(new Error('B3_DATABASE_BUSY'), { code: 'B3_DATABASE_BUSY' }); };
+  await assert.rejects(b3Service.start('b3-start-guard'), { code: 'B3_DATABASE_BUSY' });
+});
