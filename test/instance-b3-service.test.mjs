@@ -162,3 +162,25 @@ test('B3 start writes the MySQL DSN only when the database is ready; locked vaul
   await assert.rejects(b3Service.start('b3-db'), { code: 'VAULT_LOCKED' });
   assert.equal(await fs.readFile(config, 'utf8'), xml);
 });
+
+test('B3 start refuses a stale MySQL setup, a running migration and a vault locked inside the scope', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-guard');
+  const config = path.join(store.get('b3-guard').homePath, 'b3', 'b3.xml');
+  await b3Service.start('b3-guard'); await b3Service.stop('b3-guard');
+  const before = await fs.readFile(config, 'utf8');
+  let setup = { ready: false, mysqlEnabled: true }, busy = false;
+  b3Service.database = { read: async () => setup, isBusy: () => busy, connectionFor: async (id, buffer) => ({ dsn: `mysql://b3:${buffer.toString()}@127.0.0.1:3306/b3` }) };
+  b3Service.credentials = { async withRuntimeCredentials(id, fn) {
+    const controller = new AbortController(); controller.abort();
+    const b3db = Buffer.alloc(16); // already wiped by a lock
+    await fn({ b3db }, controller.signal);
+    throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
+  } };
+  await assert.rejects(b3Service.start('b3-guard'), { code: 'B3_DATABASE_NOT_READY' });
+  setup = { ready: true, mysqlEnabled: true }; busy = true;
+  await assert.rejects(b3Service.start('b3-guard'), { code: 'B3_DATABASE_BUSY' });
+  busy = false;
+  await assert.rejects(b3Service.start('b3-guard'), { code: 'VAULT_LOCKED' });
+  assert.equal(await fs.readFile(config, 'utf8'), before, 'b3.xml untouched');
+});

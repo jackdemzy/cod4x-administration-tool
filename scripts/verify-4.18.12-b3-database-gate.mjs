@@ -27,7 +27,9 @@ const checks = [
     && server.includes('app.post("/api/instances/:id/b3/database/test", requirePermission("config.manage")') && server.includes('app.post("/api/instances/:id/b3/database/migrate", requirePermission("server.manage")')],
   ["b3db password change invalidates readiness", server.includes('if (kind === "b3db") b3DatabaseService.invalidate(id)')],
   ["vault kind b3db uses the DSN-safe password policy", vault.includes("'b3db'") && vault.includes("if (kind === 'b3db') return validDatabasePassword(value);")],
-  ["b3.xml switches to MySQL only via connectionFor inside the vault scope", usesDsn.join(",") === "instance-b3-service.mjs" && /withRuntimeCredentials\(id, async credentials => \{[\s\S]{0,300}connectionFor\(id, credentials\.b3db\)/.test(b3Service)],
+  ["b3.xml switches to MySQL only via connectionFor inside the vault scope", usesDsn.join(",") === "instance-b3-service.mjs" && /withRuntimeCredentials\(id, async \(credentials, signal\) => \{[\s\S]{0,300}signal\?\.aborted[\s\S]{0,300}connectionFor\(id, credentials\.b3db\)/.test(b3Service)],
+  ["database operations use one short vault scope per helper call", /#helperCall\(id, request\) \{\s*return this\.credentials\.withRuntimeCredentials\(id, async \(credentials, signal\) => \{\s*if \(signal\?\.aborted\) fail\('VAULT_LOCKED'\);/.test(service) && !service.includes("#withPassword")],
+  ["B3 never silently falls back to SQLite and never starts during a migration", b3Service.includes("if (this.database?.isBusy?.(id)) fail('B3_DATABASE_BUSY');") && b3Service.includes("if (!setup?.ready && setup?.mysqlEnabled) fail('B3_DATABASE_NOT_READY');")],
   ["database events carry no password or DSN", eventCalls.length >= 5 && eventCalls.every(call => !/password|dsn|settings/i.test(call))],
 ];
 for (const [name, ok] of checks) console.log(`${ok ? "PASS" : "FAIL"} ${name}`);

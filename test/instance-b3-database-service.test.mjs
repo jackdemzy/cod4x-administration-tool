@@ -25,6 +25,8 @@ function scriptedHelper(script) {
     calls.push({ op: request.op, statements: request.statements, target: request.target, password: request.password.toString() });
     const next = script[request.op]?.shift();
     if (!next) throw new Error(`unexpected ${request.op}`);
+    if (scriptedHelper.inScope && !scriptedHelper.inScope()) throw new Error('helper called outside a vault scope');
+    if (next.after) next.after();
     if (next.error) throw Object.assign(new Error(next.error), { code: next.error, mysqlCode: next.mysqlCode ?? null });
     if (request.op === 'backup') {
       const text = next.text ?? backupText(next.tables);
@@ -46,11 +48,19 @@ async function fixture(script, action, { running = false, locked = false, passwo
   await fs.mkdir(instance.homePath);
   const events = [];
   const { helper, calls } = scriptedHelper(script);
+  const vault = { scopes: 0, open: 0, lease: null, lockNow() { locked = true; if (vault.lease) { vault.lease.b3db?.fill(0); vault.lease.controller.abort(); } } };
+  scriptedHelper.inScope = () => vault.open > 0;
   const credentials = {
     async withRuntimeCredentials(id, fn) {
       if (locked) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
       const b3db = password ? Buffer.from(password) : null;
-      try { return await fn(Object.freeze({ rcon: null, master: null, join: null, b3db }), new AbortController().signal); } finally { b3db?.fill(0); }
+      const controller = new AbortController();
+      vault.lease = { b3db, controller }; vault.scopes++; vault.open++;
+      try {
+        const result = await fn(Object.freeze({ rcon: null, master: null, join: null, b3db }), controller.signal);
+        if (controller.signal.aborted || locked) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
+        return result;
+      } finally { b3db?.fill(0); vault.lease = null; vault.open--; }
     },
     async instanceStatus() { return { locked, b3db: { configured: locked ? null : Boolean(password) } }; },
   };
@@ -59,7 +69,7 @@ async function fixture(script, action, { running = false, locked = false, passwo
     credentials, environment: { read: async () => ({ pythonPath: '/usr/bin/python2.7', b3Path }) },
     b3IsRunning: async () => running, onEvent: event => events.push(event), helper, now: () => new Date('2026-10-20T10:15:00.000Z'),
   });
-  try { await action({ service, calls, events, instance, root }); }
+  try { await action({ service, calls, events, instance, root, vault }); }
   finally { await fs.rm(root, { recursive: true, force: true }); }
 }
 const file = instance => path.join(instance.homePath, 'b3', 'database.json');
@@ -248,4 +258,65 @@ test('verifyBackup checks hash, header and every table marker', async () => {
     await assert.rejects(verifyBackup(target, { sha256: 'a'.repeat(64), tables: { clients: 2, data: 0 } }), { code: 'BACKUP_FAILED' });
     await assert.rejects(verifyBackup(path.join(dir, 'missing.sql'), { sha256, tables: {} }), { code: 'BACKUP_FAILED' });
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('each helper call runs in its own short vault scope', async () => {
+  const { penalties, ...partial } = complete();
+  await fixture({ probe: [{ tables: partial }, { tables: complete() }], backup: [{ tables: { clients: 1 } }], apply: [{ statements: 1 }] }, async ({ service, calls, vault }) => {
+    await service.save('server-a', SETTINGS);
+    await service.migrate('server-a');
+    assert.equal(calls.length, 4);
+    assert.equal(vault.scopes, 4, 'one vault scope per helper call, none spanning the migration');
+  });
+});
+
+test('vault lock between backup and apply: nothing applied, VAULT_LOCKED, state unchanged', async () => {
+  const { penalties, ...partial } = complete();
+  let vault;
+  await fixture({ probe: [{ tables: partial }], backup: [{ tables: { clients: 1 }, after: () => vault.lockNow() }], apply: [{ statements: 1 }] }, async context => {
+    vault = context.vault;
+    const { service, calls, instance } = context;
+    await service.save('server-a', SETTINGS);
+    const before = await fs.readFile(file(instance), 'utf8');
+    await assert.rejects(service.migrate('server-a'), { code: 'VAULT_LOCKED' });
+    assert.ok(!calls.some(call => call.op === 'apply'));
+    assert.equal(await fs.readFile(file(instance), 'utf8'), before);
+  });
+});
+
+test('vault lock while SQL runs: VAULT_LOCKED recorded, not ready, no misleading MIGRATION_FAILED', async () => {
+  const { penalties, ...partial } = complete();
+  let vault;
+  await fixture({ probe: [{ tables: partial }, { tables: complete() }], backup: [{ tables: { clients: 1 } }], apply: [{ statements: 1, after: () => vault.lockNow() }] }, async context => {
+    vault = context.vault;
+    const { service, events, instance } = context;
+    await service.save('server-a', SETTINGS);
+    await assert.rejects(service.migrate('server-a'), { code: 'VAULT_LOCKED' });
+    const stored = JSON.parse(await fs.readFile(file(instance), 'utf8'));
+    assert.deepEqual([stored.lastCheck.code, stored.lastCheck.ready], ['VAULT_LOCKED', false]);
+    assert.match(stored.lastCheck.backup.path, /b3-20261020T101500Z\.sql$/);
+    assert.ok(!events.some(event => event.cause === 'DB_AUTH_FAILED'));
+  });
+});
+
+test('once ready, MySQL stays enabled until the settings are removed; isBusy reports running operations', async () => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await fixture({ probe: [{ tables: complete() }] }, async ({ service }) => {
+    await service.save('server-a', SETTINGS);
+    assert.equal((await service.read('server-a')).mysqlEnabled, false);
+    await service.test('server-a');
+    assert.deepEqual([(await service.read('server-a')).ready, (await service.read('server-a')).mysqlEnabled], [true, true]);
+    await service.save('server-a', { ...SETTINGS, port: 3307 });
+    assert.deepEqual([(await service.read('server-a')).ready, (await service.read('server-a')).mysqlEnabled], [false, true]);
+    await service.invalidate('server-a');
+    assert.equal((await service.read('server-a')).mysqlEnabled, true);
+    service.helper = async () => { await gate; return { tables: complete() }; };
+    const running = service.test('server-a');
+    assert.equal(service.isBusy('server-a'), true);
+    release(); await running;
+    assert.equal(service.isBusy('server-a'), false);
+    const removed = await service.remove('server-a');
+    assert.deepEqual([removed.settings, removed.ready, removed.mysqlEnabled], [null, false, false]);
+  });
 });

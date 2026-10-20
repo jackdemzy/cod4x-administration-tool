@@ -23,6 +23,12 @@ Design: `docs/superpowers/specs/2026-10-20-b3-database-design.md`. Plan: `docs/s
 `scripts/verify-4.18.12-b3-database-native.mjs` passed 14/14 in WSL COD4X-Test against the dedicated test database `b3_control_test` (MariaDB 10.11, Python 2.7.18, PyMySQL 0.10.1, eBc-B3 9096624):
 EMPTY -> migration -> COMPLETE without backup; existing data plus a dropped table -> SCHEMA_PARTIAL -> verified 0600 backup containing the data -> only the missing table created; eBc opt-in refused without the exact phrase and applied after a backup; wrong password -> DB_AUTH_FAILED; wrong port -> DB_UNREACHABLE; a real B3 start logged "Successfully established a connection with MySQL database" with no password in b3.log, B3 output or events.
 
+### Whole-branch review and fixes
+
+- A vault lock during a migration is honored: every helper call runs in its own short vault scope (the vault scope is exclusive across all instances, so a migration no longer blocks RCON and server starts for minutes). A lock before any SQL ran records nothing; a lock while SQL ran records `VAULT_LOCKED` (not ready) instead of a misleading `MIGRATION_FAILED`.
+- B3 no longer falls back to SQLite silently: once an instance was B3 Ready, B3 start is refused with `B3_DATABASE_NOT_READY` until the database is tested again; going back to SQLite is explicit (`POST …/b3/database/remove`). B3 start is refused while a migration runs (`B3_DATABASE_BUSY`), and a vault lock inside the start scope leaves `b3.xml` unchanged.
+- The B3 database password can be changed while the game server runs (it is not used by the server process).
+
 ### Also in this version
 
 - Windows process inspection gives a cold PowerShell start 10 s instead of 3 s (PR #6); stop/recovery no longer abort on slow hosts.
