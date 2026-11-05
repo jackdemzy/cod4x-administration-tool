@@ -271,3 +271,11 @@ The generated installer is expected at `dist-installer\COD4X-CONTROL-Setup-3.0.2
 
 ## FIX8
 CFG-Eingaben, `fs_game` und RCON-Port werden zentral validiert; Steuerzeichen und unsichere relative/absolute Mod-Pfade werden abgefangen.
+
+## Lizenz
+
+COD4X CONTROL ist freie Software unter der [GNU Affero General Public License, Version 3 oder später](LICENSE) (SPDX `AGPL-3.0-or-later`). Copyright © 2026 jackdemzy.
+
+Kurz gefasst: Nutzen, Ändern und Weitergeben ist erlaubt, solange geänderte Versionen unter derselben Lizenz mit Quellcode weitergegeben werden. Wer eine geänderte Version über ein Netzwerk für andere bereitstellt (zum Beispiel einen Fernzugriff per Browser), muss diesen Nutzern den Quellcode anbieten (§ 13). Verbindlich ist allein der Lizenztext in `LICENSE`.
+
+Die npm-Abhängigkeiten stehen unter eigenen, mit der AGPL vereinbaren Lizenzen (MIT, ISC, BSD-3-Clause, BlueOak-1.0.0). CoD4X, eBc-B3, Mods und Spieldaten werden nicht mitgeliefert und behalten ihre eigenen Lizenzen.
