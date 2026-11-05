@@ -55,6 +55,16 @@ At runtime CONTROL keeps these values outside the source tree: secrets in the en
 
 If a secret was committed by mistake, treat it as leaked: revoke or rotate it first (new RCON password, new Discord webhook, new TOTP enrolment), then remove it from the repository. Deleting the file in a new commit is not enough, because it stays in the history.
 
+## Development and review
+
+Security depends on how changes are made, not only on reports. Every change to this repository, by a person or by an AI coding agent, follows these rules:
+
+- **Superpowers workflow.** Work with the [Superpowers](https://github.com/obra/superpowers) skills (`/superpowers`): brainstorm and write a plan before code, test-driven development, systematic debugging for failures, and verification before claiming a change is done. Plans and specs go to `docs/superpowers/`.
+- **OpenAI Codex code review.** Every pull request is reviewed by the OpenAI Codex code reviewer before it is merged. It runs when a pull request is opened or marked ready; request it again with a comment `@codex review`, and for changes to authentication, the vault, RCON, the remote gateway or anything that handles secrets also `@codex security review`. Each finding is answered: fixed, or explained why it does not apply.
+- **No secrets in text.** Commits, pull requests, comments and logs never contain any of the secrets listed above. Scan the diff before every push.
+- **English on GitHub.** Commit messages, pull requests, issues and comments are written in English.
+- **Green preflight.** `npm run preflight` passes locally and in CI before a pull request is merged.
+
 ## Repository protection
 
 The maintainer keeps these GitHub features switched on:
