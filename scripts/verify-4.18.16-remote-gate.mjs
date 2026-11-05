@@ -47,7 +47,8 @@ const checks = [
   ["admin and operator need a second factor remotely", adminWithoutMfa.code === "REMOTE_TOTP_SETUP_REQUIRED"],
   ["10 failed logins lock the client and user", locked.status === 429],
   ["TOTP matches RFC 6238 (SHA-1 test vectors)", hotp(Buffer.from("12345678901234567890"), Math.floor(59 / 30), 8) === "94287082" && hotp(Buffer.from("12345678901234567890"), Math.floor(20000000000 / 30), 8) === "65353130"],
-  ["whitelist is read-only apart from login/logout", REMOTE_ROUTES.filter(route => route.startsWith("POST")).join() === "POST /remote/api/login,POST /remote/api/logout"],
+  // 4.18.18 (Block 24c) adds the user's own push subscription; nothing else writes.
+  ["whitelist is read-only apart from login/logout and the own push subscription", REMOTE_ROUTES.filter(route => route.startsWith("POST")).join() === "POST /remote/api/login,POST /remote/api/logout,POST /remote/api/push/subscribe,POST /remote/api/push/unsubscribe"],
   ["remote access is per user and off by default; the gateway is off by default", server.includes("remoteAccess: row?.remoteAccess === true") && server.includes('enabled: false, mode: "tailscale"')],
   ["the local login uses the same brake", server.includes("const throttleKey = LoginThrottle.key(req.socket.remoteAddress, username);") && server.includes("throttle: loginThrottle")],
   ["remote settings and sessions need user.manage; the admin API still binds loopback by default", ['app.get("/api/remote", requirePermission("user.manage")', 'app.post("/api/remote/settings", requirePermission("user.manage")'].every(text => server.includes(text)) && server.includes('const HOST = process.env.HOST || "127.0.0.1";')],

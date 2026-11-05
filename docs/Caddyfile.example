@@ -1,0 +1,19 @@
+monitor.example.org {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	# Only the remote app is forwarded; everything else goes to /remote/.
+	@remote path /remote /remote/*
+	handle @remote {
+		reverse_proxy 127.0.0.1:8788 {
+			header_up -Tailscale-User-Login
+			header_up -Tailscale-User-Name
+			header_up -Tailscale-User-Profile-Pic
+		}
+	}
+	handle {
+		redir * /remote/ 302
+	}
+}
