@@ -43,10 +43,12 @@ import { RconClient } from "./lib/rcon-client.mjs";
 import { MonitorStore, monitorRange } from "./lib/monitor-store.mjs";
 import { MonitorCollector } from "./lib/monitor-collector.mjs";
 import { MonitorHost } from "./lib/monitor-host.mjs";
+import { MonitorAlerts } from "./lib/monitor-alerts.mjs";
+import { AlertNotifier } from "./lib/alert-notifier.mjs";
 import { readInstanceConsoleLog } from "./lib/instance-console-log.mjs";
 import { LoginThrottle } from "./lib/login-throttle.mjs";
 import { RemoteSessions } from "./lib/remote-sessions.mjs";
-import { REMOTE_DEFAULT_PORT, REMOTE_ROUTES, createRemoteGateway, listenRemoteGateway, remoteListenOptions } from "./lib/remote-gateway.mjs";
+import { REMOTE_DEFAULT_PORT, REMOTE_ROUTES, REMOTE_PROXY_MAX_FAILURES, caddyfileTemplate, createRemoteGateway, listenRemoteGateway, remoteListenOptions } from "./lib/remote-gateway.mjs";
 import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecoveryCode, totpUri, verifyTotp } from "./lib/totp.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
@@ -1036,6 +1038,8 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
     // Anything that narrows access ends the user's remote sessions at once.
     let remoteRevoked = 0;
     if (target.disabled || target.remoteAccess !== true || req.body?.totpReset === true || (typeof req.body?.password === "string" && req.body.password.length)) remoteRevoked = remoteSessions.revokeUser(target.username);
+    // Without remote access (or disabled) the user's phones get no more push alerts.
+    if (target.disabled || target.remoteAccess !== true) await alertNotifier.removeUser(target.username).catch(() => 0);
     else if (roleChanged) remoteSessions.setRole(target.username, target.role);
     if (typeof req.body?.password === "string" && req.body.password.length) {
       const passwordError = validateAuthPassword(req.body.password);
@@ -2577,6 +2581,15 @@ app.delete("/api/instances/:id", requirePermission("server.manage"), instanceRou
 // keeps 30 days of history under the data root and records outages with the
 // probable cause. Never uses the RCON password, never starts or stops anything.
 const monitorStore = new MonitorStore({ directory: dataPath("monitor") });
+// Block 24c: notifications. Push goes only to users who may still see the
+// monitoring remotely (enabled, remote access, monitor.read).
+const alertNotifier = new AlertNotifier({
+  directory: dataPath("config"),
+  audit: (level, event, details) => audit(level, event, details),
+  eligible: username => { const user = findAuthUser(username); return Boolean(user && !user.disabled && user.remoteAccess === true && hasPermission(user.role, "monitor.read")); },
+});
+try { await alertNotifier.load(); } catch (error) { console.error(`[alerts] settings unavailable: ${error.code || error.message}`); }
+const monitorAlerts = new MonitorAlerts({ rules: () => alertNotifier.rules(), send: alert => alertNotifier.send(alert) });
 try { await monitorStore.load(); } catch (error) { console.error(`[monitor] history unavailable: ${error.code || error.message}`); }
 const monitorCollector = new MonitorCollector({
   listInstances: async () => { try { return instanceStore.list(); } catch { return []; } },
@@ -2586,7 +2599,11 @@ const monitorCollector = new MonitorCollector({
   b3Running: id => b3Service.isRunning(id),
   store: monitorStore,
   host: new MonitorHost(),
-  onEvent: event => audit(event.kind === "down" && event.cause?.kind !== "stopped" ? "warn" : "info", `monitor.server.${event.kind}`, { instanceId: event.id, runId: event.runId, cause: event.cause?.kind || null, downMs: event.downMs ?? null }),
+  onEvent: event => {
+    audit(event.kind === "down" && event.cause?.kind !== "stopped" ? "warn" : "info", `monitor.server.${event.kind}`, { instanceId: event.id, runId: event.runId, cause: event.cause?.kind || null, downMs: event.downMs ?? null });
+    void monitorAlerts.handleEvent(event, monitorCollector.live(event.id));
+  },
+  onTick: overview => monitorAlerts.handleTick(overview),
 });
 if (process.env.COD4X_MONITOR !== "off") monitorCollector.start();
 function monitorRoute(action) {
@@ -2609,6 +2626,19 @@ app.get("/api/monitor/instances/:id/events", monitorRead, monitorRoute(async req
   return { events: monitorStore.events(req.params.id, range).map(event => event.cause && !consoleAllowed ? { ...event, cause: { ...event.cause, console: [] } } : event), range };
 }));
 
+// Block 24c: notification settings and a test alert (config.manage). The
+// webhook URL is accepted here but never returned, only its masked form.
+const alertRoute = action => async (req, res) => {
+  try { res.set("Cache-Control", "no-store").json({ ok: true, ...await action(req) }); }
+  catch (error) { const code = /^(ALERT|DISCORD|PUSH)_/.test(error.code || "") ? error.code : "ALERT_FAILED"; res.status(code === "ALERT_FAILED" ? 500 : 400).json({ ok: false, code, field: error.field || null, error: code }); }
+};
+app.get("/api/alerts", requirePermission("config.manage"), alertRoute(async () => ({ alerts: alertNotifier.status() })));
+app.post("/api/alerts/settings", requirePermission("config.manage"), alertRoute(async req => ({ alerts: await alertNotifier.configure({ rules: req.body?.rules, discordUrl: req.body?.discordUrl, push: req.body?.push }, req.auth.username) })));
+app.post("/api/alerts/test", requirePermission("config.manage"), alertRoute(async req => {
+  const result = await alertNotifier.test(req.auth.username);
+  return { result: { discord: result.discord ? { ok: result.discord.ok, code: result.discord.code || null } : null, push: { sent: result.push.filter(item => item.ok).length, failed: result.push.filter(item => !item.ok).length } }, alerts: alertNotifier.status() };
+}));
+
 // ─── Block 24b: Remote gateway (browser / phone) ────────────────────────────
 // A separate listener with the mobile web app and a fixed read-only whitelist
 // (lib/remote-gateway.mjs). Off by default. Tailscale mode binds 127.0.0.1 only
@@ -2618,14 +2648,19 @@ const REMOTE_SETTINGS_FILE = dataPath("config", "remote.json");
 const REMOTE_SOURCE_URL = process.env.COD4X_SOURCE_URL || "https://github.com/jackdemzy/cod4x-administration-tool";
 const REMOTE_APP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "dist", "remote");
 const APP_VERSION = JSON.parse(await fs.readFile(new URL("./package.json", import.meta.url), "utf8")).version;
-const REMOTE_DEFAULTS = Object.freeze({ enabled: false, mode: "tailscale", port: REMOTE_DEFAULT_PORT, lanHost: null, certFile: null, keyFile: null });
+const REMOTE_DEFAULTS = Object.freeze({ enabled: false, mode: "tailscale", port: REMOTE_DEFAULT_PORT, lanHost: null, certFile: null, keyFile: null, proxyDomain: null });
+// Block 24c: a public domain behind Caddy on this machine. The gateway stays on
+// 127.0.0.1; Caddy terminates HTTPS (Let's Encrypt) and forwards to it.
+const PROXY_DOMAIN = /^(?=.{4,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
 const remoteState = { settings: { ...REMOTE_DEFAULTS }, server: null, error: null, startedAt: null };
 function validateRemoteSettings(input = {}) {
   const next = { ...REMOTE_DEFAULTS, ...remoteState.settings };
   if (input.enabled !== undefined) { if (typeof input.enabled !== "boolean") throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "enabled" }); next.enabled = input.enabled; }
-  if (input.mode !== undefined) { if (!["tailscale", "lan"].includes(input.mode)) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "mode" }); next.mode = input.mode; }
+  if (input.mode !== undefined) { if (!["tailscale", "lan", "proxy"].includes(input.mode)) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "mode" }); next.mode = input.mode; }
   if (input.port !== undefined) { const port = Number(input.port); if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === PORT) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "port" }); next.port = port; }
-  for (const field of ["lanHost", "certFile", "keyFile"]) if (input[field] !== undefined) next[field] = input[field] === null || input[field] === "" ? null : String(input[field]).trim();
+  for (const field of ["lanHost", "certFile", "keyFile", "proxyDomain"]) if (input[field] !== undefined) next[field] = input[field] === null || input[field] === "" ? null : String(input[field]).trim();
+  if (next.proxyDomain) { next.proxyDomain = next.proxyDomain.toLowerCase(); if (!PROXY_DOMAIN.test(next.proxyDomain)) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "proxyDomain" }); }
+  if (next.mode === "proxy" && !next.proxyDomain) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "proxyDomain" });
   if (next.mode === "lan") {
     remoteListenOptions({ host: next.lanHost || "", port: next.port, tls: { cert: next.certFile, key: next.keyFile } });
     for (const field of ["certFile", "keyFile"]) if (!next[field] || !path.isAbsolute(next[field])) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field });
@@ -2666,7 +2701,15 @@ async function remoteSecondFactor(username, code) {
   return { ok: true, method: "recovery", remaining: user.recovery.length };
 }
 const remoteApp = createRemoteGateway({
-  login: remoteLogin, verifySecondFactor: remoteSecondFactor, hasPermission, sessions: remoteSessions, throttle: loginThrottle, audit: (level, event, details) => audit(level, event, details),
+  login: remoteLogin, verifySecondFactor: remoteSecondFactor, hasPermission, sessions: remoteSessions, throttle: loginThrottle, proxyThrottle: new LoginThrottle({ maxFailures: REMOTE_PROXY_MAX_FAILURES }),
+  policy: () => ({ proxy: remoteState.settings.mode === "proxy" }), audit: (level, event, details) => audit(level, event, details),
+  push: {
+    publicKey: () => alertNotifier.vapidPublicKey,
+    enabled: () => alertNotifier.status().push.enabled,
+    count: username => alertNotifier.status(username).push.mine,
+    subscribe: (username, subscription) => alertNotifier.subscribe(username, subscription),
+    unsubscribe: (username, endpoint) => alertNotifier.unsubscribe(username, endpoint),
+  },
   monitor: {
     overview: async () => monitorCollector.overview(),
     history: async (id, range) => { monitorInstance(id); return monitorStore.history(id, range); },
@@ -2695,6 +2738,7 @@ function remoteStatus() {
     settings, running: Boolean(remoteState.server), error: remoteState.error, startedAt: remoteState.startedAt, address: address ? { host: address.address, port: address.port } : null,
     disabledByEnvironment: process.env.COD4X_REMOTE === "off", appBuilt: existsSync(path.join(REMOTE_APP_DIR, "remote.html")), routes: REMOTE_ROUTES, sourceUrl: REMOTE_SOURCE_URL, version: APP_VERSION,
     tailscaleCommand: `tailscale serve --bg --https=443 127.0.0.1:${settings.port}`, tailscaleOffCommand: `tailscale serve --https=443 127.0.0.1:${settings.port} off`,
+    caddyfile: caddyfileTemplate(settings.proxyDomain, settings.port), proxyLoginLimit: REMOTE_PROXY_MAX_FAILURES,
     sessions: remoteSessions.list().map(({ sessionId, username, role, mfa, client, tailscaleUser, createdAt, lastSeenAt, expiresAt, absoluteExpiresAt }) => ({ sessionId, username, role, mfa, client, tailscaleUser, createdAt, lastSeenAt, expiresAt, absoluteExpiresAt })),
   };
 }
@@ -2706,8 +2750,10 @@ app.get("/api/remote", requirePermission("user.manage"), remoteRoute(async () =>
 app.post("/api/remote/settings", requirePermission("user.manage"), remoteRoute(async req => {
   const next = validateRemoteSettings(req.body || {});
   await saveRemoteSettings(next);
+  const modeChanged = next.mode !== remoteState.settings.mode;
   remoteState.settings = next;
-  if (!next.enabled) remoteSessions.revokeAll();
+  // Switching off or to another exposure (e.g. a public proxy) ends every remote session.
+  if (!next.enabled || modeChanged) remoteSessions.revokeAll();
   audit("warn", "remote.gateway.configured", { actor: req.auth.username, enabled: next.enabled, mode: next.mode, port: next.port });
   await applyRemoteGateway();
   return { remote: remoteStatus() };

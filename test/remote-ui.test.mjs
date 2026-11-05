@@ -44,3 +44,22 @@ test('remote access panel: TOTP setup, gateway settings and sessions', { skip },
   const set = render('SecondFactorSection', { de: true, request: noFetch, me: { totpEnabled: true, recoveryRemaining: 7 } });
   assert.ok(set.includes('7 Wiederherstellungscodes übrig') && set.includes('Ausschalten') && set.includes('type="password"'));
 });
+
+test('notifications panel, proxy mode and push toggle (Block 24c)', { skip }, async () => {
+  const { render } = await renderer();
+  const alerts = { rules: { enabled: true, onDown: true, onUp: true, onPlannedStop: false, diskFreeGb: 5, b3Stopped: false, playersAtLeast: null, repeatMinutes: 30 },
+    discord: { configured: true, url: 'https://discord.com/api/webhooks/1234…/••••abcd', last: { at: Date.UTC(2026, 10, 5, 12), ok: true, code: null } },
+    push: { enabled: true, subscriptions: 2, users: ['phone'], last: null } };
+  const html = render('NotificationsSection', { de: true, request: noFetch, initial: alerts });
+  for (const text of ['Benachrichtigungen', 'Alarme eingeschaltet', 'https://discord.com/api/webhooks/1234…/••••abcd', 'Entfernen', 'Push senden · 2 Gerät(e) (phone)', 'Testalarm senden', 'iOS 16.4', 'Sperrzeit (min)']) assert.ok(html.includes(text), text);
+  assert.ok(html.includes('type="password"') && !html.includes('value="https://discord.com/api/webhooks/1234'), 'the webhook field never shows a URL');
+  const remote = { settings: { enabled: true, mode: 'proxy', port: 8788, lanHost: null, certFile: null, keyFile: null, proxyDomain: 'monitor.example.org' }, running: true, error: null, address: { host: '127.0.0.1', port: 8788 }, appBuilt: true,
+    tailscaleCommand: 'x', tailscaleOffCommand: 'y', caddyfile: 'monitor.example.org {\n\treverse_proxy 127.0.0.1:8788\n}\n', proxyLoginLimit: 5, sessions: [] };
+  const gateway = render('GatewaySection', { de: true, request: noFetch, initial: remote });
+  for (const text of ['Öffentliche Domain hinter Caddy', 'Zweiter Faktor ist für alle Rollen Pflicht, nach 5 Fehlversuchen', 'monitor.example.org {', 'Let&#x27;s Encrypt']) assert.ok(gateway.includes(text), text);
+  assert.equal(render('PushToggle', {}), '', 'nothing before the browser is checked (SSR)');
+  const code = readFileSync(new URL('../lib/remote-app.jsx', import.meta.url), 'utf8');
+  assert.ok(code.includes("userVisibleOnly: true") && code.includes("'/remote/api/push/subscribe'"));
+  const sw = readFileSync(new URL('../remote-public/sw.js', import.meta.url), 'utf8');
+  assert.ok(sw.includes('addEventListener("push"') && sw.includes('showNotification') && sw.includes('notificationclick'));
+});
