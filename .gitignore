@@ -9,6 +9,14 @@ logs/
 servers/
 installations/
 credential-vault/
+# Runtime state written when the backend runs from the source folder (COD4X_DATA_ROOT
+# defaults to "."): users with password hashes and TOTP secrets, sessions, alert
+# settings with the Discord webhook and the VAPID private key, push subscriptions,
+# audit log and monitor history. Only the two shipped defaults stay tracked.
+config/*
+!config/policy.json
+!config/config-profiles.json
+monitor/
 backups/
 work/
 outputs/

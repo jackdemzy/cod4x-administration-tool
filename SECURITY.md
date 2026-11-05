@@ -1,0 +1,66 @@
+# Security Policy
+
+COD4X CONTROL is development source, not a release. It manages game servers, holds RCON passwords and can be reached from a phone, so security reports are welcome and taken seriously.
+
+## Supported versions
+
+Only the latest state of the `main` branch is supported. Fixes are not back-ported to older versions or to copies of the source outside this repository.
+
+## Reporting a vulnerability
+
+Please **do not** open a public issue, pull request or discussion for a security problem.
+
+Report it privately through GitHub instead: **Security → Advisories → Report a vulnerability** in this repository. The report stays visible only to you and the maintainer until a fix is published.
+
+A useful report contains:
+
+- the affected version (`package.json` or the version shown in the app),
+- what an attacker can do and what they need for it (network position, account, role),
+- steps or a minimal proof of concept,
+- whether you have shared it with anyone else.
+
+Do not send real credentials, real server addresses or other people's data. Test only against installations you own.
+
+You can expect a first answer within 7 days. Once the issue is confirmed, a fix is prepared in a private fork where possible and published together with an advisory. You will be credited unless you ask not to be.
+
+## Scope
+
+In scope:
+
+- the CONTROL backend (`installer-server.mjs`, `lib/`) and its admin API on `127.0.0.1:8787`,
+- the remote gateway and the phone app (`/remote/`), including login, second factor, sessions, push and the remote actions,
+- the credential vault, RCON handling and the B3 integration,
+- the Electron desktop app.
+
+Out of scope:
+
+- the CoD4x server core, B3 and other third-party software the tool installs or starts; report those to their projects,
+- vulnerabilities that need full control of the machine CONTROL runs on,
+- findings in development-only dependencies that never reach the shipped app (these are assessed in [`docs/SECURITY-ADVISORIES.md`](docs/SECURITY-ADVISORIES.md)),
+- reports from automated scanners without a description of real impact.
+
+## Secrets never belong in this repository
+
+The repository is public. The following must never be committed, pasted into issues, pull requests or comments, or included in screenshots and logs:
+
+- RCON passwords, the CoD4x master token, the B3 database password and the vault passphrase,
+- Discord webhook URLs (they work like a password),
+- the Web Push (VAPID) private key and push subscriptions,
+- TOTP secrets and recovery codes,
+- TLS private keys and certificates (`*.key`, `*.pem`),
+- `.env` files with real values, API keys and access tokens of any kind,
+- real IP addresses, player GUIDs or other personal data from a live server.
+
+At runtime CONTROL keeps these values outside the source tree: secrets in the encrypted credential vault (`credential-vault/`), alert settings and push subscriptions in `0600` files under `config/`, user accounts under `config/`. These folders and file types are listed in `.gitignore` (only the two shipped defaults `config/policy.json` and `config/config-profiles.json` are tracked). Test code uses only public test vectors (for example RFC 8291 Appendix A) and made-up values.
+
+If a secret was committed by mistake, treat it as leaked: revoke or rotate it first (new RCON password, new Discord webhook, new TOTP enrolment), then remove it from the repository. Deleting the file in a new commit is not enough, because it stays in the history.
+
+## Repository protection
+
+The maintainer keeps these GitHub features switched on:
+
+- secret scanning and push protection (Settings → Advanced Security),
+- Dependabot alerts,
+- private vulnerability reporting.
+
+Every change also runs the source preflight in CI on Windows and Linux.

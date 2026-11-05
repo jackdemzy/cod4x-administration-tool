@@ -60,3 +60,16 @@ The dry run (`npm audit fix --dry-run`) would only install older or alpha compon
 - Both alerts were dismissed on GitHub on 2026-10-19 by the repository owner (`jackdemzy`) with the reason "Risk is tolerable to this project" (`tolerable_risk`) and a reference to this document: alerts #48 (`http-cache-semantics`) and #49 (`sprintf-js`).
 - **Re-assess as soon as** either advisory lists a patched version, `electron-builder` switches to `@electron/get` ≥ 4 without `global-agent`, or the build runs in an environment with a shared HTTP cache or proxy.
 - This assessment will be revisited in roadmap block 20 (Security Audit); block 23 (Release) requires a fresh `npm audit`.
+
+## Update 2026-11-05: GHSA-g3hv-75wg-m249 – `minimatch` ≥ 7.0.0, < 11.0.1 (moderate)
+
+As of 4.18.19, `npm audit` lists 6 entries; all of them inherit this one advisory (`@electron/universal`, `app-builder-lib`, `dmg-builder`, `electron-builder`, `electron-builder-squirrel-windows`, `minimatch`).
+
+**Issue according to the [advisory](https://github.com/advisories/GHSA-g3hv-75wg-m249) (CVSS 6.9):** an attacker who can supply a glob pattern can make the preprocessing grow and then run quadratically, which costs CPU and memory (denial of service). No confidentiality or integrity impact.
+
+**Assessment for COD4X CONTROL:**
+- `minimatch` 9.0.9 and 10.2.6 are pulled in only by `electron-builder` 26.18.0 (`app-builder-lib`, `@electron/universal`), a devDependency used to build the installer. `npm ls minimatch --omit=dev` is empty, so the shipped app does not contain it.
+- During the build the glob patterns come from this repository's own configuration, never from outside, so the attack path does not exist.
+- `npm audit fix` would downgrade `electron-builder` to 24.13.3, which is not an option.
+
+**Decision:** no dependency change for now. The patched version 11.0.1 is a new major version published on 2026-10-27, and `electron-builder` 26.18.0 itself still requires `minimatch` ^10.2.5. Forcing 11.x through `overrides` would change the installer build without closing a reachable path. **Re-assess** when `electron-builder` moves to `minimatch` ≥ 11.0.1 (then update normally and run the preflight) or by 2026-11-19 at the latest.
