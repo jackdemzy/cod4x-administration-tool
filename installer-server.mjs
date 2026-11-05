@@ -24,6 +24,8 @@ import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import dgram from "node:dgram";
 import { inspectBaseGame } from "./lib/base-game-manager.mjs";
 import { mergeBaseGameState, resolveRuntimeLayout, selectRuntimeBaseGamePath } from "./lib/runtime-layout.mjs";
@@ -42,6 +44,10 @@ import { MonitorStore, monitorRange } from "./lib/monitor-store.mjs";
 import { MonitorCollector } from "./lib/monitor-collector.mjs";
 import { MonitorHost } from "./lib/monitor-host.mjs";
 import { readInstanceConsoleLog } from "./lib/instance-console-log.mjs";
+import { LoginThrottle } from "./lib/login-throttle.mjs";
+import { RemoteSessions } from "./lib/remote-sessions.mjs";
+import { REMOTE_DEFAULT_PORT, REMOTE_ROUTES, createRemoteGateway, listenRemoteGateway, remoteListenOptions } from "./lib/remote-gateway.mjs";
+import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecoveryCode, totpUri, verifyTotp } from "./lib/totp.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 
@@ -135,7 +141,7 @@ async function loadAuthUsers() {
     const rows = Array.isArray(raw?.users) ? raw.users : [];
     for (const row of rows) {
       const normalized = normalizeAuthUser(row);
-      if (normalized) authUsers.set(normalized.username.toLowerCase(), { ...normalized, disabled: row.disabled === true, createdAt: row.createdAt || null, updatedAt: row.updatedAt || null });
+      if (normalized) authUsers.set(normalized.username.toLowerCase(), { ...normalized, disabled: row.disabled === true, createdAt: row.createdAt || null, updatedAt: row.updatedAt || null, ...normalizeRemoteFields(row) });
     }
   } catch {}
   if (authUser && !authUsers.has(authUser.username.toLowerCase())) {
@@ -150,11 +156,21 @@ async function saveAuthUsers() {
   const dir = path.dirname(AUTH_USERS_FILE);
   await fs.mkdir(dir, { recursive: true });
   const tmp = `${AUTH_USERS_FILE}.tmp-${process.pid}`;
-  const users = [...authUsers.values()].map(u => ({ version: 1, username: u.username, role: u.role, passwordHash: u.passwordHash, disabled: u.disabled === true, createdAt: u.createdAt || null, updatedAt: u.updatedAt || null }));
+  const users = [...authUsers.values()].map(u => ({ version: 1, username: u.username, role: u.role, passwordHash: u.passwordHash, disabled: u.disabled === true, createdAt: u.createdAt || null, updatedAt: u.updatedAt || null, ...normalizeRemoteFields(u) }));
   await fs.writeFile(tmp, JSON.stringify({ version: 1, users }, null, 2) + "\n", { encoding: "utf8", flag: "w", mode: 0o600 });
   await fs.chmod(tmp, 0o600).catch(() => {});
   await fs.rename(tmp, AUTH_USERS_FILE);
   await fs.chmod(AUTH_USERS_FILE, 0o600).catch(() => {});
+}
+
+// Block 24b: per-user remote access flag, TOTP secret (base32, in this 0600 file
+// and not in the vault, so a locked vault does not lock remote logins out) and
+// scrypt hashes of unused recovery codes.
+function normalizeRemoteFields(row) {
+  const totp = row?.totp && typeof row.totp.secret === "string" && /^[A-Z2-7]{32}$/.test(row.totp.secret)
+    ? { secret: row.totp.secret, lastStep: Number.isInteger(row.totp.lastStep) ? row.totp.lastStep : null, enabledAt: typeof row.totp.enabledAt === "string" ? row.totp.enabledAt : null } : null;
+  const recovery = totp && Array.isArray(row.recovery) ? row.recovery.filter(entry => entry && /^[0-9a-f]{32}$/.test(entry.salt) && /^[0-9a-f]{64}$/.test(entry.hash)).slice(0, 10).map(({ salt, hash }) => ({ salt, hash })) : [];
+  return { remoteAccess: row?.remoteAccess === true, totp, recovery };
 }
 
 function findAuthUser(username) {
@@ -162,7 +178,7 @@ function findAuthUser(username) {
 }
 
 function sanitizeUserMetadata(user) {
-  return { username: user.username, role: user.role, disabled: user.disabled === true, createdAt: user.createdAt || null, updatedAt: user.updatedAt || null };
+  return { username: user.username, role: user.role, disabled: user.disabled === true, createdAt: user.createdAt || null, updatedAt: user.updatedAt || null, remoteAccess: user.remoteAccess === true, totpEnabled: Boolean(user.totp), recoveryRemaining: user.totp ? (user.recovery || []).length : 0 };
 }
 
 async function saveAuthUser(next) {
@@ -290,6 +306,7 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "secrets", permission: "secrets.manage", routes: [] },
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
+  { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
 ]);
 
@@ -856,20 +873,31 @@ app.post("/api/auth/init", async (req, res) => {
   }
 });
 
+// Block 24b: the login brake also guards the local login (per client address and user).
+const loginThrottle = new LoginThrottle();
 app.post("/api/auth/login", async (req, res) => {
   try {
     if (!authUser) return res.status(428).json({ ok: false, error: "First-Run-Initialisierung erforderlich." });
     const username = String(req.body?.username || "").trim();
     const password = String(req.body?.password || "");
+    const throttleKey = LoginThrottle.key(req.socket.remoteAddress, username);
+    const lock = loginThrottle.check(throttleKey);
+    if (lock.locked) {
+      audit({ level: "warn", event: "auth.login_locked", details: { username } });
+      res.setHeader("Retry-After", String(Math.ceil(lock.retryAfterMs / 1000)));
+      return res.status(429).json({ ok: false, code: "LOGIN_LOCKED", retryAfterMs: lock.retryAfterMs, error: `Zu viele Fehlversuche. Erneut möglich in ${Math.ceil(lock.retryAfterMs / 60000)} min.` });
+    }
     const candidate = findAuthUser(username);
     const userA = crypto.createHash("sha256").update(username).digest();
     const userB = crypto.createHash("sha256").update(candidate?.username || authUser.username).digest();
     const validUser = crypto.timingSafeEqual(userA, userB);
     const validPassword = candidate ? verifyAuthPassword(password, candidate.passwordHash) : verifyAuthPassword(password, authUser.passwordHash);
     if (!candidate || candidate.disabled || !validUser || !validPassword) {
-      audit({ level: "warn", event: "auth.login_failed", details: { username } });
+      const locked = loginThrottle.fail(throttleKey);
+      audit({ level: "warn", event: locked ? "auth.login_locked" : "auth.login_failed", details: { username } });
       return res.status(401).json({ ok: false, error: candidate?.disabled ? "Benutzer ist deaktiviert." : "Benutzername oder Passwort ungültig." });
     }
+    loginThrottle.succeed(throttleKey);
     const session = createAuthSession(candidate.username, candidate.role);
     audit({ level: "info", event: "auth.login", details: { username: candidate.username } });
     res.json({ ok: true, token: session.token, sessionId: session.sessionId, expiresAt: session.expiresAt, user: { username: candidate.username, role: candidate.role } });
@@ -885,7 +913,49 @@ app.post("/api/auth/logout", requireAuth, (req, res) => {
 });
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
-  res.json({ ok: true, user: { username: req.auth.username, role: req.auth.role } });
+  const user = findAuthUser(req.auth.username);
+  res.json({ ok: true, user: { username: req.auth.username, role: req.auth.role, remoteAccess: user?.remoteAccess === true, totpEnabled: Boolean(user?.totp), recoveryRemaining: user?.totp ? user.recovery.length : 0 } });
+});
+
+// ─── Block 24b: second factor (TOTP, RFC 6238) for the remote gateway ───────
+// Every user enrols for themselves: setup returns a fresh secret (kept pending
+// for 10 min), confirm with a valid code stores it and returns 10 recovery codes
+// once. Disabling needs the password; an admin can reset it (PATCH totpReset).
+const totpPending = new Map();
+const remoteSessions = new RemoteSessions();
+const TOTP_PENDING_MS = 10 * 60e3;
+app.post("/api/auth/totp/setup", requireAuth, (req, res) => {
+  const user = findAuthUser(req.auth.username);
+  if (!user) return res.status(404).json({ ok: false, code: "USER_NOT_FOUND", error: "Benutzer nicht gefunden." });
+  if (user.totp) return res.status(409).json({ ok: false, code: "TOTP_ALREADY_ENABLED", error: "Zweiter Faktor ist bereits eingerichtet. Zuerst ausschalten." });
+  const secret = generateTotpSecret();
+  totpPending.set(user.username.toLowerCase(), { secret, expiresAt: Date.now() + TOTP_PENDING_MS });
+  audit("info", "auth.totp.setup_started", { username: user.username });
+  res.set("Cache-Control", "no-store").json({ ok: true, secret, uri: totpUri({ secret, account: user.username }), expiresAt: Date.now() + TOTP_PENDING_MS });
+});
+app.post("/api/auth/totp/confirm", requireAuth, async (req, res) => {
+  const user = findAuthUser(req.auth.username), key = String(req.auth.username).toLowerCase(), pending = totpPending.get(key);
+  if (!user || !pending || pending.expiresAt <= Date.now()) { totpPending.delete(key); return res.status(409).json({ ok: false, code: "TOTP_SETUP_EXPIRED", error: "Einrichtung abgelaufen. Bitte neu starten." }); }
+  const step = verifyTotp(pending.secret, req.body?.code);
+  if (step === null) { audit("warn", "auth.totp.confirm_failed", { username: user.username }); return res.status(400).json({ ok: false, code: "TOTP_INVALID", error: "Code ungültig. Uhrzeit von Handy und Rechner prüfen." }); }
+  const codes = generateRecoveryCodes();
+  user.totp = { secret: pending.secret, lastStep: step, enabledAt: new Date().toISOString() };
+  user.recovery = codes.map(hashRecoveryCode);
+  user.updatedAt = new Date().toISOString();
+  totpPending.delete(key);
+  await saveAuthUsers();
+  audit("info", "auth.totp.enabled", { username: user.username });
+  res.set("Cache-Control", "no-store").json({ ok: true, recoveryCodes: codes });
+});
+app.post("/api/auth/totp/disable", requireAuth, async (req, res) => {
+  const user = findAuthUser(req.auth.username);
+  if (!user?.totp) return res.status(409).json({ ok: false, code: "TOTP_NOT_ENABLED", error: "Kein zweiter Faktor eingerichtet." });
+  if (!verifyAuthPassword(String(req.body?.password || ""), user.passwordHash)) { audit("warn", "auth.totp.disable_failed", { username: user.username }); return res.status(401).json({ ok: false, code: "PASSWORD_INVALID", error: "Passwort ungültig." }); }
+  user.totp = null; user.recovery = []; user.updatedAt = new Date().toISOString();
+  await saveAuthUsers();
+  const revoked = remoteSessions.revokeUser(user.username);
+  audit("warn", "auth.totp.disabled", { username: user.username, remoteSessionsRevoked: revoked });
+  res.json({ ok: true, remoteSessionsRevoked: revoked });
 });
 
 // ─── 4.11.6 User & Role Administration ──────────────────────────────────────
@@ -957,8 +1027,16 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
     if (!nextRole) return res.status(400).json({ ok: false, error: "Ungültige Rolle." });
     if (target.username.toLowerCase() === req.auth.username.toLowerCase() && nextRole !== "admin") return res.status(400).json({ ok: false, error: "Der eigene Admin-Account kann nicht auf eine niedrigere Rolle gesetzt werden." });
     if (req.body?.disabled === true && target.username.toLowerCase() === req.auth.username.toLowerCase()) return res.status(400).json({ ok: false, error: "Der eigene Admin-Account kann nicht deaktiviert werden." });
+    if (req.body?.remoteAccess !== undefined && typeof req.body.remoteAccess !== "boolean") return res.status(400).json({ ok: false, error: "remoteAccess muss true oder false sein." });
+    const roleChanged = target.role !== nextRole;
     target.role = nextRole;
     if (req.body?.disabled !== undefined) target.disabled = Boolean(req.body.disabled);
+    if (req.body?.remoteAccess !== undefined) target.remoteAccess = req.body.remoteAccess;
+    if (req.body?.totpReset === true) { target.totp = null; target.recovery = []; }
+    // Anything that narrows access ends the user's remote sessions at once.
+    let remoteRevoked = 0;
+    if (target.disabled || target.remoteAccess !== true || req.body?.totpReset === true || (typeof req.body?.password === "string" && req.body.password.length)) remoteRevoked = remoteSessions.revokeUser(target.username);
+    else if (roleChanged) remoteSessions.setRole(target.username, target.role);
     if (typeof req.body?.password === "string" && req.body.password.length) {
       const passwordError = validateAuthPassword(req.body.password);
       if (passwordError) return res.status(400).json({ ok: false, error: passwordError });
@@ -969,7 +1047,7 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
     await saveAuthUsers();
     if (authUser?.username.toLowerCase() === target.username.toLowerCase()) await saveAuthUser(target);
     for (const session of authSessions.values()) if (session.username.toLowerCase() === target.username.toLowerCase()) session.role = target.role;
-    audit("info", "user.updated", { actor: req.auth.username, username: target.username, role: target.role, disabled: target.disabled });
+    audit("info", "user.updated", { actor: req.auth.username, username: target.username, role: target.role, disabled: target.disabled, remoteAccess: target.remoteAccess === true, totpReset: req.body?.totpReset === true, remoteSessionsRevoked: remoteRevoked });
     res.json({ ok: true, user: sanitizeUserMetadata(target) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -983,8 +1061,9 @@ app.post("/api/users/:username/revoke", requirePermission("user.manage"), (req, 
   for (const [token, session] of authSessions) {
     if (session.username.toLowerCase() === target.username.toLowerCase()) { authSessions.delete(token); revoked++; }
   }
-  audit("info", "user.sessions_revoked", { actor: req.auth.username, username: target.username, revoked });
-  res.json({ ok: true, username: target.username, revoked });
+  const remoteRevoked = remoteSessions.revokeUser(target.username);
+  audit("info", "user.sessions_revoked", { actor: req.auth.username, username: target.username, revoked, remoteRevoked });
+  res.json({ ok: true, username: target.username, revoked, remoteRevoked });
 });
 
 app.get("/api/installer/releases", async (_req, res) => {
@@ -1470,6 +1549,9 @@ function persistAuditEntry(entry) {
 }
 
 function audit(level, event, details = {}) {
+  // The auth routes call audit({ level, event, details }); before 4.18.16 those
+  // entries were recorded with the event name "[object Object]".
+  if (level && typeof level === "object") ({ level, event, details = {} } = level);
   const entry = {
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
@@ -2526,6 +2608,122 @@ app.get("/api/monitor/instances/:id/events", monitorRead, monitorRoute(async req
   const range = monitorRange(String(req.query.range || "7d")).name, consoleAllowed = hasPermission(req.auth.role, "diagnostics.read");
   return { events: monitorStore.events(req.params.id, range).map(event => event.cause && !consoleAllowed ? { ...event, cause: { ...event.cause, console: [] } } : event), range };
 }));
+
+// ─── Block 24b: Remote gateway (browser / phone) ────────────────────────────
+// A separate listener with the mobile web app and a fixed read-only whitelist
+// (lib/remote-gateway.mjs). Off by default. Tailscale mode binds 127.0.0.1 only
+// and `tailscale serve` adds HTTPS for the tailnet; LAN mode needs a
+// certificate. This admin API stays on loopback either way.
+const REMOTE_SETTINGS_FILE = dataPath("config", "remote.json");
+const REMOTE_SOURCE_URL = process.env.COD4X_SOURCE_URL || "https://github.com/jackdemzy/cod4x-administration-tool";
+const REMOTE_APP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "dist", "remote");
+const APP_VERSION = JSON.parse(await fs.readFile(new URL("./package.json", import.meta.url), "utf8")).version;
+const REMOTE_DEFAULTS = Object.freeze({ enabled: false, mode: "tailscale", port: REMOTE_DEFAULT_PORT, lanHost: null, certFile: null, keyFile: null });
+const remoteState = { settings: { ...REMOTE_DEFAULTS }, server: null, error: null, startedAt: null };
+function validateRemoteSettings(input = {}) {
+  const next = { ...REMOTE_DEFAULTS, ...remoteState.settings };
+  if (input.enabled !== undefined) { if (typeof input.enabled !== "boolean") throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "enabled" }); next.enabled = input.enabled; }
+  if (input.mode !== undefined) { if (!["tailscale", "lan"].includes(input.mode)) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "mode" }); next.mode = input.mode; }
+  if (input.port !== undefined) { const port = Number(input.port); if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === PORT) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "port" }); next.port = port; }
+  for (const field of ["lanHost", "certFile", "keyFile"]) if (input[field] !== undefined) next[field] = input[field] === null || input[field] === "" ? null : String(input[field]).trim();
+  if (next.mode === "lan") {
+    remoteListenOptions({ host: next.lanHost || "", port: next.port, tls: { cert: next.certFile, key: next.keyFile } });
+    for (const field of ["certFile", "keyFile"]) if (!next[field] || !path.isAbsolute(next[field])) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field });
+  }
+  return next;
+}
+async function loadRemoteSettings() {
+  try { remoteState.settings = validateRemoteSettings(JSON.parse(await fs.readFile(REMOTE_SETTINGS_FILE, "utf8"))); }
+  catch (error) { if (error.code !== "ENOENT") console.error(`[remote] settings ignored: ${error.code || error.message}`); remoteState.settings = { ...REMOTE_DEFAULTS }; }
+}
+async function saveRemoteSettings(settings) {
+  await fs.mkdir(path.dirname(REMOTE_SETTINGS_FILE), { recursive: true });
+  const tmp = `${REMOTE_SETTINGS_FILE}.tmp-${process.pid}`;
+  await fs.writeFile(tmp, JSON.stringify(settings, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+  await fs.rename(tmp, REMOTE_SETTINGS_FILE);
+}
+// Same checks as the local login; the second factor is verified separately. An
+// unknown user is checked against a fixed hash so the answer takes as long.
+const REMOTE_TIMING_HASH = hashAuthPassword(crypto.randomBytes(16).toString("hex"));
+async function remoteLogin({ username, password }) {
+  const candidate = findAuthUser(username);
+  const validPassword = verifyAuthPassword(password, candidate?.passwordHash || REMOTE_TIMING_HASH);
+  if (!candidate || candidate.disabled || !validPassword) return null;
+  return { username: candidate.username, role: candidate.role, remoteAccess: candidate.remoteAccess === true, totpEnabled: Boolean(candidate.totp) };
+}
+async function remoteSecondFactor(username, code) {
+  const user = findAuthUser(username);
+  if (!user?.totp) return { ok: false };
+  if (/^\s*\d{3}\s?\d{3}\s*$/.test(code)) {
+    const step = verifyTotp(user.totp.secret, code.replace(/\s/g, ""), { lastStep: user.totp.lastStep });
+    if (step === null) return { ok: false };
+    user.totp.lastStep = step; await saveAuthUsers();
+    return { ok: true, method: "totp" };
+  }
+  const index = matchRecoveryCode(code, user.recovery);
+  if (index < 0) return { ok: false };
+  user.recovery.splice(index, 1); user.updatedAt = new Date().toISOString(); await saveAuthUsers();
+  return { ok: true, method: "recovery", remaining: user.recovery.length };
+}
+const remoteApp = createRemoteGateway({
+  login: remoteLogin, verifySecondFactor: remoteSecondFactor, hasPermission, sessions: remoteSessions, throttle: loginThrottle, audit: (level, event, details) => audit(level, event, details),
+  monitor: {
+    overview: async () => monitorCollector.overview(),
+    history: async (id, range) => { monitorInstance(id); return monitorStore.history(id, range); },
+    events: async (id, rangeName) => { monitorInstance(id); const range = monitorRange(rangeName).name; return { events: monitorStore.events(id, range), range }; },
+  },
+  staticDir: REMOTE_APP_DIR, version: APP_VERSION, sourceUrl: REMOTE_SOURCE_URL,
+});
+async function applyRemoteGateway() {
+  if (remoteState.server) { const server = remoteState.server; remoteState.server = null; server.closeAllConnections?.(); await new Promise(resolve => server.close(() => resolve())); }
+  remoteState.error = null; remoteState.startedAt = null;
+  if (!remoteState.settings.enabled || process.env.COD4X_REMOTE === "off") return;
+  const { mode, port, lanHost, certFile, keyFile } = remoteState.settings;
+  try {
+    const tls = mode === "lan" ? { cert: await fs.readFile(certFile), key: await fs.readFile(keyFile) } : null;
+    remoteState.server = await listenRemoteGateway(remoteApp, { host: mode === "lan" ? lanHost : "127.0.0.1", port, tls });
+    remoteState.startedAt = Date.now();
+    audit("warn", "remote.gateway.started", { mode, port, host: mode === "lan" ? lanHost : "127.0.0.1" });
+  } catch (error) {
+    remoteState.error = error.code || "REMOTE_START_FAILED";
+    audit("error", "remote.gateway.failed", { mode, port, code: remoteState.error });
+  }
+}
+function remoteStatus() {
+  const { settings } = remoteState, address = remoteState.server?.address?.();
+  return {
+    settings, running: Boolean(remoteState.server), error: remoteState.error, startedAt: remoteState.startedAt, address: address ? { host: address.address, port: address.port } : null,
+    disabledByEnvironment: process.env.COD4X_REMOTE === "off", appBuilt: existsSync(path.join(REMOTE_APP_DIR, "remote.html")), routes: REMOTE_ROUTES, sourceUrl: REMOTE_SOURCE_URL, version: APP_VERSION,
+    tailscaleCommand: `tailscale serve --bg --https=443 127.0.0.1:${settings.port}`, tailscaleOffCommand: `tailscale serve --https=443 127.0.0.1:${settings.port} off`,
+    sessions: remoteSessions.list().map(({ sessionId, username, role, mfa, client, tailscaleUser, createdAt, lastSeenAt, expiresAt, absoluteExpiresAt }) => ({ sessionId, username, role, mfa, client, tailscaleUser, createdAt, lastSeenAt, expiresAt, absoluteExpiresAt })),
+  };
+}
+const remoteRoute = action => async (req, res) => {
+  try { res.set("Cache-Control", "no-store").json({ ok: true, ...await action(req) }); }
+  catch (error) { const code = error.code === "REMOTE_SETTINGS_INVALID" || /^REMOTE_(HOST|PORT|TLS)_/.test(error.code || "") ? error.code : "REMOTE_FAILED"; res.status(code === "REMOTE_FAILED" ? 500 : 400).json({ ok: false, code, field: error.field || null, error: code }); }
+};
+app.get("/api/remote", requirePermission("user.manage"), remoteRoute(async () => ({ remote: remoteStatus() })));
+app.post("/api/remote/settings", requirePermission("user.manage"), remoteRoute(async req => {
+  const next = validateRemoteSettings(req.body || {});
+  await saveRemoteSettings(next);
+  remoteState.settings = next;
+  if (!next.enabled) remoteSessions.revokeAll();
+  audit("warn", "remote.gateway.configured", { actor: req.auth.username, enabled: next.enabled, mode: next.mode, port: next.port });
+  await applyRemoteGateway();
+  return { remote: remoteStatus() };
+}));
+app.post("/api/remote/sessions/:sessionId/revoke", requirePermission("user.manage"), remoteRoute(async req => {
+  const revoked = remoteSessions.revoke(String(req.params.sessionId || ""));
+  audit("warn", "remote.session.revoked", { actor: req.auth.username, sessionId: req.params.sessionId, revoked });
+  return { revoked, remote: remoteStatus() };
+}));
+app.post("/api/remote/sessions/revoke-all", requirePermission("user.manage"), remoteRoute(async req => {
+  const revoked = remoteSessions.revokeAll();
+  audit("warn", "remote.session.revoked_all", { actor: req.auth.username, revoked });
+  return { revoked, remote: remoteStatus() };
+}));
+await loadRemoteSettings();
+await applyRemoteGateway();
 
 app.listen(PORT, HOST, () => {
   console.log(`COD4X CONTROL installer API listening on :${PORT}`);
