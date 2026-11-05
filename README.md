@@ -1,3 +1,7 @@
+## 4.18.17 Runtime Update note
+
+4.18.17 moves to supported runtimes: Electron 45 (Electron 42 left support on 2026-10-20; the backend and the remote gateway run on Electron's own Node, now 24.22) and Node.js 22.12+ for building (Node 20 left support on 2026-04-30; recommended: 24 LTS). The remembered login uses Electron's asynchronous safeStorage API. Development source, not a release.
+
 ## 4.18.16 Remote Access note
 
 4.18.16 implements roadmap Block 24b: the monitoring can be opened from a browser or a phone. A separate gateway (off by default) serves a mobile web app and only read-only monitoring routes; the admin API stays on loopback. The recommended mode is Tailscale: the gateway listens on 127.0.0.1 and `tailscale serve` adds HTTPS inside your own tailnet, without opening a port. Remote access is granted per user. Logins use a cookie session, a login brake (also for the local login) and, for admin and operator, a second factor (TOTP, RFC 6238) with recovery codes. Every page links the source code (AGPL-3.0). Setup: `docs/REMOTE-ACCESS.md`. Development source, not a release.
@@ -112,7 +116,7 @@ A native Electron desktop shell around the COD4X CONTROL React UI and the local 
 
 ## Build on Windows
 
-Requirements: Node.js 20+ and network access to npm/GitHub/FPSChallenge.eu where required.
+Requirements: Node.js 22.12+ (recommended: 24 LTS) and network access to npm/GitHub/FPSChallenge.eu where required.
 
 Double-click `build.cmd` or run:
 
@@ -266,7 +270,7 @@ Added:
 
 ## One-command Windows build
 
-On Windows, install Node.js 20 or newer, then double-click `build.cmd`. The script checks the source, installs npm dependencies, runs the Vite production build, creates the Electron NSIS installer, and verifies that the expected EXE exists.
+On Windows, install Node.js 22.12 or newer (recommended: 24 LTS), then double-click `build.cmd`. The script checks the source, installs npm dependencies, runs the Vite production build, creates the Electron NSIS installer, and verifies that the expected EXE exists.
 
 Equivalent PowerShell command:
 
