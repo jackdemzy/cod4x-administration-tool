@@ -1,0 +1,12 @@
+{
+  "name": "COD4X CONTROL Monitor",
+  "short_name": "CoD4x Monitor",
+  "description": "Serverstatus, Spieler und Ausfälle (nur lesen).",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#070b09",
+  "theme_color": "#070b09",
+  "lang": "de",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
