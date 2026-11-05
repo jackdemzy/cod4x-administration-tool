@@ -9,3 +9,5 @@ Die vorhandene COD4X-CONTROL-ROADMAP-DETAILED.md ist verbindlich. iw3mp.exe ist 
 Vor einer Übernahme mindestens den passenden Preflight ausführen und Ergebnisse inklusive SKIPs angeben. Quelltests, Browserprüfung, Build und echte Runtime-Gates sind unterschiedliche Nachweise. Keine Fertigstellung oder erfolgreiche Plattformprüfung ohne passende ausgeführte Gates behaupten.
 
 CODEOWNERS ordnet Reviews dem Eigentümer zu; die Datei allein ersetzt keine GitHub-Zugriffsrechte oder Branch-Regeln. Es ist kein automatischer Merge eingerichtet.
+
+Beiträge werden unter der Lizenz des Projekts angenommen ([AGPL-3.0-or-later](LICENSE)). Mit einem Pull Request bestätigst du, dass du die eingereichten Änderungen unter dieser Lizenz weitergeben darfst. Übernommener Fremdcode braucht eine verträgliche Lizenz und eine Herkunftsangabe im Pull Request.
