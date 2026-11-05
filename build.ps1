@@ -7,21 +7,22 @@ Set-Location $PSScriptRoot
 
 Write-Host ''
 Write-Host '========================================='
-Write-Host ' COD4X CONTROL 4.18.16 - Windows Build'
+Write-Host ' COD4X CONTROL 4.18.17 - Windows Build'
 Write-Host '========================================='
 Write-Host ''
 
 function Require-Command($name) {
   if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
-    throw "$name wurde nicht gefunden. Bitte Node.js 20+ installieren und das Terminal neu starten."
+    throw "$name wurde nicht gefunden. Bitte Node.js 22.12+ (empfohlen 24 LTS) installieren und das Terminal neu starten."
   }
 }
 
 Require-Command node
 Require-Command npm
 
-$nodeMajor = [int]((node -p "process.versions.node.split('.')[0]").Trim())
-if ($nodeMajor -lt 20) { throw "Node.js 20+ erforderlich. Gefunden: $(node --version)" }
+# Electron 45 needs Node.js >= 22.12 to install; Node 20 is end-of-life since 2026-04-30.
+$nodeOk = (node -p "const [a,b]=process.versions.node.split('.').map(Number); a>22||(a===22&&b>=12)").Trim()
+if ($nodeOk -ne 'true') { throw "Node.js 22.12+ erforderlich (empfohlen 24 LTS). Gefunden: $(node --version)" }
 
 Write-Host "Node: $(node --version)"
 Write-Host "npm : $(npm --version)"
@@ -69,7 +70,7 @@ Write-Host '[4/4] Erzeuge Electron/NSIS Installer ...'
 npx electron-builder --win nsis
 if ($LASTEXITCODE -ne 0) { throw "Electron/NSIS-Build fehlgeschlagen (ExitCode $LASTEXITCODE)." }
 
-$installer = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Setup-4.18.16-x64.exe'
+$installer = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Setup-4.18.17-x64.exe'
 if (-not (Test-Path $installer)) {
   throw "Build beendet, aber erwartete EXE wurde nicht gefunden: $installer"
 }
