@@ -63,3 +63,18 @@ test('notifications panel, proxy mode and push toggle (Block 24c)', { skip }, as
   const sw = readFileSync(new URL('../remote-public/sw.js', import.meta.url), 'utf8');
   assert.ok(sw.includes('addEventListener("push"') && sw.includes('showNotification') && sw.includes('notificationclick'));
 });
+
+test('remote app: actions panel only when allowed, code field until the step-up, restart asks again', { skip }, async () => {
+  const { render, helpers } = await renderer();
+  assert.equal(render('ActionsPanel', { initial: { allowed: false } }), '');
+  const servers = [{ id: 'a', name: 'Gate', up: true, players: 3 }, { id: 'b', name: 'Down', up: false, players: 0 }];
+  const fresh = render('ActionsPanel', { initial: { allowed: true, stepUpUntil: null, servers } });
+  assert.ok(fresh.includes('Aktionen') && fresh.includes('Gate') && fresh.includes('3 Spieler') && fresh.includes('Jede Aktion braucht einen frischen Code'));
+  assert.equal((fresh.match(/>Neustart<\/button>/g) || []).length, 2);
+  assert.equal((fresh.match(/<button[^>]*disabled=""[^>]*>Nachricht/g) || []).length, 1, 'no message to a server that is down');
+  const stepped = render('ActionsPanel', { initial: { allowed: true, stepUpUntil: Date.now() + 60e3, servers } });
+  assert.ok(stepped.includes('Bestätigt bis') && stepped.includes('Ein Neustart fragt trotzdem nach einem Code'));
+  for (const code of ['REMOTE_STEP_UP_REQUIRED', 'REMOTE_STEP_UP_INVALID', 'REMOTE_ACTION_LIMIT', 'REMOTE_RESTART_COOLDOWN', 'REMOTE_ACTIONS_DISABLED', 'RCON_SAY_INVALID']) assert.notEqual(helpers.remoteMessage(code), code, code);
+  const code = readFileSync(new URL('../lib/remote-app.jsx', import.meta.url), 'utf8');
+  assert.ok(!/\/rcon\/|\/stop|\/start/.test(code), 'no free RCON, start or stop from the phone');
+});

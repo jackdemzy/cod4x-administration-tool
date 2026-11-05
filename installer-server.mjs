@@ -172,7 +172,7 @@ function normalizeRemoteFields(row) {
   const totp = row?.totp && typeof row.totp.secret === "string" && /^[A-Z2-7]{32}$/.test(row.totp.secret)
     ? { secret: row.totp.secret, lastStep: Number.isInteger(row.totp.lastStep) ? row.totp.lastStep : null, enabledAt: typeof row.totp.enabledAt === "string" ? row.totp.enabledAt : null } : null;
   const recovery = totp && Array.isArray(row.recovery) ? row.recovery.filter(entry => entry && /^[0-9a-f]{32}$/.test(entry.salt) && /^[0-9a-f]{64}$/.test(entry.hash)).slice(0, 10).map(({ salt, hash }) => ({ salt, hash })) : [];
-  return { remoteAccess: row?.remoteAccess === true, totp, recovery };
+  return { remoteAccess: row?.remoteAccess === true, remoteActions: row?.remoteActions === true, totp, recovery };
 }
 
 function findAuthUser(username) {
@@ -180,7 +180,7 @@ function findAuthUser(username) {
 }
 
 function sanitizeUserMetadata(user) {
-  return { username: user.username, role: user.role, disabled: user.disabled === true, createdAt: user.createdAt || null, updatedAt: user.updatedAt || null, remoteAccess: user.remoteAccess === true, totpEnabled: Boolean(user.totp), recoveryRemaining: user.totp ? (user.recovery || []).length : 0 };
+  return { username: user.username, role: user.role, disabled: user.disabled === true, createdAt: user.createdAt || null, updatedAt: user.updatedAt || null, remoteAccess: user.remoteAccess === true, remoteActions: user.remoteActions === true, totpEnabled: Boolean(user.totp), recoveryRemaining: user.totp ? (user.recovery || []).length : 0 };
 }
 
 async function saveAuthUser(next) {
@@ -916,7 +916,7 @@ app.post("/api/auth/logout", requireAuth, (req, res) => {
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
   const user = findAuthUser(req.auth.username);
-  res.json({ ok: true, user: { username: req.auth.username, role: req.auth.role, remoteAccess: user?.remoteAccess === true, totpEnabled: Boolean(user?.totp), recoveryRemaining: user?.totp ? user.recovery.length : 0 } });
+  res.json({ ok: true, user: { username: req.auth.username, role: req.auth.role, remoteAccess: user?.remoteAccess === true, remoteActions: user?.remoteActions === true, totpEnabled: Boolean(user?.totp), recoveryRemaining: user?.totp ? user.recovery.length : 0 } });
 });
 
 // ─── Block 24b: second factor (TOTP, RFC 6238) for the remote gateway ───────
@@ -1030,10 +1030,12 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
     if (target.username.toLowerCase() === req.auth.username.toLowerCase() && nextRole !== "admin") return res.status(400).json({ ok: false, error: "Der eigene Admin-Account kann nicht auf eine niedrigere Rolle gesetzt werden." });
     if (req.body?.disabled === true && target.username.toLowerCase() === req.auth.username.toLowerCase()) return res.status(400).json({ ok: false, error: "Der eigene Admin-Account kann nicht deaktiviert werden." });
     if (req.body?.remoteAccess !== undefined && typeof req.body.remoteAccess !== "boolean") return res.status(400).json({ ok: false, error: "remoteAccess muss true oder false sein." });
+    if (req.body?.remoteActions !== undefined && typeof req.body.remoteActions !== "boolean") return res.status(400).json({ ok: false, error: "remoteActions muss true oder false sein." });
     const roleChanged = target.role !== nextRole;
     target.role = nextRole;
     if (req.body?.disabled !== undefined) target.disabled = Boolean(req.body.disabled);
     if (req.body?.remoteAccess !== undefined) target.remoteAccess = req.body.remoteAccess;
+    if (req.body?.remoteActions !== undefined) target.remoteActions = req.body.remoteActions;
     if (req.body?.totpReset === true) { target.totp = null; target.recovery = []; }
     // Anything that narrows access ends the user's remote sessions at once.
     let remoteRevoked = 0;
@@ -1051,7 +1053,7 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
     await saveAuthUsers();
     if (authUser?.username.toLowerCase() === target.username.toLowerCase()) await saveAuthUser(target);
     for (const session of authSessions.values()) if (session.username.toLowerCase() === target.username.toLowerCase()) session.role = target.role;
-    audit("info", "user.updated", { actor: req.auth.username, username: target.username, role: target.role, disabled: target.disabled, remoteAccess: target.remoteAccess === true, totpReset: req.body?.totpReset === true, remoteSessionsRevoked: remoteRevoked });
+    audit("info", "user.updated", { actor: req.auth.username, username: target.username, role: target.role, disabled: target.disabled, remoteAccess: target.remoteAccess === true, remoteActions: target.remoteActions === true, totpReset: req.body?.totpReset === true, remoteSessionsRevoked: remoteRevoked });
     res.json({ ok: true, user: sanitizeUserMetadata(target) });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -2648,7 +2650,7 @@ const REMOTE_SETTINGS_FILE = dataPath("config", "remote.json");
 const REMOTE_SOURCE_URL = process.env.COD4X_SOURCE_URL || "https://github.com/jackdemzy/cod4x-administration-tool";
 const REMOTE_APP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "dist", "remote");
 const APP_VERSION = JSON.parse(await fs.readFile(new URL("./package.json", import.meta.url), "utf8")).version;
-const REMOTE_DEFAULTS = Object.freeze({ enabled: false, mode: "tailscale", port: REMOTE_DEFAULT_PORT, lanHost: null, certFile: null, keyFile: null, proxyDomain: null });
+const REMOTE_DEFAULTS = Object.freeze({ enabled: false, mode: "tailscale", port: REMOTE_DEFAULT_PORT, lanHost: null, certFile: null, keyFile: null, proxyDomain: null, actions: false });
 // Block 24c: a public domain behind Caddy on this machine. The gateway stays on
 // 127.0.0.1; Caddy terminates HTTPS (Let's Encrypt) and forwards to it.
 const PROXY_DOMAIN = /^(?=.{4,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
@@ -2656,6 +2658,7 @@ const remoteState = { settings: { ...REMOTE_DEFAULTS }, server: null, error: nul
 function validateRemoteSettings(input = {}) {
   const next = { ...REMOTE_DEFAULTS, ...remoteState.settings };
   if (input.enabled !== undefined) { if (typeof input.enabled !== "boolean") throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "enabled" }); next.enabled = input.enabled; }
+  if (input.actions !== undefined) { if (typeof input.actions !== "boolean") throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "actions" }); next.actions = input.actions; }
   if (input.mode !== undefined) { if (!["tailscale", "lan", "proxy"].includes(input.mode)) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "mode" }); next.mode = input.mode; }
   if (input.port !== undefined) { const port = Number(input.port); if (!Number.isInteger(port) || port < 1024 || port > 65535 || port === PORT) throw Object.assign(new Error("REMOTE_SETTINGS_INVALID"), { code: "REMOTE_SETTINGS_INVALID", field: "port" }); next.port = port; }
   for (const field of ["lanHost", "certFile", "keyFile", "proxyDomain"]) if (input[field] !== undefined) next[field] = input[field] === null || input[field] === "" ? null : String(input[field]).trim();
@@ -2686,7 +2689,8 @@ async function remoteLogin({ username, password }) {
   if (!candidate || candidate.disabled || !validPassword) return null;
   return { username: candidate.username, role: candidate.role, remoteAccess: candidate.remoteAccess === true, totpEnabled: Boolean(candidate.totp) };
 }
-async function remoteSecondFactor(username, code) {
+// totpOnly (Block 24d step-up): a recovery code never authorises an action.
+async function remoteSecondFactor(username, code, { totpOnly = false } = {}) {
   const user = findAuthUser(username);
   if (!user?.totp) return { ok: false };
   if (/^\s*\d{3}\s?\d{3}\s*$/.test(code)) {
@@ -2695,6 +2699,7 @@ async function remoteSecondFactor(username, code) {
     user.totp.lastStep = step; await saveAuthUsers();
     return { ok: true, method: "totp" };
   }
+  if (totpOnly) return { ok: false };
   const index = matchRecoveryCode(code, user.recovery);
   if (index < 0) return { ok: false };
   user.recovery.splice(index, 1); user.updatedAt = new Date().toISOString(); await saveAuthUsers();
@@ -2703,6 +2708,20 @@ async function remoteSecondFactor(username, code) {
 const remoteApp = createRemoteGateway({
   login: remoteLogin, verifySecondFactor: remoteSecondFactor, hasPermission, sessions: remoteSessions, throttle: loginThrottle, proxyThrottle: new LoginThrottle({ maxFailures: REMOTE_PROXY_MAX_FAILURES }),
   policy: () => ({ proxy: remoteState.settings.mode === "proxy" }), audit: (level, event, details) => audit(level, event, details),
+  // Block 24d: the same services as the admin tool; actor is marked as remote.
+  actions: {
+    allowed: username => { const user = findAuthUser(username); return Boolean(remoteState.settings.actions && user && !user.disabled && user.remoteAccess === true && user.remoteActions === true && hasPermission(user.role, "server.manage")); },
+    players: async id => { const instance = monitorInstance(id); const online = await rconService.online(id, { full: false }); return { instance: { id, name: instance.name || id }, map: online.map, players: online.players.filter(player => !["CNCT", "ZMBI"].includes(player.ping)).map(({ slot, name, ping, score, bot }) => ({ slot, name, ping, score, bot })) }; },
+    say: async (id, text, actor) => { monitorInstance(id); return rconService.say(id, text, `remote:${actor}`); },
+    kick: async (id, target, actor) => { monitorInstance(id); if (typeof target.name !== "string") throw Object.assign(new Error("RCON_KICK_INVALID"), { code: "RCON_KICK_INVALID" }); return { kick: await rconService.kick(id, { slot: target.slot, name: target.name, reason: target.reason }, `remote:${actor}`) }; },
+    restart: async (id, actor) => { monitorInstance(id); const runtime = await instanceManager.launch(id, true); audit("warn", "instance.restart", { instanceId: id, actor: `remote:${actor}` }); return { restarted: true, status: runtime?.status || null }; },
+    notify: (kind, details) => {
+      if (!alertNotifier.rules().enabled || kind === "say") return;
+      let name = details.instanceId; try { name = instanceStore.get(details.instanceId).name || name; } catch { /* gone */ }
+      const title = kind === "restart" ? `${name}: Neustart von ${details.username}` : `${name}: Spieler gekickt von ${details.username}`;
+      return alertNotifier.send({ key: `action:${kind}:${details.instanceId}:${Date.now()}`, type: `action-${kind}`, instanceId: details.instanceId, severity: "info", title, body: "Aus der Ferne ausgelöst." });
+    },
+  },
   push: {
     publicKey: () => alertNotifier.vapidPublicKey,
     enabled: () => alertNotifier.status().push.enabled,
