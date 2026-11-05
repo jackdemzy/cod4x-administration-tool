@@ -62,7 +62,7 @@ export function GatewaySection({ request, de = true, initial = null }) {
     : remote.error ? [T.bad, `${L(de, 'Start fehlgeschlagen', 'Start failed')}: ${remote.error}`] : [T.muted, remote.disabledByEnvironment ? 'COD4X_REMOTE=off' : L(de, 'Aus', 'Off')];
   return <div style={box}>
     <strong style={{ fontSize: 12 }}>{L(de, 'Fern-Gateway (Browser / Handy)', 'Remote gateway (browser / phone)')}</strong>
-    <p style={small}>{L(de, 'Ein eigener Zugang nur zum Monitoring (lesend). Die Admin-API bleibt lokal. Fernzugriff wird pro Benutzer unter „Benutzer & Rollen“ freigeschaltet.', 'A separate, read-only entry to monitoring. The admin API stays local. Remote access is granted per user under "Users & roles".')}</p>
+    <p style={small}>{L(de, 'Ein eigener Zugang zum Monitoring; dazu, wenn unten erlaubt, Nachricht, Kick und Neustart. Die Admin-API bleibt lokal. Fernzugriff und Aktionen werden pro Benutzer unter „Benutzer & Rollen“ freigeschaltet.', 'A separate entry to monitoring; plus message, kick and restart when allowed below. The admin API stays local. Remote access and actions are granted per user under "Users & roles".')}</p>
     <p style={{ ...small, color: state[0] }}>● {state[1]}</p>
     {!remote.appBuilt && <p style={{ ...small, color: T.warn }}>{L(de, 'Die Web-App ist nicht gebaut (npm run build).', 'The web app is not built (npm run build).')}</p>}
     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
