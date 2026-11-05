@@ -6,12 +6,13 @@ const HEADER = 'map     : mp_crash\n\nnum score ping playerid            steamid
 const row = (slot, playerid, name, address = '203.0.113.7:28960') => `${String(slot).padStart(3)}     0   48 ${playerid.padEnd(19)} 7654321           ${name}^7                            0 ${address.padEnd(52)} 1234 25000\n`;
 const status = (...rows) => HEADER + rows.join('');
 
-function service({ statuses = [], running = true, kickError = null, lockAfterScopes = Infinity } = {}) {
-  const kicks = [], audits = [], commands = [];
+function service({ statuses = [], running = true, kickError = null, sayError = null, lockAfterScopes = Infinity } = {}) {
+  const kicks = [], audits = [], commands = [], says = [];
   const vault = { scopes: 0 };
   const client = {
     async execute(password, command) { commands.push(command); if (command !== 'status') throw new Error('unexpected'); return { text: statuses.shift() ?? status(), latencyMs: 1, packets: 1 }; },
     async kick(password, slot, reason) { kicks.push({ slot, reason, password: password.toString() }); if (kickError) throw Object.assign(new Error(kickError), { code: kickError }); return { text: '', latencyMs: 1 }; },
+    async say(password, text) { says.push({ text, password: password.toString() }); if (sayError) throw Object.assign(new Error(sayError), { code: sayError }); return { latencyMs: 1 }; },
     async probe() { return {}; },
   };
   const rcon = new InstanceRconService({
@@ -22,7 +23,7 @@ function service({ statuses = [], running = true, kickError = null, lockAfterSco
     clientFactory: () => client,
     sleep: async () => {},
   });
-  return { rcon, kicks, audits, commands, vault };
+  return { rcon, kicks, audits, commands, vault, says };
 }
 
 test('kick verifies the target, kicks the slot and confirms it left', async () => {
@@ -132,4 +133,16 @@ test('C1: a renamed player with the same real playerid is not confirmed as kicke
 test('C3: a reconnecting player next to their own ZMBI row is still online', async () => {
   const ctx = service({ statuses: [status(row(3, '1234567890', 'Wolf'), row(5, '1234567890', 'Wolf').replace('   48 ', ' ZMBI '))] });
   assert.deepEqual([...(await ctx.rcon.findOnline('srv')).entries()], [['1234567890', 3]]);
+});
+
+test('say (Block 24d): one checked line, audited with the text; a timeout counts as sent', async () => {
+  const ok = service();
+  assert.deepEqual(await ok.rcon.say('srv', '  Restart in 5  ', 'remote:op'), { said: true, text: 'Restart in 5' });
+  assert.deepEqual(ok.says, [{ text: 'Restart in 5', password: 'Kick-Rcon-123' }]);
+  assert.deepEqual(ok.audits.at(-1), { level: 'info', event: 'rcon.say', instanceId: 'srv', actor: 'remote:op', ok: true, text: 'Restart in 5' });
+  await assert.rejects(ok.rcon.say('srv', 'x; quit', 'remote:op'), { code: 'RCON_SAY_INVALID' });
+  assert.equal(ok.says.length, 1, 'an invalid line never reaches the server');
+  assert.deepEqual(await service({ sayError: 'RCON_TIMEOUT' }).rcon.say('srv', 'hi', 'a'), { said: true, text: 'hi' });
+  await assert.rejects(service({ sayError: 'RCON_BAD_PASSWORD' }).rcon.say('srv', 'hi', 'a'), { code: 'RCON_BAD_PASSWORD' });
+  await assert.rejects(service({ running: false }).rcon.say('srv', 'hi', 'a'), error => error.code !== undefined && error.code !== 'RCON_SAY_INVALID');
 });
