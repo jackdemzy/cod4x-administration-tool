@@ -18,13 +18,16 @@ concurrency:
 
 jobs:
   preflight:
-    name: Preflight (${{ matrix.os }})
+    # Node 22 jobs keep the check names used so far ("Preflight (<os>)").
+    name: Preflight (${{ matrix.os }}${{ matrix.node != 22 && format(', Node {0}', matrix.node) || '' }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
+        # 22 = minimum (Electron 45 needs >= 22.12); 24 = the Node line inside Electron 45.
+        node: [22, 24]
     env:
       # Electron binaries are only needed to package the installer, not for preflight/build.
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -41,7 +44,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install dependencies

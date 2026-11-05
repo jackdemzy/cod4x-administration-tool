@@ -31,20 +31,34 @@ ipcMain.handle('select-runtime-executable', async () => {
 // configurations) and the encrypted value is stored only below app.getPath('userData').
 const REMEMBERED_LOGIN_FILE = () => path.join(app.getPath('userData'), 'remembered-login.json');
 
-function rememberedLoginAvailable(){
-  try { return Boolean(safeStorage.isEncryptionAvailable()); } catch { return false; }
+// 4.18.17: asynchronous safeStorage API (the synchronous one is deprecated in
+// Electron 45). Values written by the old API decrypt unchanged.
+async function rememberedLoginAvailable(){
+  try { return Boolean(await safeStorage.isAsyncEncryptionAvailable()); } catch { return false; }
+}
+
+async function writeRememberedLogin(username, password){
+  const fs = require('fs/promises');
+  const file = REMEMBERED_LOGIN_FILE();
+  const tmp = `${file}.tmp-${process.pid}`;
+  await fs.mkdir(path.dirname(file), {recursive:true});
+  const encrypted = (await safeStorage.encryptStringAsync(password)).toString('base64');
+  await fs.writeFile(tmp, JSON.stringify({version:1, username, password:encrypted}) + '\n', {encoding:'utf8'});
+  await fs.rename(tmp, file);
 }
 
 async function readRememberedLogin(){
-  if (!rememberedLoginAvailable()) return {available:false, credentials:null};
+  if (!(await rememberedLoginAvailable())) return {available:false, credentials:null};
   try {
     const fs = require('fs/promises');
     const raw = JSON.parse(await fs.readFile(REMEMBERED_LOGIN_FILE(), 'utf8'));
     if (!raw || raw.version !== 1 || typeof raw.username !== 'string' || typeof raw.password !== 'string') {
       return {available:true, credentials:null};
     }
-    const password = safeStorage.decryptString(Buffer.from(raw.password, 'base64'));
+    const {result: password, shouldReEncrypt} = await safeStorage.decryptStringAsync(Buffer.from(raw.password, 'base64'));
     if (!password) return {available:true, credentials:null};
+    // The OS key was rotated: store the value again under the current key.
+    if (shouldReEncrypt) await writeRememberedLogin(raw.username, password).catch(() => {});
     return {available:true, credentials:{username:raw.username, password}};
   } catch {
     return {available:true, credentials:null};
@@ -54,17 +68,11 @@ async function readRememberedLogin(){
 ipcMain.handle('get-remembered-login', async () => readRememberedLogin());
 
 ipcMain.handle('save-remembered-login', async (_event, payload) => {
-  if (!rememberedLoginAvailable()) return {ok:false, available:false};
+  if (!(await rememberedLoginAvailable())) return {ok:false, available:false};
   const username = String(payload?.username || '').trim();
   const password = String(payload?.password || '');
   if (!username || !password) return {ok:false, available:true};
-  const fs = require('fs/promises');
-  const file = REMEMBERED_LOGIN_FILE();
-  const tmp = `${file}.tmp-${process.pid}`;
-  await fs.mkdir(path.dirname(file), {recursive:true});
-  const encrypted = safeStorage.encryptString(password).toString('base64');
-  await fs.writeFile(tmp, JSON.stringify({version:1, username, password:encrypted}) + '\n', {encoding:'utf8'});
-  await fs.rename(tmp, file);
+  await writeRememberedLogin(username, password);
   return {ok:true, available:true};
 });
 
