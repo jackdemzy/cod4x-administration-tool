@@ -18,6 +18,18 @@ const MESSAGES = {
   PUSH_SERVICE_NOT_ALLOWED: 'Dieser Push-Dienst wird nicht unterstützt.',
   PUSH_UNAVAILABLE: 'Push ist auf dem Server nicht verfügbar.',
   PUSH_DENIED: 'Benachrichtigungen sind für diese Seite blockiert. In den Browser-Einstellungen erlauben.',
+  REMOTE_STEP_UP_REQUIRED: 'Bitte einen frischen Code aus der Authenticator-App eingeben.',
+  REMOTE_STEP_UP_INVALID: 'Code ungültig oder schon benutzt. Wiederherstellungscodes gelten hier nicht.',
+  REMOTE_ACTION_LIMIT: 'Zu viele Aktionen in kurzer Zeit. Bitte ein paar Minuten warten.',
+  REMOTE_RESTART_COOLDOWN: 'Dieser Server wurde gerade erst neu gestartet. Bitte kurz warten.',
+  REMOTE_ACTIONS_DISABLED: 'Fernaktionen sind für dich nicht freigeschaltet.',
+  RCON_SAY_INVALID: 'Nachricht ungültig: 1–150 Zeichen, ohne Umlaute und ohne " ; % / \\.',
+  RCON_KICK_INVALID: 'Kick-Grund ungültig (ohne Umlaute und ohne " ; % / \\).',
+  RCON_KICK_NOT_ONLINE: 'Der Spieler ist nicht mehr auf dem Server.',
+  RCON_KICK_TARGET_CHANGED: 'Auf diesem Platz sitzt inzwischen jemand anderes. Liste neu laden.',
+  RCON_KICK_NOT_CONFIRMED: 'Kick gesendet, aber nicht bestätigt. Spielerliste prüfen.',
+  RCON_NOT_RUNNING: 'Der Server läuft nicht.',
+  VAULT_LOCKED: 'Der Tresor im Admin-Tool ist gesperrt, RCON ist deshalb nicht möglich.',
 };
 export const remoteMessage = code => MESSAGES[code] || code || 'Unbekannter Fehler.';
 
@@ -109,6 +121,84 @@ export function PushToggle({ supported = null }) {
   </section>;
 }
 
+const small = { margin: 0, fontSize: 13, color: T.muted };
+const ghost = { ...button, width: 'auto', padding: '8px 12px', fontSize: 14, background: 'transparent', color: T.text, borderColor: T.border };
+const danger = { ...ghost, color: T.bad, borderColor: `${T.bad}88` };
+
+// Block 24d: say, kick and restart with step-up. A fresh 6-digit code opens a
+// 5-minute window for messages and kicks; a restart always asks for its own code.
+export function ActionsPanel({ initial = null }) {
+  const [info, setInfo] = useState(initial);
+  const [servers, setServers] = useState(initial?.servers || []);
+  const [open, setOpen] = useState(null); // { id, kind }
+  const [form, setForm] = useState({ text: '', reason: '', code: '' });
+  const [players, setPlayers] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (initial) return;
+    call('/remote/api/actions').then(data => {
+      setInfo(data);
+      if (data.allowed) call('/remote/api/monitor/overview').then(overview => setServers(overview.monitor.instances.map(item => ({ id: item.id, name: item.name, up: item.up, players: (item.players || []).length })))).catch(() => {});
+    }).catch(() => setInfo({ allowed: false }));
+  }, []);
+  if (!info?.allowed) return null;
+  const stepped = info.stepUpUntil && info.stepUpUntil > Date.now();
+  const needCode = kind => kind === 'restart' || !stepped;
+  const show = (id, kind) => { setOpen({ id, kind }); setForm({ text: '', reason: '', code: '' }); setError(''); setNotice(''); setPlayers(null); if (kind === 'kick') call(`/remote/api/instances/${encodeURIComponent(id)}/players`).then(data => setPlayers(data.players)).catch(failure => setError(remoteMessage(failure.code))); };
+  async function act(kind, body) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const data = await call(`/remote/api/instances/${encodeURIComponent(open.id)}/${kind}`, { method: 'POST', body: { ...body, ...(form.code ? { code: form.code } : {}) } });
+      setInfo(value => ({ ...value, stepUpUntil: data.stepUpUntil }));
+      setNotice(kind === 'say' ? 'Nachricht gesendet.' : kind === 'kick' ? 'Spieler gekickt.' : 'Neustart ausgelöst.');
+      setForm(value => ({ ...value, text: '', code: '' }));
+      if (kind === 'kick') setPlayers(list => (list || []).filter(player => player.slot !== body.slot));
+      if (kind === 'restart') setOpen(null);
+    } catch (failure) { setError(remoteMessage(failure.code)); if (failure.code === 'REMOTE_STEP_UP_REQUIRED') setInfo(value => ({ ...value, stepUpUntil: null })); }
+    finally { setBusy(false); }
+  }
+  const codeField = kind => needCode(kind) && <label style={{ display: 'grid', gap: 6, fontSize: 13, color: T.muted }}>{kind === 'restart' ? 'Neuer Code für den Neustart (ein schon benutzter gilt nicht, sonst kurz auf den nächsten warten)' : 'Code aus der Authenticator-App (gilt dann 5 min)'}<input style={field} inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={form.code} onChange={e => setForm({ ...form, code: e.target.value.replace(/\D/g, '') })} /></label>;
+  return <section style={{ marginTop: 16, padding: 12, border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, display: 'grid', gap: 10 }}>
+    <strong style={{ fontSize: 14 }}>Aktionen</strong>
+    <p style={small}>{stepped ? `Bestätigt bis ${new Date(info.stepUpUntil).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}. Ein Neustart fragt trotzdem nach einem Code.` : 'Jede Aktion braucht einen frischen Code. Alles steht im Audit.'}</p>
+    {servers.length === 0 && <p style={small}>Keine Serverinstanz.</p>}
+    {servers.map(server => <div key={server.id} style={{ display: 'grid', gap: 8, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 14 }}>{server.name} <span style={{ color: server.up ? T.good : T.bad }}>●</span> <span style={{ color: T.muted, fontSize: 12 }}>{server.players} Spieler</span></span>
+        <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button style={ghost} disabled={!server.up} onClick={() => show(server.id, 'say')}>Nachricht</button>
+          <button style={ghost} disabled={!server.up} onClick={() => show(server.id, 'kick')}>Spieler</button>
+          <button style={danger} onClick={() => show(server.id, 'restart')}>Neustart</button>
+        </span>
+      </div>
+      {open?.id === server.id && open.kind === 'say' && <div style={{ display: 'grid', gap: 8 }}>
+        <label style={{ display: 'grid', gap: 6, fontSize: 13, color: T.muted }}>Nachricht an alle Spieler (max. 150 Zeichen, ohne Umlaute)<input style={field} maxLength={150} value={form.text} onChange={e => setForm({ ...form, text: e.target.value })} /></label>
+        {codeField('say')}
+        <button style={button} disabled={busy || !form.text.trim() || (needCode('say') && form.code.length !== 6)} onClick={() => act('say', { text: form.text })}>Senden</button>
+      </div>}
+      {open?.id === server.id && open.kind === 'kick' && <div style={{ display: 'grid', gap: 8 }}>
+        {players === null ? <p style={small}>Spielerliste wird geladen …</p> : players.length === 0 ? <p style={small}>Niemand online.</p> : <>
+          <label style={{ display: 'grid', gap: 6, fontSize: 13, color: T.muted }}>Grund (optional)<input style={field} maxLength={80} value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} /></label>
+          {codeField('kick')}
+          {players.map(player => <div key={player.slot} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14 }}>{player.name} <span style={{ color: T.muted, fontSize: 12 }}>#{player.slot}{player.bot ? ' · Bot' : ''}</span></span>
+            <button style={danger} disabled={busy || (needCode('kick') && form.code.length !== 6)} onClick={() => { if (typeof window === 'undefined' || window.confirm(`${player.name} kicken?`)) void act('kick', { slot: player.slot, name: player.name, reason: form.reason }); }}>Kicken</button>
+          </div>)}
+        </>}
+      </div>}
+      {open?.id === server.id && open.kind === 'restart' && <div style={{ display: 'grid', gap: 8 }}>
+        <p style={{ ...small, color: T.bad }}>{server.name} wirklich neu starten? {server.players ? `${server.players} Spieler werden getrennt.` : 'Gerade ist niemand online.'}</p>
+        {codeField('restart')}
+        <button style={{ ...button, color: T.bad, borderColor: `${T.bad}88`, background: 'transparent' }} disabled={busy || form.code.length !== 6} onClick={() => act('restart', {})}>Jetzt neu starten</button>
+      </div>}
+    </div>)}
+    {notice && <p style={{ ...small, color: T.good }}>{notice}</p>}
+    {error && <p role="alert" style={{ color: T.bad, fontSize: 14, margin: 0 }}>{error}</p>}
+  </section>;
+}
+
 export function RemoteApp({ initialSession = null, initialInfo = null }) {
   const [session, setSession] = useState(initialSession);
   const [info, setInfo] = useState(initialInfo);
@@ -129,7 +219,7 @@ export function RemoteApp({ initialSession = null, initialInfo = null }) {
         <strong style={{ letterSpacing: '.08em' }}>COD4X MONITOR</strong>
         <span style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13, color: T.muted }}>{session.user?.username}<button onClick={logout} style={{ ...button, width: 'auto', padding: '6px 10px', fontSize: 13 }}>Abmelden</button></span>
       </header>
-      {session.monitor === false ? <p>Keine Berechtigung für das Monitoring (monitor.read).</p> : <><MonitorDashboard de request={request} /><PushToggle /></>}
+      {session.monitor === false ? <p>Keine Berechtigung für das Monitoring (monitor.read).</p> : <><MonitorDashboard de request={request} /><ActionsPanel /><PushToggle /></>}
     </> : checked ? <RemoteLogin onLogin={data => { setExpired(''); setSession({ ...data, monitor: true }); }} initialError={expired} /> : <p style={{ color: T.muted }}>…</p>}
     <SourceFooter info={info} />
   </div>;
