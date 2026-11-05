@@ -10,6 +10,7 @@ import { InstanceB3Runtime } from "./lib/instance-b3-runtime.jsx";
 import { InstanceB3Database } from "./lib/instance-b3-database.jsx";
 import { InstanceB3Admin } from "./lib/instance-b3-admin.jsx";
 import { InstanceOnlinePlayers } from "./lib/instance-online-players.jsx";
+import { MonitorDashboard } from "./lib/monitor-dashboard.jsx";
 
 /**
  * COD4X CONTROL — CoD4x 21.5 Admin Panel
@@ -1393,7 +1394,7 @@ function ProductionRuntimePanel({lang}){
   return <>
     <Header
       title={de ? "Production Runtime" : "Production Runtime"}
-      sub={de ? "4.18.14 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick" : "4.18.14 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick"}
+      sub={de ? "4.18.15 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick" : "4.18.14 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring"}
     />
 
     <ServerInstancesPanel lang={lang} executablePath={executablePath} baseGamePath={baseGamePath} platform={platform} cod4x={cod4x}/>
@@ -1587,7 +1588,7 @@ function ProductionRuntimePanel({lang}){
       )}
     </Section>
 
-    <Section title={de ? "Sicherheitsgrenzen 4.18.14" : "4.18.14 security boundaries"}>
+    <Section title={de ? "Sicherheitsgrenzen 4.18.15" : "4.18.15 security boundaries"}>
       <div style={{fontSize:10,color:C.muted,lineHeight:1.7}}>
         Windows Runtime startet ausschließlich <code style={{color:C.text}}>cod4x18_dedrun.exe</code> · Linux-Core <code style={{color:C.text}}>cod4x18_dedrun</code> ist für Discovery/Verifikation vorbereitet · Client-EXE <code style={{color:C.text}}>iw3mp.exe</code> wird nicht als Server-Core akzeptiert · getrenntes Server-Arbeitsverzeichnis je Instanz (<code style={{color:C.text}}>fs_homepath</code>) · Verified-Core Gate · <code style={{color:C.text}}>shell:false</code> · PID-/Pfad-Verifikation nach Spawn · begrenztes stdout/stderr · kontrollierter Stop mit Prozessende-Prüfung · persistenter Runtime-State · SHA-256-Fingerprint · Core-Nachweis im Runtime-Core-Registry-Verzeichnis möglich · schema-basierte Instanzkonfiguration mit Vorprüfung, Backup, Apply, Verify, Restore und Aktivierungsnachweis · RCON nur über 127.0.0.1 mit Befehls-Allowlist, Passwort nur kurzlebig aus dem Tresor und redigiert in Runtime-History/-Output · optionaler Master-Token (<code style={{color:C.text}}>sv_authtoken</code>) aus dem Tresor, Serverstart nie davon abhängig · Netzwerkbindung standardmäßig Loopback, öffentlich nur ausdrücklich pro Instanz bestätigt · Master-List-Prüfung gegen die offizielle Liste · Plugins nur mit freigegebenem SHA-256, Abweichung blockiert den Start · B3-Abhängigkeiten nur per fester Interpreter-Probe und statischer Quellprüfung, B3 wird nicht gestartet · B3 als eigener Prozess je Instanz, unabhängig vom Server-Lebenszyklus, nur mit geprüftem eBc-B3 · B3-Health-Dashboard mit getrennter Fehlerdiagnose, B3-publist dauerhaft unterdrückt · Audit + Correlation-ID.
       </div>
@@ -1596,7 +1597,7 @@ function ProductionRuntimePanel({lang}){
 
 }
 
-const TABS=[["overview","⌂"],["config","⚙"],["mods","▣"],["security","✓"],["diagnostics","◉"],["runtime","▶"],["audit","≡"],["rcon","⌘"],["versions","⇩"],["tools","•"]];
+const TABS=[["overview","⌂"],["monitor","◷"],["config","⚙"],["mods","▣"],["security","✓"],["diagnostics","◉"],["runtime","▶"],["audit","≡"],["rcon","⌘"],["versions","⇩"],["tools","•"]];
 
 
 function RBACPanel({lang}){
@@ -1756,11 +1757,11 @@ function UserAdministrationPanel({lang, user}){
     {error&&<div style={{background:"rgba(239,68,68,.1)",border:`1px solid ${C.danger}55`,color:C.danger,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:10}}>{error}</div>}
     {message&&<div style={{background:"rgba(34,197,94,.08)",border:`1px solid ${C.success}55`,color:C.success,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:10}}>{message}</div>}
     <div style={{display:"grid",gridTemplateColumns:"1.2fr 1.2fr .8fr auto",gap:8,marginBottom:14}}>
-      <input style={inputStyle} placeholder="Benutzername" value={form.username} onChange={e=>setForm({...form,username:e.target.value})}/><input style={inputStyle} type="password" placeholder="Passwort (≥12)" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/><select style={selectStyle} value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{["admin","operator","auditor","viewer"].map(r=><option key={r}>{r}</option>)}</select><button onClick={create} disabled={busy} style={buttonStyle}>Anlegen</button>
+      <input style={inputStyle} placeholder="Benutzername" value={form.username} onChange={e=>setForm({...form,username:e.target.value})}/><input style={inputStyle} type="password" placeholder="Passwort (≥12)" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/><select style={selectStyle} value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{["admin","operator","auditor","viewer","monitor"].map(r=><option key={r}>{r}</option>)}</select><button onClick={create} disabled={busy} style={buttonStyle}>Anlegen</button>
     </div>
     <div style={{display:"grid",gap:6}}>
       {users.map(u=><div key={u.username} style={{display:"grid",gridTemplateColumns:"1.3fr .8fr .8fr auto auto",gap:8,alignItems:"center",background:C.code,border:`1px solid ${C.border}`,borderRadius:5,padding:"8px 10px"}}>
-        <span style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{u.username}</span><select style={{...selectStyle,padding:"5px 7px"}} value={u.role} onChange={e=>update(u.username,{role:e.target.value})}>{["admin","operator","auditor","viewer"].map(r=><option key={r}>{r}</option>)}</select><span style={{fontSize:10,color:u.disabled?C.danger:C.success}}>{u.disabled?"DEAKTIVIERT":"AKTIV"}</span><button onClick={()=>update(u.username,{disabled:!u.disabled})} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>{u.disabled?"Aktivieren":"Deaktivieren"}</button><button onClick={()=>revoke(u.username)} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>Sessions widerrufen</button>
+        <span style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{u.username}</span><select style={{...selectStyle,padding:"5px 7px"}} value={u.role} onChange={e=>update(u.username,{role:e.target.value})}>{["admin","operator","auditor","viewer","monitor"].map(r=><option key={r}>{r}</option>)}</select><span style={{fontSize:10,color:u.disabled?C.danger:C.success}}>{u.disabled?"DEAKTIVIERT":"AKTIV"}</span><button onClick={()=>update(u.username,{disabled:!u.disabled})} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>{u.disabled?"Aktivieren":"Deaktivieren"}</button><button onClick={()=>revoke(u.username)} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>Sessions widerrufen</button>
       </div>)}
     </div>
   </Section>;
@@ -2454,7 +2455,7 @@ function ControlApp({user,onLogout}){
   const [tab,setTab]=useState("config"),[lang,setLang]=useState("de");
   const t=I18N[lang];
   const labels={
-    overview:lang==="de"?"Übersicht":"Overview",
+    overview:lang==="de"?"Übersicht":"Overview",monitor:"Monitoring",
     config:t.config,rotation:t.rotation,mods:lang==="de"?"Mods":"Mods",
     security:lang==="de"?"Sicherheit":"Security",diagnostics:lang==="de"?"Diagnose":"Diagnostics",runtime:lang==="de"?"Runtime":"Runtime",audit:lang==="de"?"Audit":"Audit",rcon:t.rcon,
     versions:t.versionManager,tools:lang==="de"?"Werkzeuge":"Tools"
@@ -2476,10 +2477,11 @@ function ControlApp({user,onLogout}){
     <main className="app-main" style={{flex:1,padding:"0 30px 30px",overflow:"auto",maxWidth:"calc(100vw - 228px)"}}>
       <header className="topbar">
         <div><div className="topbar-kicker">COD4X CONTROL <span>/</span> {currentLabel.toUpperCase()}</div><div className="topbar-title">{tab==="overview"?"SERVER OVERVIEW":"SERVER ADMINISTRATION"}</div></div>
-        <div className="topbar-right"><span className="topbar-version">4.18.14</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>Logout</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
+        <div className="topbar-right"><span className="topbar-version">4.18.15</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>Logout</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
       </header>
       <div className="content-frame">
         {tab==="overview"&&<><Header title="COD4X CONTROL" sub={lang==="de"?"Serververwaltung":"Server administration"}/><Section title={lang==="de"?"Server":"Server"}><div style={{fontSize:12,color:C.muted}}>Bereit. Wähle links nur den Bereich, den du gerade benötigst.</div></Section></>}
+        {tab==="monitor"&&<><Header title="Monitoring" sub={lang==="de"?"Status, Spieler, Verlauf und Ausfälle aller Serverinstanzen":"Status, players, history and outages of all server instances"}/><MonitorDashboard de={lang==="de"} request={monitorRequest}/></>}
         {tab==="config"&&<ConfigBuilder t={t} lang={lang}/>}
         {tab==="rotation"&&<MapRotationBuilder t={t}/>}
         {tab==="mods"&&<VersionManager t={t} lang={lang}/>}
@@ -2491,10 +2493,13 @@ function ControlApp({user,onLogout}){
         {tab==="versions"&&<VersionManager t={t} lang={lang}/>}
         {tab==="tools"&&<><DvarBrowser t={t}/><GSCAssistant t={t} lang={lang}/></>}
       </div>
-      <footer className="app-footer"><span>COD4X CONTROL 4.18.14</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
+      <footer className="app-footer"><span>COD4X CONTROL 4.18.15</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
     </main>
   </div>;
 }
+
+// Block 24: JSON helper for the monitoring view; errors carry the server code.
+async function monitorRequest(route){ const response=await apiFetch(apiUrl(route)); const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.code||data.error||`HTTP ${response.status}`); return data; }
 
 function langBtn(active){return {background:active?C.accentDim:C.surface,border:`1px solid ${active?C.accent:C.border}`,color:active?C.accent:C.muted,borderRadius:4,padding:"3px 7px",fontSize:10,cursor:"pointer"};}
 

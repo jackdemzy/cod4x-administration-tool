@@ -38,6 +38,10 @@ import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
 import { InstanceB3DatabaseService } from "./lib/instance-b3-database-service.mjs";
 import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
+import { MonitorStore, monitorRange } from "./lib/monitor-store.mjs";
+import { MonitorCollector } from "./lib/monitor-collector.mjs";
+import { MonitorHost } from "./lib/monitor-host.mjs";
+import { readInstanceConsoleLog } from "./lib/instance-console-log.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 
@@ -219,7 +223,7 @@ function requireAuth(req, res, next) {
 }
 
 // ─── 4.11.4 Fine-Grained RBAC & Permissions ──────────────────────────────────
-const RBAC_ROLES = ["admin", "operator", "auditor", "viewer"];
+const RBAC_ROLES = ["admin", "operator", "auditor", "viewer", "monitor"];
 const RBAC_PERMISSIONS = [
   { id: "installation.manage", label: "Installation", description: "Installations- und Installationsvorgänge verwalten." },
   { id: "install.execute", label: "Installation ausführen", description: "Verbindliche Installationsausführung autorisieren." },
@@ -231,13 +235,16 @@ const RBAC_PERMISSIONS = [
   { id: "diagnostics.read", label: "Diagnostics", description: "Diagnose- und Health-Daten lesen." },
   { id: "audit.read", label: "Audit", description: "Audit-Trail und persistente Audit-Daten lesen." },
   { id: "user.manage", label: "Benutzerverwaltung", description: "Benutzer, Rollen und Benutzer-Sessions verwalten." },
+  { id: "monitor.read", label: "Monitoring", description: "Serverstatus, Spielerzahlen, Verlauf und Ausfälle lesen (Block 24)." },
 ];
 const RBAC_PERMISSION_IDS = RBAC_PERMISSIONS.map(p => p.id);
 const RBAC_MATRIX = Object.freeze({
   admin: Object.freeze([...RBAC_PERMISSION_IDS]),
-  operator: Object.freeze(["installation.manage", "install.execute", "updates.manage", "update.execute", "server.manage", "config.manage", "diagnostics.read"]),
-  auditor: Object.freeze(["diagnostics.read", "audit.read"]),
-  viewer: Object.freeze(["diagnostics.read", "audit.read"]),
+  operator: Object.freeze(["installation.manage", "install.execute", "updates.manage", "update.execute", "server.manage", "config.manage", "diagnostics.read", "monitor.read"]),
+  auditor: Object.freeze(["diagnostics.read", "audit.read", "monitor.read"]),
+  viewer: Object.freeze(["diagnostics.read", "audit.read", "monitor.read"]),
+  // Block 24: status and history only; no diagnostics, console or audit.
+  monitor: Object.freeze(["monitor.read"]),
 });
 
 function normalizeRole(role) {
@@ -257,12 +264,13 @@ function hasPermission(role, permission) {
   return RBAC_MATRIX[normalized].includes(id);
 }
 
-function requirePermission(permission) {
+// quietAllowed: polled read routes (monitoring) audit denials only.
+function requirePermission(permission, { quietAllowed = false } = {}) {
   return (req, res, next) => {
     const session = getAuthSession(req);
     if (!session) return res.status(401).json({ ok: false, error: "Authentication required" });
     const allowed = hasPermission(session.role, permission);
-    audit(allowed ? "info" : "warn", "rbac.permission.checked", {
+    if (!allowed || !quietAllowed) audit(allowed ? "info" : "warn", "rbac.permission.checked", {
       username: session.username,
       role: session.role,
       permission,
@@ -281,6 +289,7 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "configuration", permission: "config.manage", routes: ["GET /api/policy", "POST /api/policy/validate", "POST /api/policy/save", "GET /api/config/profiles", "POST /api/config/profiles/save", "POST /api/config/profiles/activate", "POST /api/config/profiles/delete"] },
   { area: "secrets", permission: "secrets.manage", routes: [] },
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
+  { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
 ]);
 
@@ -298,6 +307,7 @@ function authorizationBindingChecks() {
     { id: "viewer", label: "Viewer retains read permissions", pass: hasPermission("viewer", "diagnostics.read") },
     { id: "auditor", label: "Auditor retains audit permissions", pass: hasPermission("auditor", "audit.read") },
     { id: "operator", label: "Operator retains server permissions", pass: hasPermission("operator", "server.manage") },
+    { id: "monitor", label: "Monitor role reads monitoring only", pass: hasPermission("monitor", "monitor.read") && !hasPermission("monitor", "diagnostics.read") && !hasPermission("monitor", "server.manage") },
     { id: "unknown", label: "Unknown permission denied", pass: !hasPermission("admin", "not-a-permission") },
     { id: "unknown-route", label: "Unknown routes remain untouched", pass: true },
     { id: "public", label: "Public authentication allowlist remains available", pass: true },
@@ -2479,6 +2489,43 @@ app.post("/api/instances/:id/b3/admin/penalties/:penaltyId/lift", requirePermiss
 app.post("/api/instances/:id/b3/database/migrate", requirePermission("server.manage"), instanceRoute(async req => ({ database: await b3DatabaseService.migrate(req.params.id, { ebcOptIn: req.body?.ebcOptIn === true, confirmation: typeof req.body?.confirmation === "string" ? req.body.confirmation : undefined }) })));
 // Logical deletion is recoverable: move owned home to .trash, never recursively erase it.
 app.delete("/api/instances/:id", requirePermission("server.manage"), instanceRoute(async req => ({ archive: await instanceManager.archive(req.params.id) })));
+
+// ─── Block 24: Monitoring ───────────────────────────────────────────────────
+// Polls every instance (runtime state + unauthenticated getstatus on loopback),
+// keeps 30 days of history under the data root and records outages with the
+// probable cause. Never uses the RCON password, never starts or stops anything.
+const monitorStore = new MonitorStore({ directory: dataPath("monitor") });
+try { await monitorStore.load(); } catch (error) { console.error(`[monitor] history unavailable: ${error.code || error.message}`); }
+const monitorCollector = new MonitorCollector({
+  listInstances: async () => { try { return instanceStore.list(); } catch { return []; } },
+  runtimeFor: id => instanceManager.runtime(id),
+  probe: port => new RconClient({ port, timeoutMs: 1500 }).queryStatus(),
+  readConsole: homePath => readInstanceConsoleLog(homePath),
+  b3Running: id => b3Service.isRunning(id),
+  store: monitorStore,
+  host: new MonitorHost(),
+  onEvent: event => audit(event.kind === "down" && event.cause?.kind !== "stopped" ? "warn" : "info", `monitor.server.${event.kind}`, { instanceId: event.id, runId: event.runId, cause: event.cause?.kind || null, downMs: event.downMs ?? null }),
+});
+if (process.env.COD4X_MONITOR !== "off") monitorCollector.start();
+function monitorRoute(action) {
+  return async (req, res) => {
+    try { res.set("Cache-Control", "no-store").json({ ok: true, ...await action(req) }); }
+    catch (error) {
+      const code = ["INSTANCE_NOT_FOUND", "MONITOR_RANGE_INVALID"].includes(error.code) ? error.code : "MONITOR_FAILED";
+      res.status(code === "INSTANCE_NOT_FOUND" ? 404 : code === "MONITOR_FAILED" ? 500 : 400).json({ ok: false, code, error: code });
+    }
+  };
+}
+const monitorInstance = id => { try { return instanceStore.get(id); } catch { throw Object.assign(new Error("INSTANCE_NOT_FOUND"), { code: "INSTANCE_NOT_FOUND" }); } };
+const monitorRead = requirePermission("monitor.read", { quietAllowed: true });
+app.get("/api/monitor/overview", monitorRead, monitorRoute(async () => ({ monitor: monitorCollector.overview() })));
+app.get("/api/monitor/instances/:id/history", monitorRead, monitorRoute(async req => { monitorInstance(req.params.id); return { history: await monitorStore.history(req.params.id, String(req.query.range || "24h")) }; }));
+// Console lines of an outage only with diagnostics.read (the monitor role sees the cause line).
+app.get("/api/monitor/instances/:id/events", monitorRead, monitorRoute(async req => {
+  monitorInstance(req.params.id);
+  const range = monitorRange(String(req.query.range || "7d")).name, consoleAllowed = hasPermission(req.auth.role, "diagnostics.read");
+  return { events: monitorStore.events(req.params.id, range).map(event => event.cause && !consoleAllowed ? { ...event, cause: { ...event.cause, console: [] } } : event), range };
+}));
 
 app.listen(PORT, HOST, () => {
   console.log(`COD4X CONTROL installer API listening on :${PORT}`);
