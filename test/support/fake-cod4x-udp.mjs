@@ -7,7 +7,7 @@ import dgram from 'node:dgram';
 const OOB = Buffer.from([0xff, 0xff, 0xff, 0xff]);
 const REDIRECT_BUFFER = 1024;
 
-export async function startFakeCod4xServer({ port = 0, password = '', hostname = 'Fake CoD4x', mapname = 'mp_backlot', silent = false, plugins = [] } = {}) {
+export async function startFakeCod4xServer({ port = 0, password = '', hostname = 'Fake CoD4x', mapname = 'mp_backlot', silent = false, plugins = [], statusPlayers = [] } = {}) {
   const socket = dgram.createSocket('udp4');
   const state = { password, hostname, mapname, commands: [], denied: 0, lastDenyAt: 0, silent, rawPackets: [] };
   const send = (text, remote) => socket.send(Buffer.concat([OOB, Buffer.from(text, 'latin1')]), remote.port, remote.address);
@@ -27,6 +27,12 @@ export async function startFakeCod4xServer({ port = 0, password = '', hostname =
     const [verb, ...rest] = line.split(' ');
     if (verb === 'getinfo') {
       send(`infoResponse\n\\challenge\\${rest[0] || ''}\\hostname\\${state.hostname}\\mapname\\${state.mapname}\\clients\\0\\sv_maxclients\\18`, remote);
+      return;
+    }
+    // Block 24: getstatus (SVC_Status) echoes the challenge in the infostring.
+    if (verb === 'getstatus') {
+      const lines = statusPlayers.map(player => `${player.score} ${player.ping} "${player.name}"\n`).join('');
+      send(`statusResponse\n\\challenge\\${rest[0] || ''}\\sv_hostname\\^1${state.hostname}\\mapname\\${state.mapname}\\g_gametype\\war\\sv_maxclients\\18\n${lines}`, remote);
       return;
     }
     if (verb !== 'rcon') return;
