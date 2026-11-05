@@ -1,3 +1,7 @@
+## 4.18.16 Remote Access note
+
+4.18.16 implements roadmap Block 24b: the monitoring can be opened from a browser or a phone. A separate gateway (off by default) serves a mobile web app and only read-only monitoring routes; the admin API stays on loopback. The recommended mode is Tailscale: the gateway listens on 127.0.0.1 and `tailscale serve` adds HTTPS inside your own tailnet, without opening a port. Remote access is granted per user. Logins use a cookie session, a login brake (also for the local login) and, for admin and operator, a second factor (TOTP, RFC 6238) with recovery codes. Every page links the source code (AGPL-3.0). Setup: `docs/REMOTE-ACCESS.md`. Development source, not a release.
+
 ## 4.18.15 Monitoring note
 
 4.18.15 implements roadmap Block 24a: read-only monitoring of all instances. Every 15 s CONTROL asks each running server with the unauthenticated CoD4x `getstatus` query (no RCON password) and records state, map, players and latency for 30 days. A server that stops answering is declared down after 45 s, so a map change is not an outage; a crash is reported at once, with the probable cause from the end of `qconsole.log`. The Monitoring tab shows server cards, host load, history (24h/7d/30d), availability and outages. The new role `monitor` can read monitoring and nothing else. The getstatus parser and crash diagnosis are adapted from cod4-monitor (AGPL-3.0, Florian Martinez). Remote access from browser and phone follows in Block 24b. Development source, not a release.
