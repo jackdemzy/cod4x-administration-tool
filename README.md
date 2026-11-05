@@ -1,3 +1,7 @@
+## 4.18.15 Monitoring note
+
+4.18.15 implements roadmap Block 24a: read-only monitoring of all instances. Every 15 s CONTROL asks each running server with the unauthenticated CoD4x `getstatus` query (no RCON password) and records state, map, players and latency for 30 days. A server that stops answering is declared down after 45 s, so a map change is not an outage; a crash is reported at once, with the probable cause from the end of `qconsole.log`. The Monitoring tab shows server cards, host load, history (24h/7d/30d), availability and outages. The new role `monitor` can read monitoring and nothing else. The getstatus parser and crash diagnosis are adapted from cod4-monitor (AGPL-3.0, Florian Martinez). Remote access from browser and phone follows in Block 24b. Development source, not a release.
+
 ## 4.18.14 Live Kick note
 
 4.18.14 implements roadmap Block 15b: a connected player can be kicked immediately. CONTROL lists the players from RCON `status` (addresses and ids masked unless `config.manage`) and offers Kick there, on B3 player rows that are online (B3 guid = CoD4x playerid) and as "ban and kick". Because CoD4x resolves kick handles as slots or partial names and also knows `kick all`, CONTROL only sends `clientkick <slot> [reason]` with a 0-63 slot through a separate, verified path: right before the kick the slot must still hold the expected player, and afterwards it must be free. The RCON console allowlist is unchanged. Native check against the real CoD4x 21.2 core with bots passed. Development source, not a release.

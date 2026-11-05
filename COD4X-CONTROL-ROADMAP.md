@@ -828,6 +828,17 @@ Linux Package / Deployment
 
 ---
 
+## Block 24 – Monitoring und Fernzugriff (addendum 2026-11-05)
+
+Vorbild: cod4-monitor 1.0.0 (FloMtz2312, AGPL-3.0). Teile:
+
+- **24a (4.18.15)** – read-only Monitoring: getstatus ohne RCON-Passwort alle 15 s, Verlauf 30 Tage (JSONL), Ausfall nach 45 s (Mapwechsel toleriert), Absturz sofort mit Ursache aus qconsole.log, Monitoring-Tab, Rolle `monitor`.
+- **24b** – Fernzugriff Browser/Handy: separates Gateway (die volle Admin-API bleibt auf Loopback), PWA, Cookie-Session, Login-Rate-Limit, TOTP, `remote.access`, AGPL-§13-Quelllink. Standard: Tailscale.
+- **24c** – Benachrichtigungen (Ausfall/Wiederkehr), optional Caddy mit TLS.
+- **24d** – Aktionen aus der Ferne (Neustart u. a.) nur mit Step-up-Bestätigung.
+
+---
+
 ## Grundprinzipien
 
 1. `iw3mp.exe` niemals als Dedicated Server starten.
