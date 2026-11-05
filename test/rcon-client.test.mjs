@@ -59,3 +59,12 @@ test('responses from a foreign source port are ignored', async t => {
   spoofer.send(Buffer.concat([Buffer.from([255, 255, 255, 255]), Buffer.from('print\nspoofed')]), clientSocket.address().port, '127.0.0.1');
   await assert.rejects(pending, { code: 'RCON_TIMEOUT' });
 });
+
+test('Block 24: getstatus returns names, scores and pings without a password', async t => {
+  const server = await startFakeCod4xServer({ hostname: 'Status Host', mapname: 'mp_strike', statusPlayers: [{ name: '^2Wolf', score: 3, ping: 40 }, { name: 'Fox', score: 12, ping: 55 }] });
+  t.after(server.close);
+  const status = await new RconClient({ port: server.port }).queryStatus();
+  assert.deepEqual([status.reachable, status.hostname, status.mapname, status.gametype, status.maxClients], [true, 'Status Host', 'mp_strike', 'war', 18]);
+  assert.deepEqual(status.players, [{ name: 'Fox', score: 12, ping: 55 }, { name: 'Wolf', score: 3, ping: 40 }]);
+  assert.ok(!server.state.commands.length, 'no rcon command was sent');
+});

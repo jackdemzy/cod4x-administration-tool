@@ -70,3 +70,11 @@ test('kick packet carries only a numeric slot and a checked reason', () => {
 test('the console allowlist still rejects every kick form', () => {
   for (const input of ['clientkick 0', 'kick all', 'kick 1', 'onlykick 1', 'clientkick 0 reason']) assert.throws(() => normalizeRconCommand(input), { code: 'RCON_COMMAND_BLOCKED' }, input);
 });
+
+test('Block 24: statusResponse parser skips garbage lines and strips colour codes', async () => {
+  const { parseStatusResponse, buildStatusPacket } = await import('../lib/rcon-protocol.mjs');
+  const parsed = parseStatusResponse('\\sv_hostname\\^3My ^7Server\\mapname\\mp_crash\\sv_maxclients\\24\n5 30 "^1A"\nbroken line\n-1 999 "B c"\n');
+  assert.deepEqual([parsed.hostname, parsed.mapname, parsed.maxClients], ['My Server', 'mp_crash', 24]);
+  assert.deepEqual(parsed.players, [{ name: 'A', score: 5, ping: 30 }, { name: 'B c', score: -1, ping: 999 }]);
+  assert.throws(() => buildStatusPacket('x y'), { code: 'RCON_CHALLENGE_INVALID' });
+});
