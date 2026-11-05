@@ -1,3 +1,7 @@
+## 4.18.18 Alerts note
+
+4.18.18 implements roadmap Block 24c: alerts when a server goes down or comes back, on low disk space and optionally when B3 stops or a player threshold is reached. Channels are a Discord webhook and Web Push to the phone app (RFC 8291/8292, no extra package); a repeat brake keeps it quiet. Optional mode for a public domain behind Caddy with a second factor for every role. Setup: `docs/REMOTE-ACCESS.md`. Development source, not a release.
+
 ## 4.18.17 Runtime Update note
 
 4.18.17 moves to supported runtimes: Electron 45 (Electron 42 left support on 2026-10-20; the backend and the remote gateway run on Electron's own Node, now 24.22) and Node.js 22.12+ for building (Node 20 left support on 2026-04-30; recommended: 24 LTS). The remembered login uses Electron's asynchronous safeStorage API. Development source, not a release.
