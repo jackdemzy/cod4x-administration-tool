@@ -74,9 +74,33 @@ Push-Nachrichten enthalten nur:
 
 Konsolenzeilen werden nie mitgeschickt. E-Mail gibt es bewusst nicht.
 
+## Aktionen vom Handy (ab 4.18.19)
+
+Vom Handy aus gehen drei Dinge: eine **Nachricht** an alle Spieler, einen Spieler **kicken** und einen Server **neu starten**. Alles andere bleibt nur lesbar.
+
+So schaltest du es ein:
+
+1. Im Admin-Tool unter **Fern-Gateway** „Fernaktionen erlauben“ anhaken und speichern.
+2. In der **Benutzerverwaltung** beim gewünschten Benutzer „Aktionen“ anhaken. Das geht nur für admin und operator.
+3. Der Benutzer braucht den zweiten Faktor (TOTP) und meldet sich damit in der Handy-App an.
+
+Danach erscheint in der App unter dem Monitoring der Bereich **Aktionen**.
+
+So ist es abgesichert:
+
+- Vor der ersten Aktion fragt die App nach einem **frischen Code** aus der Authenticator-App. Danach gelten Nachricht und Kick 5 min ohne neuen Code.
+- Ein **Neustart** fragt immer nach einem eigenen Code. Ein schon benutzter Code gilt nicht, auch nicht der vom Anmelden. Dann kurz auf den nächsten Code warten.
+- **Wiederherstellungscodes** gelten für Aktionen nie.
+- Höchstens 10 Aktionen in 5 min pro Sitzung, höchstens ein Neustart pro Server in 2 min.
+- Die Nachricht darf nur einfache Zeichen enthalten (keine Umlaute, keine `"`, `;`, `%`, `/`, `\`), höchstens 150 Zeichen.
+- Jede Aktion steht im Audit, mit Benutzer, Gerät und Ergebnis. Kick und Neustart lösen zusätzlich einen Alarm aus, wenn Alarme an sind.
+- Das gilt auch über die öffentliche Caddy-Domain. Dort ist der zweite Faktor beim Anmelden ohnehin für alle Pflicht.
+
+Abschalten: Haken beim Benutzer oder im Gateway entfernen. Das wirkt sofort.
+
 ## Was das Gateway schützt
 
-- **Routen:** Erreichbar sind nur Anmelden, Abmelden, Monitoring lesen, die Push-Anmeldung des eigenen Geräts und die Web-App. Tresor, Installer, Konfiguration, RCON und Benutzerverwaltung gibt es dort nicht.
+- **Routen:** Erreichbar sind nur Anmelden, Abmelden, Monitoring lesen, die Push-Anmeldung des eigenen Geräts, die drei Aktionen (Nachricht, Kick, Neustart, nur mit Freigabe und Code) und die Web-App. Tresor, Installer, Konfiguration, freies RCON, Start/Stopp und Benutzerverwaltung gibt es dort nicht.
 - **Sitzung:** Cookie, für JavaScript nicht lesbar, nur über HTTPS, nur von der eigenen Seite. Sie endet nach 30 min ohne Nutzung, spätestens nach 12 h.
 - **Login-Bremse:** Nach 10 Fehlversuchen in 15 min ist die Anmeldung 15 min gesperrt. Das gilt auch für den lokalen Login.
 - **Rechte entziehen:** Jede Fern-Sitzung lässt sich im Admin-Tool beenden. Wer deaktiviert wird oder die Fernfreigabe verliert, ist sofort draußen.

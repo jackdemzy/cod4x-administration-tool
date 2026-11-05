@@ -1,3 +1,7 @@
+## 4.18.19 Remote Actions note
+
+4.18.19 implements roadmap Block 24d: from the phone app an admin or operator can send a chat message to all players, kick a listed player and restart a server. Off by default (gateway switch and a per-user switch); every action needs a fresh code from the authenticator app (a 5-minute window for message and kick, its own code for each restart, never a recovery code), with limits and a full audit. Works over Tailscale, LAN and the public Caddy domain. Setup: `docs/REMOTE-ACCESS.md`. Development source, not a release.
+
 ## 4.18.18 Alerts note
 
 4.18.18 implements roadmap Block 24c: alerts when a server goes down or comes back, on low disk space and optionally when B3 stops or a player threshold is reached. Channels are a Discord webhook and Web Push to the phone app (RFC 8291/8292, no extra package); a repeat brake keeps it quiet. Optional mode for a public domain behind Caddy with a second factor for every role. Setup: `docs/REMOTE-ACCESS.md`. Development source, not a release.
