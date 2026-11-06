@@ -119,6 +119,16 @@ try {
   const botCheckin = /Checked in client/.test(b3log);
   console.log(botCheckin ? "INFO B3 auth checked in a client by itself" : "INFO B3 auth did not check in a bot by itself (bots may not raise EVT_CLIENT_AUTH); covered by the manual RCON check above");
 
+  // b3hide hides only "!", while B3 also runs @ & / commands: a public "@auth"
+  // raises the dashboard alarm from B3's VERBOSE "Queueing event EVT_CLIENT_SAY :
+  // <text>" line (b3/parser.py queueEvent). That line needs a real client: B3
+  // queues only events with a handler (admin/auth: client events), and the cod4x
+  // parser lists players from b3status with an IP regex, so bots never become B3
+  // clients (connectClient() = {}). Natively only the log level is checked; the
+  // line shape is covered by test/b3-manager.test.mjs.
+  const verbose = b3log.split("\n").find(line => /^\d{6} \d{2}:\d{2}:\d{2}\s+VERBOSE\s/.test(line)) || null;
+  check("B3 writes VERBOSE lines at log_level 9 (needed to see 'Queueing event EVT_CLIENT_SAY')", Boolean(verbose), verbose ? verbose.slice(0, 100) : "no VERBOSE line");
+
   const kicked = await rcon.kick("b3-integration", { slot: 1, playerid: "0", name: "bot1", reason: "Native b3hide kick" }, "native");
   await delay(1500);
   const after = parseStatus(await raw("status"), { format: "b3hide" }).players.map(player => `${player.slot}:${player.name}`).join(",");
