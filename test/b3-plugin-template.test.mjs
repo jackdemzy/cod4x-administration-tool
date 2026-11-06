@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderB3PluginTemplate } from '../lib/b3-plugin-template.mjs';
+import { renderB3PluginTemplate, b3PluginClassName } from '../lib/b3-plugin-template.mjs';
 import { validateB3PluginIni, validateB3PluginXml, validateB3PluginCode, checkB3PluginText } from '../lib/b3-plugin-validate.mjs';
 import { B3_PLUGIN_MESSAGES, b3PluginMessage } from '../lib/b3-plugin-messages.mjs';
 
@@ -20,10 +20,22 @@ test('template: code and config for a new plugin', () => {
   assert.equal(validateB3PluginIni(config).ok, true);
 });
 
-test('template: underscore names become CamelCase classes', () => {
+test('template: class name follows Python str.title() like B3 loader', () => {
+  assert.equal(b3PluginClassName('myplug'), 'MyplugPlugin');
+  assert.equal(b3PluginClassName('my_plug'), 'My_PlugPlugin');
+  assert.equal(b3PluginClassName('abc2def'), 'Abc2DefPlugin');
   const { code } = renderB3PluginTemplate('my_plug');
-  assert.match(code, /class MyPlugPlugin\(b3\.plugin\.Plugin\)/);
+  assert.match(code, /class My_PlugPlugin\(b3\.plugin\.Plugin\)/);
   assert.doesNotThrow(() => validateB3PluginCode('my_plug', code));
+});
+
+test('template: config-file plugin with configured message', () => {
+  const { code, config } = renderB3PluginTemplate('myplug');
+  assert.match(code, /requiresConfigFile = True/);
+  assert.match(code, /def onLoadConfig\(self\)/);
+  assert.match(code, /client\.message\(self\._message\)/);
+  assert.match(code, /'Hello from myplug'/);
+  assert.match(config, /\[settings\]\nmessage: Hello from myplug/);
 });
 
 test('ini: accepted forms', () => {
