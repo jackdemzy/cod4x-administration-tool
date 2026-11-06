@@ -2570,7 +2570,8 @@ async function b3IntegrationView(id, full = false) {
   const vault = await credentialService.status();
   const serverRunning = (await instanceManager.runtime(id)).state?.status === "RUNNING";
   const b3Running = await b3Service.isRunning(id);
-  const hints = restartHints({ plan: view.plan, vaultSha256: vault.sha256, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null });
+  const own = await credentialService.instanceStatus(id);
+  const hints = restartHints({ plan: view.plan, credentialDigest: own.digest, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null });
   const status = await credentialService.instanceStatus(id);
   return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: full ? vault.sha256 : null } };
 }
