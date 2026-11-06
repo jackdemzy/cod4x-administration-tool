@@ -64,3 +64,16 @@ test('b3Integration reports the plan and whether the file matches a release hash
   assert.equal(view.knownHash, false);
   assert.equal(view.b3hide.state, 'DISABLED');
 });
+
+// PR #23 review: a switch that would exceed the plugin limit saves nothing.
+test('switching on with 15 other plugins enabled is refused before anything is saved', async t => {
+  const context = await fixture(t);
+  const { manager, store } = context;
+  await approvedB3hide(context, 'b3i-limit');
+  const extra = Array.from({ length: 15 }, (_, index) => ({ name: `extra${String(index + 1).padStart(2, '0')}`, platform: store.get('b3i-limit').platform,
+    sha256: sha(pluginBytes(index)), bytes: 256, enabled: true, approvedAt: new Date().toISOString(), source: 'approved', config: {} }));
+  await store.setPlugins('b3i-limit', [...store.get('b3i-limit').plugins, ...extra]);
+  await assert.rejects(manager.configureB3Integration('b3i-limit', { hideCommands: true, prefix: '!', hideLevel: 20 }), { code: 'PLUGIN_LIMIT' });
+  assert.equal((await manager.b3Integration('b3i-limit')).settings.hideCommands, false, 'hideCommands stays off');
+  assert.equal(store.get('b3i-limit').plugins.find(plugin => plugin.name === 'b3hide').enabled, false, 'b3hide stays disabled');
+});

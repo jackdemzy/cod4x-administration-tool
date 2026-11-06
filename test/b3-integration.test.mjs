@@ -104,3 +104,14 @@ test('integrationRow: off, blocked, not connected and ok', async () => {
   assert.deepEqual(integrationRow({ plan: on, b3hideLoad: 'LOADED', b3Running: true, startedWith: { fingerprint: 'x' }, authStarted: true }), { status: 'NOT_CONNECTED', code: 'B3_AUTH_NOT_STARTED' });
   assert.deepEqual(integrationRow({ plan: on, b3hideLoad: 'LOADED', b3Running: true, startedWith: started, authStarted: true }), { status: 'OK', code: null });
 });
+
+test('PR #23 review: a known different B3 command prefix blocks the integration, an unchecked one does not', () => {
+  assert.deepEqual(codes(plan({ b3CommandPrefix: '#' }).blockers), ['B3_COMMAND_PREFIX_MISMATCH']);
+  assert.deepEqual(codes(plan({ b3CommandPrefix: '' }).blockers), ['B3_COMMAND_PREFIX_MISMATCH'], 'an unreadable prefix fails closed');
+  assert.deepEqual(codes(plan({ b3CommandPrefix: '!' }).blockers), []);
+  assert.deepEqual(codes(plan({ b3CommandPrefix: null }).blockers), [], 'the server launch does not check the B3 source');
+  assert.deepEqual(codes(plan({ authPluginPresent: false, b3CommandPrefix: '#' }).blockers), ['B3_AUTH_PLUGIN_MISSING']);
+  assert.deepEqual(codes(planB3Integration({ settings: normalizeB3Integration({ hideCommands: false }), b3CommandPrefix: '#', credentialsPresent: { rcon: true } }).blockers), []);
+  assert.ok(B3_INTEGRATION_CODES.includes('B3_COMMAND_PREFIX_MISMATCH'));
+  assert.notEqual(b3IntegrationMessage('B3_COMMAND_PREFIX_MISMATCH', 'en'), 'B3_COMMAND_PREFIX_MISMATCH');
+});
