@@ -121,7 +121,7 @@
   - `[commands]` with `auth: 0`;
   - `[messages]` with `auth_message`, `auth_done`, `already_done`, `bad_auth`, `no_password`, using the default texts from eBc-B3 `auth.py`;
   - `[passwords]` with `<level>: <password>` for each entry; the section is omitted when there are none.
-- `prepareB3Runtime(instance, gLog, { databaseDsn, rconPassword, auth })`, where `auth` is `{ passwords } | null`. It writes `b3.xml` and, when `auth` is set, `plugin_auth.ini`; it removes a stale `plugin_auth.ini` when `auth` is null. Both are written atomically (0600). It returns `{ ...paths, gameLog, sha256, authSha256 }`.
+- `prepareB3Runtime(instance, gLog, { databaseDsn, rconPassword, auth })`, where `auth` is `{ passwords } | null`. It writes `b3.xml` and, when `auth` is set, `plugin_auth.ini`; it removes a stale `plugin_auth.ini` when `auth` is null. Both are written atomically (0600). It returns `{ ...paths, gameLog, fingerprint, authFingerprint }`: hashes of the non-secret inputs only, not of the file text (CodeQL js/insufficient-password-hash), so they must not be used for change detection.
 - `redactB3PluginAuth(text)` replaces every value in `[passwords]` with `[redacted]`.
 
 - [ ] Write the failing tests:

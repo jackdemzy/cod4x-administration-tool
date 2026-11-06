@@ -39,14 +39,14 @@ test('prepareB3Runtime writes both files 0600 and removes a stale auth config', 
   const prepared = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: { passwords: { 100: 'hunter22' } } });
   assert.match(await fs.readFile(prepared.config, 'utf8'), /Rcon-Pass-1/);
   assert.match(await fs.readFile(prepared.authConfig, 'utf8'), /100: hunter22/);
-  assert.match(prepared.authSha256, /^[0-9a-f]{64}$/);
+  assert.match(prepared.authFingerprint, /^[0-9a-f]{64}$/);
   if (process.platform !== 'win32') {
     assert.equal(await mode(prepared.config), 0o600);
     assert.equal(await mode(prepared.authConfig), 0o600);
   }
   const again = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: null });
   await assert.rejects(fs.stat(again.authConfig), { code: 'ENOENT' });
-  assert.equal(again.authSha256, null);
+  assert.equal(again.authFingerprint, null);
 });
 
 test('the config views redact the rcon password and the auth passwords', () => {
@@ -58,13 +58,21 @@ test('the config views redact the rcon password and the auth passwords', () => {
   assert.match(shown, /^auth: 0$/m);
 });
 
-test('CodeQL: the returned hashes never derive from a password (fingerprints of the non-secret inputs)', async t => {
+test('CodeQL: the returned fingerprints never derive from a password (non-secret inputs only)', async t => {
   const instance = await home(t);
   const one = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: { passwords: { 100: 'hunter22' } } });
   const two = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-2', auth: { passwords: { 100: 'other-pass' } } });
-  assert.equal(one.sha256, two.sha256, 'b3.xml hash does not follow the RCON password');
-  assert.equal(one.authSha256, two.authSha256, 'plugin_auth.ini hash does not follow the !auth password');
-  assert.notEqual((await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: null })).sha256, one.sha256, 'the auth entry still changes the b3.xml hash');
+  assert.match(one.fingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(one.sha256, undefined, 'no value claims to be a content hash of b3.xml');
+  assert.equal(one.fingerprint, two.fingerprint, 'b3.xml fingerprint does not follow the RCON password');
+  assert.equal(one.authFingerprint, two.authFingerprint, 'plugin_auth.ini fingerprint does not follow the !auth password');
+  assert.notEqual(one.fingerprint, one.authFingerprint, 'each file has its own fingerprint');
+  const withoutAuth = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: null });
+  assert.notEqual(withoutAuth.fingerprint, one.fingerprint, 'the auth entry still changes the b3.xml fingerprint');
+  const withoutRcon = await prepareB3Runtime(instance, 'games_mp.log', { auth: { passwords: { 100: 'hunter22' } } });
+  assert.equal(withoutRcon.authFingerprint, one.authFingerprint, 'plugin_auth.ini fingerprint does not follow b3.xml-only inputs');
   const dsn = password => prepareB3Runtime(instance, 'games_mp.log', { databaseDsn: `mysql://b3:${password}@127.0.0.1:3306/b3`, rconPassword: 'Rcon-Pass-1' });
-  assert.equal((await dsn('db-pass-1')).sha256, (await dsn('db-pass-2')).sha256, 'b3.xml hash does not follow the database password');
+  const mysql = await dsn('db-pass-1');
+  assert.equal(mysql.fingerprint, (await dsn('db-pass-2')).fingerprint, 'b3.xml fingerprint does not follow the database password');
+  assert.notEqual(mysql.fingerprint, withoutAuth.fingerprint, 'MySQL instead of SQLite changes the b3.xml fingerprint');
 });

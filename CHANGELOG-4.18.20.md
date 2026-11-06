@@ -63,6 +63,10 @@ Fixed with regression tests (`test/b3-integration-review.test.mjs`, `test/instan
   - The server has its own fingerprint over the b3hide values only, so an `!auth` change asks for a B3 restart, never a server restart.
   - Credentials compare by a per-instance digest (record ids and change times, never values) instead of the global vault hash.
 
+- **Config hashes (CodeQL `js/insufficient-password-hash`).** The B3 start/restart response returned an unsalted SHA-256 of `b3.xml`, which holds the RCON and database passwords, so a short password could be guessed offline.
+  - It now returns `config.fingerprint`, a hash of the non-secret inputs only (paths, port, game log, template version, and whether MySQL, RCON and auth are set). It does not match the file hash and is not meant for change detection.
+  - `plugin_auth.ini` gets its own `authFingerprint` the same way (`test/b3-config-integration.test.mjs`).
+
 The deferred minor findings are listed in the PR description.
 
 ### Checks
