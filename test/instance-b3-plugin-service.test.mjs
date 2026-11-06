@@ -171,3 +171,22 @@ test('missing b3Path makes shipped rows MISSING but customs work', async t => {
   await service.createCustom('public-01', { name: 'myplug', from: 'template' });
   assert.equal((await service.setEnabled('public-01', 'myplug', true)).state, 'ENABLED');
 });
+
+test('33rd custom plugin is rejected before any file write', async t => {
+  const { service, b3 } = await setup(t);
+  for (let i = 0; i < 32; i += 1) await service.createCustom('public-01', { name: `plug_${String(i).padStart(2, '0')}`, from: 'template' });
+  await assert.rejects(service.createCustom('public-01', { name: 'extra', from: 'template' }), { code: 'B3_PLUGIN_LIMIT' });
+  await assert.rejects(fs.stat(path.join(b3, 'extplugins', 'extra.py')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(b3, 'plugins', 'extra.ini')), { code: 'ENOENT' });
+});
+
+test('failed registry commit removes the created files and allows a retry', async t => {
+  const { service, store, b3 } = await setup(t);
+  const original = store.setB3Plugins.bind(store);
+  store.setB3Plugins = async () => { throw Object.assign(new Error('persist failed'), { code: 'PERSIST_FAILED' }); };
+  await assert.rejects(service.createCustom('public-01', { name: 'myplug', from: 'template' }), { code: 'PERSIST_FAILED' });
+  await assert.rejects(fs.stat(path.join(b3, 'extplugins', 'myplug.py')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(b3, 'plugins', 'myplug.ini')), { code: 'ENOENT' });
+  store.setB3Plugins = original;
+  assert.equal((await service.createCustom('public-01', { name: 'myplug', from: 'template' })).name, 'myplug');
+});
