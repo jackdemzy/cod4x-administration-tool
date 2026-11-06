@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs/promises';
-import { parseStatus, cleanName } from '../lib/rcon-status.mjs';
+import { parseStatus, cleanName, nameMatches } from '../lib/rcon-status.mjs';
 
 test('parses the real CoD4x 21 status with two bots', async () => {
   const status = parseStatus(await fs.readFile(new URL('./fixtures/cod4x-status-bots.txt', import.meta.url), 'latin1'));
@@ -24,4 +24,22 @@ test('names with spaces, colour codes and digits are parsed from the right', () 
 test('cleanName removes colour codes', () => {
   assert.equal(cleanName('^1Big ^7Bad^7'), 'Big Bad');
   assert.equal(cleanName('plain'), 'plain');
+});
+
+test('b3hide status: bots, a truncated colour name, numeric ping and the limits', async () => {
+  const text = await fs.readFile(new URL('./fixtures/cod4x-status-b3hide.txt', import.meta.url), 'latin1');
+  const status = parseStatus(text, { format: 'b3hide' });
+  assert.equal(status.format, 'b3hide');
+  assert.deepEqual(status.limits, { nameLength: 15, connectionState: false });
+  assert.equal(status.map, 'mp_backlot');
+  assert.deepEqual(status.players.map(player => [player.slot, player.name, player.bot, player.ping]), [[0, 'bot0', true, 0], [1, 'bot1', true, 0], [4, 'VeryLongPlaye', false, 48]]);
+  assert.deepEqual([status.players[2].playerid, status.players[2].address, status.players[2].qport], ['2310346613472386', '203.0.113.7:28960', 4321]);
+  assert.equal(parseStatus(text).format, 'core');
+});
+
+test('b3hide name match compares only the cut prefix of long names', () => {
+  assert.equal(nameMatches({ name: 'VeryLongPlaye', rawName: '^1VeryLongPlaye^7' }, 'VeryLongPlayerName', 'b3hide'), true);
+  assert.equal(nameMatches({ name: 'VeryLongPlaye', rawName: '^1VeryLongPlaye^7' }, 'VeryLongPlayerName', 'core'), false);
+  assert.equal(nameMatches({ name: 'Wolf', rawName: 'Wolf^7' }, 'Wolfgang', 'b3hide'), false);
+  assert.equal(nameMatches({ name: 'Wolf', rawName: 'Wolf^7' }, 'Wolf', 'b3hide'), true);
 });

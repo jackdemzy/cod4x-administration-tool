@@ -2354,7 +2354,12 @@ const instanceStore = new ServerInstanceStore({ root: instanceRoot, registryFile
 const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => instanceStore.get(id) });
 let instanceManager = null;
 // RCON audit events carry instance, actor, normalized command and codes only, never the password.
-const rconService = new InstanceRconService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit });
+const rconService = new InstanceRconService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit,
+  // Block 16: b3hide replaces `status` for the run it was loaded into.
+  statusFormat: async id => {
+    const launched = instanceManager.launchedWith(id);
+    return launched?.b3hide && launched.runId === (await instanceManager.runtime(id)).state?.runId ? "b3hide" : "core";
+  } });
 // Master audit events carry instance, run and fixed codes only, never the token.
 const masterService = new InstanceMasterService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit });
 // B3 runtime (Block 12): separate processes; events are audited, never the output.

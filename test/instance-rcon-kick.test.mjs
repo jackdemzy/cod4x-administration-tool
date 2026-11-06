@@ -6,7 +6,7 @@ const HEADER = 'map     : mp_crash\n\nnum score ping playerid            steamid
 const row = (slot, playerid, name, address = '203.0.113.7:28960') => `${String(slot).padStart(3)}     0   48 ${playerid.padEnd(19)} 7654321           ${name}^7                            0 ${address.padEnd(52)} 1234 25000\n`;
 const status = (...rows) => HEADER + rows.join('');
 
-function service({ statuses = [], running = true, kickError = null, sayError = null, lockAfterScopes = Infinity } = {}) {
+function service({ statuses = [], running = true, kickError = null, sayError = null, lockAfterScopes = Infinity, statusFormat } = {}) {
   const kicks = [], audits = [], commands = [], says = [];
   const vault = { scopes: 0 };
   const client = {
@@ -22,6 +22,7 @@ function service({ statuses = [], running = true, kickError = null, sayError = n
     audit: (level, event, details) => audits.push({ level, event, ...details }),
     clientFactory: () => client,
     sleep: async () => {},
+    ...(statusFormat ? { statusFormat } : {}),
   });
   return { rcon, kicks, audits, commands, vault, says };
 }
@@ -145,4 +146,29 @@ test('say (Block 24d): one checked line, audited with the text; a timeout counts
   assert.deepEqual(await service({ sayError: 'RCON_TIMEOUT' }).rcon.say('srv', 'hi', 'a'), { said: true, text: 'hi' });
   await assert.rejects(service({ sayError: 'RCON_BAD_PASSWORD' }).rcon.say('srv', 'hi', 'a'), { code: 'RCON_BAD_PASSWORD' });
   await assert.rejects(service({ running: false }).rcon.say('srv', 'hi', 'a'), error => error.code !== undefined && error.code !== 'RCON_SAY_INVALID');
+});
+
+// Block 16: b3hide replaces `status` (plugins/cod4x_b3hide Cmd_B3Status_f).
+const B3HIDE_HEADER = 'map: mp_backlot\nnum score ping guid                             name            lastmsg address               qport rate\n--- ----- ---- -------------------------------- --------------- ------- --------------------- ----- -----\n';
+const b3row = (slot, id, short, ping = 48) => `${String(slot).padStart(3)}    12 ${String(ping).padStart(4)} ${id.padEnd(32)} ${short}^7${' '.repeat(Math.max(1, 16 - short.replace(/\^[^^]/g, '').length))}      0 203.0.113.7:28960      4321 25000\n`;
+const b3status = (...rows) => B3HIDE_HEADER + rows.join('') + '\n';
+
+test('b3hide format: a matching playerid is kicked and confirmed, a mismatch never', async () => {
+  let ctx = service({ statusFormat: async () => 'b3hide', statuses: [b3status(b3row(4, '2310346613472386', '^1VeryLongPlaye')), b3status()] });
+  assert.deepEqual(await ctx.rcon.kick('srv', { slot: 4, playerid: '2310346613472386', name: 'VeryLongPlayerName' }), { kicked: true, slot: 4 });
+  assert.deepEqual(ctx.kicks.map(kick => kick.slot), [4]);
+  ctx = service({ statusFormat: async () => 'b3hide', statuses: [b3status(b3row(4, '9999999999', '^1VeryLongPlaye'))] });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 4, playerid: '2310346613472386' }), { code: 'RCON_KICK_TARGET_CHANGED' });
+  assert.equal(ctx.kicks.length, 0);
+  // Only the 15-byte prefix of a long name can be compared; a different prefix is a different player.
+  ctx = service({ statusFormat: async () => 'b3hide', statuses: [b3status(b3row(4, '0', '^1VeryLongPlaye'))] });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 4, playerid: '0', name: 'SomeoneElse' }), { code: 'RCON_KICK_TARGET_CHANGED' });
+});
+
+test('b3hide format: online() reports the limits and numeric ping', async () => {
+  const { rcon } = service({ statusFormat: async () => 'b3hide', statuses: [b3status(b3row(4, '2310346613472386', '^1VeryLongPlaye', 0))] });
+  const online = await rcon.online('srv');
+  assert.deepEqual(online.limits, { nameLength: 15, connectionState: false });
+  assert.equal(online.players[0].ping, 0);
+  assert.equal(online.players[0].name, 'VeryLongPlaye');
 });
