@@ -104,7 +104,7 @@ Inside the one `withRuntimeCredentials` scope that already writes the MySQL DSN.
 
 ### Status parser (`lib/rcon-status.mjs`)
 
-- Detect the b3hide format: legacy header and no `steamid` column, as produced by `Cmd_B3Status_f`.
+- Select the b3hide format from the run's plugin state (b3hide enabled in the current run). The text alone cannot tell it apart from the core's `sv_legacyguidmode 1` output, which has the same header.
 - Return `format: 'b3hide'` with `limits: { nameLength: 15, connectionState: false }`.
 - Kick verification (4.18.14) in this format:
   - The playerid must match; a name check compares only the first 15 visible characters.
