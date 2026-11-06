@@ -45,7 +45,7 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
   Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_MONITOR: 'off' });
   const child = spawn(process.execPath, [fileURLToPath(new URL('../installer-server.mjs', import.meta.url))], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let diagnostics = '';
-  for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { diagnostics = (diagnostics + chunk.toString()).slice(-8000); });
+  for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { diagnostics = (diagnostics + chunk.toString()).slice(-200000); });
   const closed = new Promise(resolve => child.once('close', resolve));
   t.after(async () => { child.kill(); await closed; await fs.rm(root, { recursive: true, force: true }); });
   const url = `http://127.0.0.1:${port}`;
@@ -126,6 +126,28 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
   assert.equal(savedConfig.status, 200, savedConfig.json.error);
   assert.match(savedConfig.json.config.sha256, /^[0-9a-f]{64}$/);
   assert.equal((await call(operator, `${base}/myplug/enable`, {})).status, 200, 'operator switches custom plugins');
+  // A syntax error reaches the client with its line number.
+  const syntax = await call(operator, `${base}/myplug/config`, { text: '[settings]\nno separator here\n', expectedSha256: savedConfig.json.config.sha256 }, 'PUT');
+  assert.deepEqual([syntax.status, syntax.json.code], [400, 'B3_PLUGIN_CONFIG_INVALID']);
+  assert.ok(Number.isInteger(syntax.json.line), JSON.stringify(syntax.json));
+  // Malformed JSON with a token: fixed code, no parser message, nothing logged.
+  const malformed = async route => {
+    const response = await fetch(`${url}${route}`, { method: 'PUT', headers: { Authorization: `Bearer ${admin}`, 'Content-Type': 'application/json' }, body: '{"text": "token = SECRET-JSON-123' });
+    return { status: response.status, raw: await response.text() };
+  };
+  for (const [route, code] of [[`${base}/myplug/config`, 'B3_PLUGIN_CONFIG_INVALID'], [`${base}/custom/myplug/code`, 'B3_PLUGIN_CODE_INVALID']]) {
+    const result = await malformed(route);
+    assert.equal(result.status, 400);
+    assert.equal(JSON.parse(result.raw).code, code);
+    assert.ok(!result.raw.includes('SECRET-JSON-123'));
+  }
+  // Electron renderer (Origin: null) preflights PUT and DELETE.
+  const allowed = async route => (await fetch(`${url}${route}`, { method: 'OPTIONS', headers: { Origin: 'null', 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'authorization,content-type' } })).headers.get('access-control-allow-methods').split(',').map(value => value.trim());
+  assert.ok((await allowed(`${base}/myplug/config`)).includes('PUT'));
+  assert.ok((await allowed(`${base}/custom/myplug/code`)).includes('PUT'));
+  assert.ok((await allowed(`${base}/custom/myplug`)).includes('DELETE'));
+  assert.ok(!(await allowed(`${base}/myplug/enable`)).some(method => method === 'PUT' || method === 'DELETE'));
+  assert.ok(!(await allowed('/api/instances/b3p-01/start')).includes('DELETE'));
 
   // code: b3.plugins.code only, exact keys, save.
   assert.equal((await call(operator, `${base}/custom/myplug/code`)).status, 403);
@@ -172,5 +194,5 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
   assert.equal(find('b3.plugin.custom_created', 'myplug').details.sha256, custom.json.plugin.sha256);
   assert.equal(find('b3.plugin.config_saved', 'myplug').details.sha256, undefined, 'config hashes stay out of the audit');
   const everything = JSON.stringify(events) + diagnostics;
-  for (const secret of ['SECRET-123', 'EDITED-CODE-MARKER', 'class UploadedPlugin']) assert.ok(!everything.includes(secret), secret);
+  for (const secret of ['SECRET-123', 'SECRET-JSON-123', 'EDITED-CODE-MARKER', 'class UploadedPlugin']) assert.ok(!everything.includes(secret), secret);
 });
