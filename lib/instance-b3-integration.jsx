@@ -38,6 +38,7 @@ export function B3IntegrationPanel({ data, canManage, de, busy, onSave, onSetPas
     {data.knownHash && <p>{de ? 'b3hide entspricht dem CoD4x-21.2-Release (Freigabe trotzdem selbst prüfen).' : 'b3hide matches the CoD4x 21.2 release (approval is still yours).'}</p>}
     {(data.plan?.blockers || []).length > 0 && <ul role="alert">{data.plan.blockers.map(entry => <li key={entry.code}>{b3IntegrationMessage(entry.code, lang)}</li>)}</ul>}
     {(data.plan?.warnings || []).map(entry => <p key={entry.code}>{b3IntegrationMessage(entry.code, lang)}</p>)}
+    {data.settings?.hideCommands && <p role="note">{b3IntegrationMessage('B3_OTHER_PREFIXES_VISIBLE', lang)}</p>}
     {hints.length > 0 && <ul role="status">{hints.map(text => <li key={text}>{text}</li>)}</ul>}
     <table>
       <caption>{de ? '!auth-Passwörter pro Level (optional)' : '!auth passwords per level (optional)'}</caption>

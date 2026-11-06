@@ -75,6 +75,11 @@ Fixed with regression tests (`test/b3-integration-review.test.mjs`, `test/instan
 - **Integration changes and B3 starts exclude each other.** A change fails with `B3_INTEGRATION_BUSY` while a start is in flight, and a start fails while a change is being saved.
 - **Runtime state in the dashboard.** The B3 dashboard shows the b3hide/auth state (`dashboard.integration`) with its reason, for example `B3HIDE_NOT_LOADED`. While it is not connected, it warns not to type `!auth` passwords.
 
+- **Other B3 prefixes.** B3 also runs commands with its loud, big and private prefixes (`@`, `&`, `/` in `plugin_admin.ini`). b3hide only hides `!`, so a public `@auth <password>` is visible in chat. The core and B3 cannot prevent this without patching b3hide, so CONTROL limits it instead:
+  - the generated `auth_message` says "only with !, never @ & /";
+  - while the switch is on, the integration panel explains the risk (`B3_OTHER_PREFIXES_VISIBLE`);
+  - the B3 log parser detects a public auth command with another prefix (B3 VERBOSE "Queueing event EVT_CLIENT_SAY/TEAM_SAY"), keeping only the fact and never the value. The dashboard then raises `B3_AUTH_PASSWORD_EXPOSED` and asks to change the `!auth` passwords.
+
 The deferred minor findings are listed in the PR description.
 
 ### Checks
