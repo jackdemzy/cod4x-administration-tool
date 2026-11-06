@@ -200,3 +200,32 @@ test('decoding an existing vault without b3db still works', () => fixture(async 
   assert.deepEqual([status.rcon.configured, status.b3db.configured], [true, false]);
   restarted.lock(); service.lock();
 }));
+
+test('b3auth passwords are set and cleared per level and listed without values', () => fixture(async service => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  await service.setB3AuthPassword('server-a', { level: 100, value: 'hunter22', expectedSha256: (await service.status()).sha256 });
+  await service.setB3AuthPassword('server-a', { level: 20, value: 'mod-pass', expectedSha256: (await service.status()).sha256 });
+  let status = await service.instanceStatus('server-a');
+  assert.deepEqual(status.b3auth.levels, [20, 100]);
+  assert.ok(!JSON.stringify(status).includes('hunter22'));
+  await service.setB3AuthPassword('server-a', { level: 100, value: null, expectedSha256: (await service.status()).sha256 });
+  status = await service.instanceStatus('server-a');
+  assert.deepEqual(status.b3auth.levels, [20]);
+  await service.withRuntimeCredentials('server-a', async credentials => assert.deepEqual(JSON.parse(credentials.b3auth.toString()), { 20: 'mod-pass' }));
+  await service.withRuntimeCredentials('server-b', async credentials => assert.equal(credentials.b3auth, null));
+  service.lock();
+}));
+
+test('b3auth rejects invalid passwords and levels, the generic path and a locked vault', () => fixture(async service => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  const snapshot = await service.status();
+  for (const value of ['abc', 'x'.repeat(65), 'a b c d', 'pa"ss', 'pa;ss', 'pa\\ss', '<pass>', 'pa&ss']) {
+    await assert.rejects(service.setB3AuthPassword('server-a', { level: 100, value, expectedSha256: snapshot.sha256 }), error => {
+      assert.equal(error.code, 'B3_AUTH_PASSWORD_INVALID'); assert.ok(!error.message.includes(value)); return true;
+    });
+  }
+  await assert.rejects(service.setB3AuthPassword('server-a', { level: 21, value: 'goodpass', expectedSha256: snapshot.sha256 }), { code: 'B3_AUTH_PASSWORD_INVALID' });
+  await assert.rejects(service.set('server-a', 'b3auth', { value: '{"100":"goodpass"}', expectedSha256: snapshot.sha256 }), { code: 'CREDENTIAL_INVALID' });
+  service.lock();
+  await assert.rejects(service.setB3AuthPassword('server-a', { level: 100, value: 'goodpass', expectedSha256: snapshot.sha256 }), { code: 'VAULT_LOCKED' });
+}));
