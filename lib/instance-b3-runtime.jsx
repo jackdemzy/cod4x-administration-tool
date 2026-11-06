@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { InstanceB3Integration } from './instance-b3-integration.jsx';
+import { InstanceB3Plugins } from './instance-b3-plugins.jsx';
 import { b3IntegrationMessage } from './b3-integration-messages.mjs';
 
 const STATUS_TEXT = {
@@ -125,6 +126,7 @@ export function InstanceB3Runtime({ instance, request, de }) {
     <B3Dashboard dashboard={dashboard} de={de}/>
     <B3RuntimeView b3={b3} de={de}/>
     <InstanceB3Integration instance={instance} request={request} de={de}/>
+    <InstanceB3Plugins instance={instance} request={request} de={de}/>
     {panel && <pre aria-label={panel.kind} style={{ maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{panel.text}</pre>}
   </details>;
 }
