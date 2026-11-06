@@ -58,11 +58,13 @@ test('the config views redact the rcon password and the auth passwords', () => {
   assert.match(shown, /^auth: 0$/m);
 });
 
-test('CodeQL: the returned hashes never derive from a password (computed over the redacted text)', async t => {
+test('CodeQL: the returned hashes never derive from a password (fingerprints of the non-secret inputs)', async t => {
   const instance = await home(t);
   const one = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: { passwords: { 100: 'hunter22' } } });
   const two = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-2', auth: { passwords: { 100: 'other-pass' } } });
   assert.equal(one.sha256, two.sha256, 'b3.xml hash does not follow the RCON password');
   assert.equal(one.authSha256, two.authSha256, 'plugin_auth.ini hash does not follow the !auth password');
   assert.notEqual((await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: null })).sha256, one.sha256, 'the auth entry still changes the b3.xml hash');
+  const dsn = password => prepareB3Runtime(instance, 'games_mp.log', { databaseDsn: `mysql://b3:${password}@127.0.0.1:3306/b3`, rconPassword: 'Rcon-Pass-1' });
+  assert.equal((await dsn('db-pass-1')).sha256, (await dsn('db-pass-2')).sha256, 'b3.xml hash does not follow the database password');
 });
