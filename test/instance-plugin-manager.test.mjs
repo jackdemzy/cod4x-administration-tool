@@ -42,3 +42,17 @@ test('plugin manager renders states, hashes, actions, dependencies and config wi
   assert.match(panel, /Plugins erkennen/);
   assert.match(panel, /blockiert den Start/);
 });
+
+test('Block 16: b3hide dvars are read-only while the integration controls them; release hashes are named', {
+  skip: nativeCompilerAvailable ? false : 'Shared Windows dependencies do not contain native Linux esbuild; UI renderer verified on Windows separately',
+}, async () => {
+  const render = await renderer();
+  const catalog = { fullName: 'CoD4x B3 hide', dependencies: [], configSchema: { b3Hide: { type: 'integer', min: 0, max: 1, default: '1' } } };
+  const plugin = { name: 'b3hide', state: 'ENABLED', enabled: true, sha256: '51fadd9ae0be0bb8855d37a56b53a04b289be775c9fdc38fe256e1f7cb8969bb', pinnedSha256: '51fadd9ae0be0bb8855d37a56b53a04b289be775c9fdc38fe256e1f7cb8969bb', load: null, version: null, catalog, config: {} };
+  const controlled = render('PluginConfigEditor', { de: false, plugin, busy: false, controlled: true, onSave: () => {} });
+  assert.match(controlled, /Controlled by the B3 integration/);
+  assert.match(controlled, /<input[^>]*disabled=""/);
+  assert.match(controlled, /<button[^>]*disabled=""/);
+  assert.match(render('PluginTable', { de: false, plugins: [plugin], busy: false, onAction: () => {} }), /Matches the CoD4x 21\.2 release/);
+  assert.ok(!/Matches the CoD4x/.test(render('PluginTable', { de: false, plugins: [{ ...plugin, sha256: 'e'.repeat(64) }], busy: false, onAction: () => {} })));
+});

@@ -44,6 +44,7 @@ export function InstanceOnlinePlayers({ instance, request, de, initial = null })
     <button disabled={busy} onClick={() => run(() => load(state.permissions === null))}>{de ? 'Aktualisieren' : 'Refresh'}</button>
     {state.online && <>
       <p>Map: {state.online.map ?? '—'} · {state.online.players.length} {de ? 'Spieler' : 'players'}</p>
+      {state.online.limits?.connectionState === false && <p>{de ? `b3hide aktiv: Status eingeschränkt (Namen auf ${state.online.limits.nameLength} Zeichen gekürzt, kein Verbindungsstatus).` : `b3hide active: status limited (names cut to ${state.online.limits.nameLength} characters, no connection state).`}</p>}
       <table><thead><tr><th>Slot</th><th>Name</th><th>Ping</th><th>Score</th><th>ID</th><th>{de ? 'Adresse' : 'Address'}</th>{manage && <th>{de ? 'Kick' : 'Kick'}</th>}</tr></thead>
         <tbody>{state.online.players.map(player => <tr key={player.slot}>
           <td>{player.slot}</td><td>{player.name}</td><td>{player.ping}</td><td>{player.score}</td><td>{player.playerid}</td><td>{player.address}</td>

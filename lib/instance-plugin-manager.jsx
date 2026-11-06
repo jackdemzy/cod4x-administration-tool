@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { KNOWN_B3HIDE_HASHES } from './b3-integration-constants.mjs';
+
+const RELEASE_HASHES = new Set(Object.values(KNOWN_B3HIDE_HASHES));
 
 const STATE_TEXT = {
   ENABLED: ['aktiv – wird beim Start geladen', 'enabled – loaded on start'],
@@ -21,7 +24,7 @@ export function PluginTable({ plugins, de, busy, onAction }) {
       <td role={plugin.state === 'INTEGRITY_MISMATCH' ? 'alert' : undefined}>{plugin.state} – {text(STATE_TEXT, plugin.state)}</td>
       <td>{plugin.load ? text(LOAD_TEXT, plugin.load) : '–'}</td>
       <td>{plugin.version || '–'}</td>
-      <td style={{ overflowWrap: 'anywhere' }} title={plugin.sha256 || ''}>{plugin.sha256 || '–'}{plugin.pinnedSha256 && plugin.pinnedSha256 !== plugin.sha256 && <div>{de ? 'Freigegeben' : 'Approved'}: {plugin.pinnedSha256}</div>}</td>
+      <td style={{ overflowWrap: 'anywhere' }} title={plugin.sha256 || ''}>{plugin.sha256 || '–'}{RELEASE_HASHES.has(plugin.sha256) && <div>{de ? 'Entspricht dem CoD4x-21.2-Release (Freigabe trotzdem selbst prüfen)' : 'Matches the CoD4x 21.2 release (approval is still yours)'}</div>}{plugin.pinnedSha256 && plugin.pinnedSha256 !== plugin.sha256 && <div>{de ? 'Freigegeben' : 'Approved'}: {plugin.pinnedSha256}</div>}</td>
       <td>
         {(plugin.state === 'NOT_APPROVED' || plugin.state === 'INTEGRITY_MISMATCH') && <button disabled={busy} onClick={() => onAction('approve', plugin)}>{de ? 'Hash bestätigen + freigeben' : 'Confirm hash + approve'}</button>}
         {plugin.state === 'DISABLED' && <button disabled={busy} onClick={() => onAction('enable', plugin)}>{de ? 'Aktivieren' : 'Enable'}</button>}
@@ -32,20 +35,23 @@ export function PluginTable({ plugins, de, busy, onAction }) {
   </table>;
 }
 
-export function PluginConfigEditor({ plugin, de, busy, onSave }) {
+// controlled: Block 16 B3 integration owns the b3hide dvars (read-only here).
+export function PluginConfigEditor({ plugin, de, busy, onSave, controlled = false }) {
   const schema = plugin?.catalog?.configSchema;
   const [values, setValues] = useState(() => ({ ...Object.fromEntries(Object.entries(schema || {}).map(([key, definition]) => [key, definition.default])), ...(plugin?.config || {}) }));
   if (!schema || !plugin.pinnedSha256) return null;
   return <fieldset>
     <legend>{plugin.name} – {de ? 'Plugin-Konfiguration (wird nach loadPlugin gesetzt)' : 'plugin configuration (set after loadPlugin)'}</legend>
+    {controlled && <p>{de ? 'Wird von der B3-Integration gesteuert (B3 Manager → CoD4x-Verbindung).' : 'Controlled by the B3 integration (B3 manager → CoD4x connection).'}</p>}
     {Object.entries(schema).map(([key, definition]) => <label key={key} style={{ marginRight: 8 }}>{key}
-      <input type={definition.type === 'integer' ? 'number' : 'text'} min={definition.min} max={definition.max} value={values[key] ?? ''} disabled={busy} onChange={event => setValues({ ...values, [key]: event.target.value })}/></label>)}
-    <button disabled={busy} onClick={() => onSave(plugin, values)}>{de ? 'Konfiguration speichern' : 'Save configuration'}</button>
+      <input type={definition.type === 'integer' ? 'number' : 'text'} min={definition.min} max={definition.max} value={values[key] ?? ''} disabled={busy || controlled} onChange={event => setValues({ ...values, [key]: event.target.value })}/></label>)}
+    <button disabled={busy || controlled} onClick={() => onSave(plugin, values)}>{de ? 'Konfiguration speichern' : 'Save configuration'}</button>
   </fieldset>;
 }
 
 export function InstancePluginManager({ instance, request, de }) {
   const [data, setData] = useState(null), [sourcePath, setSourcePath] = useState('');
+  const [controlled, setControlled] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -61,7 +67,10 @@ export function InstancePluginManager({ instance, request, de }) {
     try {
       await task();
       const listing = await call();
-      if (mounted.current) { setData(listing.plugins); if (done) setMessage(done); }
+      // The B3 integration state only locks the b3hide fields; a failed lookup keeps them editable.
+      let hide = false;
+      try { const response = await request(`/api/instances/${encodeURIComponent(instance.id)}/b3/integration`); if (response.ok) hide = (await response.json()).integration?.settings?.hideCommands === true; } catch { hide = false; }
+      if (mounted.current) { setData(listing.plugins); setControlled(hide); if (done) setMessage(done); }
     } catch (failure) { if (mounted.current) setError(failure.message); }
     finally { if (mounted.current) setBusy(false); }
   }
@@ -81,7 +90,7 @@ export function InstancePluginManager({ instance, request, de }) {
     {message && <p role="status">{message}</p>}
     {data && <>
       <PluginTable plugins={data.plugins} de={de} busy={busy || running} onAction={action}/>
-      {data.plugins.filter(plugin => plugin.catalog?.configSchema && plugin.pinnedSha256).map(plugin => <PluginConfigEditor key={plugin.name} plugin={plugin} de={de} busy={busy || running} onSave={(value, config) => run(() => call(`/${encodeURIComponent(value.name)}/config`, { config }), de ? 'Plugin-Konfiguration gespeichert.' : 'Plugin configuration saved.')}/>)}
+      {data.plugins.filter(plugin => plugin.catalog?.configSchema && plugin.pinnedSha256).map(plugin => <PluginConfigEditor key={plugin.name} plugin={plugin} de={de} busy={busy || running} controlled={controlled && plugin.name.toLowerCase() === 'b3hide'} onSave={(value, config) => run(() => call(`/${encodeURIComponent(value.name)}/config`, { config }), de ? 'Plugin-Konfiguration gespeichert.' : 'Plugin configuration saved.')}/>)}
       <label>{de ? 'Plugin aus lokaler Datei installieren (absoluter Pfad, .dll/.so passend zur Plattform)' : 'Install plugin from local file (absolute path, .dll/.so matching the platform)'}
         <input type="text" value={sourcePath} disabled={busy || running} onChange={event => setSourcePath(event.target.value)}/></label>
       <button disabled={busy || running || !sourcePath.trim()} onClick={() => run(() => call('/install', { sourcePath: sourcePath.trim() }), de ? 'Installiert und Hash festgelegt (deaktiviert).' : 'Installed and hash pinned (disabled).')}>{de ? 'Installieren' : 'Install'}</button>

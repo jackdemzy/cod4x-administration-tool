@@ -2565,20 +2565,20 @@ app.get("/api/instances/:id/b3/logs", requirePermission("diagnostics.read"), ins
 // Generated config with credential values redacted.
 app.get("/api/instances/:id/b3/config", requirePermission("config.manage"), instanceRoute(async req => ({ config: await b3Service.config(req.params.id) })));
 // Block 16: B3 <-> CoD4x integration (b3hide + auth). No gateway route exists for it.
-async function b3IntegrationView(id) {
+async function b3IntegrationView(id, full = false) {
   const view = await instanceManager.b3Integration(id);
   const vault = await credentialService.status();
   const serverRunning = (await instanceManager.runtime(id)).state?.status === "RUNNING";
   const b3Running = await b3Service.isRunning(id);
   const hints = restartHints({ plan: view.plan, vaultSha256: vault.sha256, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null });
   const status = await credentialService.instanceStatus(id);
-  return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: vault.sha256 } };
+  return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: full ? vault.sha256 : null } };
 }
-app.get("/api/instances/:id/b3/integration", requirePermission("diagnostics.read"), instanceRoute(async req => ({ integration: await b3IntegrationView(req.params.id) })));
+app.get("/api/instances/:id/b3/integration", requirePermission("diagnostics.read"), instanceRoute(async req => ({ integration: await b3IntegrationView(req.params.id, hasPermission(req.auth.role, "config.manage")) })));
 app.post("/api/instances/:id/b3/integration", requirePermission("config.manage"), instanceRoute(async req => {
   const result = await instanceManager.configureB3Integration(req.params.id, req.body);
   audit("info", "b3.integration.configured", { instanceId: req.params.id, actor: req.auth.username, ...result.settings });
-  return { integration: await b3IntegrationView(req.params.id) };
+  return { integration: await b3IntegrationView(req.params.id, true) };
 }));
 app.post("/api/instances/:id/b3/integration/auth-password", requirePermission("config.manage"), instanceRoute(async req => {
   const body = req.body;
@@ -2587,7 +2587,7 @@ app.post("/api/instances/:id/b3/integration/auth-password", requirePermission("c
   if (!vault.initialized || vault.locked) throw Object.assign(new Error("VAULT_LOCKED"), { code: "VAULT_LOCKED" });
   const result = await credentialService.setB3AuthPassword(req.params.id, body);
   audit("info", result.set ? "b3.auth.password.set" : "b3.auth.password.cleared", { instanceId: req.params.id, actor: req.auth.username, level: result.level });
-  return { password: result, integration: await b3IntegrationView(req.params.id) };
+  return { password: result, integration: await b3IntegrationView(req.params.id, true) };
 }));
 app.post("/api/instances/:id/b3/start", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id) })));
 app.post("/api/instances/:id/b3/stop", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.stop(req.params.id) })));
