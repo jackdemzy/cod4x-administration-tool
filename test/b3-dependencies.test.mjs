@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { B3_DEPENDENCY_MATRIX, B3_SOURCE, parseInterpreterProbe, probeInterpreter, validInterpreterPath, inspectB3Source, evaluateB3Dependencies, B3Environment } from '../lib/b3-dependencies.mjs';
+import { B3_DEPENDENCY_MATRIX, B3_SOURCE, parseB3CommandPrefix, parseInterpreterProbe, probeInterpreter, validInterpreterPath, inspectB3Source, evaluateB3Dependencies, B3Environment } from '../lib/b3-dependencies.mjs';
 
 const modules = (ok = []) => Object.fromEntries(['dateutil', 'pymysql', 'mysql.connector', 'MySQLdb', 'feedparser', 'requests', 'paramiko', 'psycopg2'].map(name => [name, { ok: ok.includes(name), version: ok.includes(name) ? '1.0' : null }]));
 const python = (version, ok) => ({ version, major: Number(version.split('.')[0]), minor: Number(version.split('.')[1]), bits: 64, modules: modules(ok) });
@@ -114,4 +114,25 @@ test('environment settings persist and the check combines probe and source witho
   assert.deepEqual(result.blocking, ['b3-source']);
   assert.equal(result.results.find(item => item.id === 'b3-source').detail, 'B3_SOURCE_NOT_FOUND');
   assert.deepEqual(calls, [['-E', '-c']], 'only the fixed probe is executed');
+});
+
+// PR #23 review: b3hide hides only lines starting with its prefix, so B3's own
+// command prefix (plugin_admin.ini settings/command_prefix) must be "!" as well.
+test('B3 command prefix is read from plugin_admin.ini and a different prefix makes the auth row incompatible', async t => {
+  assert.equal(parseB3CommandPrefix('[settings]\ncommand_prefix = !\ncommand_prefix_loud = @\n'), '!');
+  assert.equal(parseB3CommandPrefix('[settings]\r\ncommand_prefix: #  ; changed\r\n'), '#');
+  assert.equal(parseB3CommandPrefix('[messages]\ncommand_prefix = #\n[settings]\nnoise = 1\n'), '!', 'only [settings] counts; missing key keeps the default');
+  assert.equal(parseB3CommandPrefix('[settings]\ncommand_prefix =\n'), '!', 'empty keeps the default like the admin plugin');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-b3-prefix-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const write = async (relative, text) => { await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true }); await fs.writeFile(path.join(root, relative), text); };
+  await write('b3/extplugins/auth.py', '# auth\n');
+  assert.equal((await inspectB3Source(root)).commandPrefix, null, 'no plugin_admin.ini: unknown');
+  await write('b3/conf/plugin_admin.ini', '[settings]\ncommand_prefix = #\n');
+  const source = await inspectB3Source(root);
+  assert.equal(source.commandPrefix, '#');
+  const row = source => evaluateB3Dependencies({ python: python('2.7.18', ['dateutil', 'pymysql']), source }).results.find(entry => entry.id === 'b3hide-auth');
+  assert.deepEqual([row(source).status, row(source).detail, row(source).found], ['INCOMPATIBLE', 'B3_COMMAND_PREFIX_MISMATCH', '#']);
+  assert.equal(row({ ...source, commandPrefix: null }).detail, 'B3_COMMAND_PREFIX_MISMATCH', 'unknown prefix fails closed');
+  assert.deepEqual([row({ ...source, commandPrefix: '!' }).status, row({ ...source, commandPrefix: '!' }).found], ['OK', '!']);
 });

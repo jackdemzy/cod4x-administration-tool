@@ -67,6 +67,14 @@ Fixed with regression tests (`test/b3-integration-review.test.mjs`, `test/instan
   - It now returns `config.fingerprint`, a hash of the non-secret inputs only (paths, port, game log, template version, and whether MySQL, RCON and auth are set). It does not match the file hash and is not meant for change detection.
   - `plugin_auth.ini` gets its own `authFingerprint` the same way (`test/b3-config-integration.test.mjs`).
 
+### PR review (Codex)
+
+- **B3 command prefix.** The B3 source check reads `settings/command_prefix` from `b3/conf/plugin_admin.ini`. Any prefix other than `!`, or a file that cannot be read, blocks the integration (`B3_COMMAND_PREFIX_MISMATCH`), because b3hide would then not hide `!auth`.
+- **Name-only kicks of truncated b3hide rows** are refused (`RCON_KICK_TARGET_AMBIGUOUS`). A name cut to 15 bytes does not identify the player, so these rows can only be kicked by player ID.
+- **Plugin limit.** The switch validates the plugin records (`PLUGIN_LIMIT`) before anything is saved, so a refused switch never leaves `hideCommands` on.
+- **Integration changes and B3 starts exclude each other.** A change fails with `B3_INTEGRATION_BUSY` while a start is in flight, and a start fails while a change is being saved.
+- **Runtime state in the dashboard.** The B3 dashboard shows the b3hide/auth state (`dashboard.integration`) with its reason, for example `B3HIDE_NOT_LOADED`. While it is not connected, it warns not to type `!auth` passwords.
+
 The deferred minor findings are listed in the PR description.
 
 ### Checks

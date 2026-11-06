@@ -32,6 +32,7 @@ export function B3IntegrationPanel({ data, canManage, de, busy, onSave, onSetPas
       {requirement(!['B3HIDE_MISSING', 'B3HIDE_NOT_APPROVED', 'B3HIDE_INTEGRITY_FAILED', 'B3HIDE_WRONG_PLATFORM'].some(code => codes.has(code)) && Boolean(data.b3hide), de ? 'b3hide vorhanden und freigegeben' : 'b3hide present and approved')}
       {requirement(!codes.has('RCON_PASSWORD_MISSING') && !(data.plan?.warnings || []).some(entry => entry.code === 'RCON_PASSWORD_MISSING'), de ? 'RCON-Passwort im Tresor' : 'RCON password in the vault')}
       {requirement(!codes.has('B3_AUTH_PLUGIN_MISSING'), de ? 'B3-Plugin auth vorhanden' : 'B3 auth plugin present')}
+      {requirement(!codes.has('B3_COMMAND_PREFIX_MISMATCH'), de ? 'B3-Befehls-Prefix ist „!“ (plugin_admin.ini)' : 'B3 command prefix is "!" (plugin_admin.ini)')}
       {requirement(!vaultClosed, de ? 'Tresor entsperrt' : 'vault unlocked')}
     </ul>
     {data.knownHash && <p>{de ? 'b3hide entspricht dem CoD4x-21.2-Release (Freigabe trotzdem selbst prüfen).' : 'b3hide matches the CoD4x 21.2 release (approval is still yours).'}</p>}

@@ -26,6 +26,7 @@ const MESSAGES = {
   RCON_SAY_INVALID: 'Nachricht ungültig: 1–150 Zeichen, ohne Umlaute und ohne " ; % / \\.',
   RCON_KICK_INVALID: 'Kick-Grund ungültig (ohne Umlaute und ohne " ; % / \\).',
   RCON_KICK_NOT_ONLINE: 'Der Spieler ist nicht mehr auf dem Server.',
+  RCON_KICK_TARGET_AMBIGUOUS: 'Der Name ist gekürzt und nicht eindeutig. Bitte am PC über die Spieler-ID kicken.',
   RCON_KICK_TARGET_CHANGED: 'Auf diesem Platz sitzt inzwischen jemand anderes. Liste neu laden.',
   RCON_KICK_NOT_CONFIRMED: 'Kick gesendet, aber nicht bestätigt. Spielerliste prüfen.',
   RCON_NOT_RUNNING: 'Der Server läuft nicht.',
