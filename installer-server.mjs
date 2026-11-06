@@ -37,7 +37,7 @@ import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
 import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
 import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
-import { restartHints } from "./lib/b3-integration.mjs";
+import { restartHints, b3PluginsRestartHint } from "./lib/b3-integration.mjs";
 import { InstanceB3DatabaseService } from "./lib/instance-b3-database-service.mjs";
 import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
 import { InstanceB3PluginService } from "./lib/instance-b3-plugin-service.mjs";
@@ -345,7 +345,10 @@ app.use((req, res, next) => {
   // Only the schema-backed instance config endpoint accepts PUT. Preserve
   // existing method exposure elsewhere; authentication/RBAC still guard writes.
   const instanceConfigPath = /^\/api\/instances\/[^/]+\/config\/?$/.test(req.path);
-  res.setHeader("Access-Control-Allow-Methods", instanceConfigPath ? "GET,POST,PUT,OPTIONS" : "GET,POST,OPTIONS");
+  // Block 16b: B3 plugin config and custom code accept PUT, a custom plugin DELETE.
+  const b3PluginPutPath = /^\/api\/instances\/[^/]+\/b3\/plugins\/(?:custom\/[^/]+\/code|[^/]+\/config)\/?$/.test(req.path);
+  const b3PluginDeletePath = /^\/api\/instances\/[^/]+\/b3\/plugins\/custom\/[^/]+\/?$/.test(req.path);
+  res.setHeader("Access-Control-Allow-Methods", `GET,POST,${instanceConfigPath || b3PluginPutPath ? "PUT," : ""}${b3PluginDeletePath ? "DELETE," : ""}OPTIONS`);
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
@@ -2602,12 +2605,7 @@ app.post("/api/instances/:id/b3/integration/auth-password", requirePermission("c
 // Block 16b: B3 plugin management. Local only (no gateway route). Switches,
 // configs and approvals need config.manage; custom code needs b3.plugins.code.
 // The audit carries names and hashes, never config or code content.
-async function b3PluginsRestart(id) {
-  if (!(await b3Service.isRunning(id))) return null;
-  const { plan } = await instanceManager.b3Integration(id);
-  const own = await credentialService.instanceStatus(id);
-  return restartHints({ plan, credentialDigest: own.digest, startedWith: b3Service.startedWith(id), pluginsRevision: instanceStore.get(id).b3PluginsRevision }).b3;
-}
+const b3PluginsRestart = id => b3PluginsRestartHint(id, { b3Service, instanceManager, credentialService, instanceStore });
 // Exact key set; anything else is the given request code.
 function b3PluginBody(req, keys, code) {
   const body = req.body;
