@@ -78,3 +78,9 @@ test('every code has a German and an English message', () => {
     assert.notEqual(b3IntegrationMessage(entry, 'de'), b3IntegrationMessage(entry, 'en'), entry);
   }
 });
+
+test('a locked vault is its own blocker when the switch is on and no warning when off', () => {
+  const locked = { rcon: false, b3authLevels: [], locked: true };
+  assert.deepEqual(codes(plan({ credentialsPresent: locked }).blockers), ['VAULT_LOCKED']);
+  assert.deepEqual(planB3Integration({ settings: normalizeB3Integration({}), b3hideState: null, authPluginPresent: true, credentialsPresent: locked }).warnings, []);
+});

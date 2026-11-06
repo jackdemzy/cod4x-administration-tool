@@ -2392,6 +2392,8 @@ instanceManager = new ServerInstanceManager({
     beforeLaunch: () => instanceStore.validatePaths(instance),
   }, options),
 });
+// Block 16: the B3 start uses the same integration plan as the server launch.
+b3Service.integration = { plan: async id => (await instanceManager.b3IntegrationPlan(id)).plan };
 try { await instanceManager.load(); }
 catch (error) { console.error(`[instances] registry unavailable: ${error.message}`); }
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
