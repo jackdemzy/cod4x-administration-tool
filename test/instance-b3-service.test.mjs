@@ -215,3 +215,73 @@ test('C3: a vault lock after the credential callback stops B3 and restores the p
   assert.equal((await b3Service.status('b3-scope')).runtime.running, false, 'B3 must not keep running');
   assert.equal(await fs.readFile(config, 'utf8'), before, 'b3.xml restored');
 });
+
+// Block 16: RCON password and auth config from the vault.
+const plan = (overrides = {}) => ({ enabled: true, b3hide: { b3Prefix: '!', b3Hide: '1', b3HideLvl: '20' }, auth: { enabled: true, passwordLevels: [100] },
+  rcon: { required: true, present: true }, blockers: [], warnings: [], fingerprint: 'f'.repeat(64), ...overrides });
+const vault = (values, { locked = false, sha256 = 'a'.repeat(64), abortAfter = false } = {}) => ({
+  async status() { return { initialized: true, locked, sha256 }; },
+  async withRuntimeCredentials(id, fn) {
+    if (locked) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
+    const credentials = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === null ? null : Buffer.from(value)]));
+    try {
+      const result = await fn(credentials, new AbortController().signal);
+      if (abortAfter) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
+      return result;
+    } finally { for (const value of Object.values(credentials)) value?.fill(0); }
+  },
+});
+
+test('Block 16: B3 start writes the rcon password and the auth config and records the fingerprint', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-int');
+  const b3 = path.join(store.get('b3-int').homePath, 'b3');
+  b3Service.integration = { plan: async () => plan() };
+  b3Service.credentials = vault({ rcon: 'Rcon-Secret-1', b3auth: JSON.stringify({ 100: 'hunter22', 40: 'not-used' }) });
+  await b3Service.start('b3-int');
+  assert.match(await fs.readFile(path.join(b3, 'b3.xml'), 'utf8'), /<set name="rcon_password">Rcon-Secret-1<\/set>/);
+  const ini = await fs.readFile(path.join(b3, 'plugin_auth.ini'), 'utf8');
+  assert.match(ini, /^100: hunter22$/m);
+  assert.ok(!ini.includes('not-used'), 'only the plan levels are written');
+  const started = b3Service.startedWith('b3-int');
+  assert.equal(started.fingerprint, 'f'.repeat(64));
+  assert.equal(started.vaultSha256, 'a'.repeat(64));
+  const view = await b3Service.config('b3-int');
+  assert.ok(!JSON.stringify(view).includes('hunter22') && !JSON.stringify(view).includes('Rcon-Secret-1'));
+  assert.match(view.authConfig.text, /^100: \[redacted\]$/m);
+});
+
+test('Block 16: a plan blocker stops the start before anything is written', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-block');
+  b3Service.integration = { plan: async () => plan({ blockers: [{ code: 'RCON_PASSWORD_MISSING' }], rcon: { required: true, present: false } }) };
+  b3Service.credentials = vault({ rcon: null });
+  await assert.rejects(b3Service.start('b3-block'), { code: 'RCON_PASSWORD_MISSING' });
+  await assert.rejects(fs.stat(path.join(store.get('b3-block').homePath, 'b3', 'b3.xml')), { code: 'ENOENT' });
+});
+
+test('Block 16: SQLite with the switch off and a locked vault starts as before without rcon', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-off');
+  b3Service.integration = { plan: async () => plan({ enabled: false, b3hide: null, auth: { enabled: false, passwordLevels: [] }, rcon: { required: false, present: false }, warnings: [{ code: 'RCON_PASSWORD_MISSING' }] }) };
+  b3Service.credentials = vault({}, { locked: true });
+  await b3Service.start('b3-off');
+  assert.match(await fs.readFile(path.join(store.get('b3-off').homePath, 'b3', 'b3.xml'), 'utf8'), /<set name="rcon_password"><\/set>/);
+  await b3Service.stop('b3-off');
+  b3Service.integration = { plan: async () => plan() };
+  await assert.rejects(b3Service.start('b3-off'), { code: 'VAULT_LOCKED' });
+});
+
+test('Block 16: a vault lock after the write stops B3, restores b3.xml and removes a new auth config', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-restore');
+  const b3 = path.join(store.get('b3-restore').homePath, 'b3');
+  await b3Service.start('b3-restore'); await b3Service.stop('b3-restore');
+  const before = await fs.readFile(path.join(b3, 'b3.xml'), 'utf8');
+  b3Service.integration = { plan: async () => plan() };
+  b3Service.credentials = vault({ rcon: 'Rcon-Secret-1', b3auth: JSON.stringify({ 100: 'hunter22' }) }, { abortAfter: true });
+  await assert.rejects(b3Service.start('b3-restore'), { code: 'VAULT_LOCKED' });
+  assert.equal((await b3Service.status('b3-restore')).runtime.running, false);
+  assert.equal(await fs.readFile(path.join(b3, 'b3.xml'), 'utf8'), before);
+  await assert.rejects(fs.stat(path.join(b3, 'plugin_auth.ini')), { code: 'ENOENT' });
+});
