@@ -108,3 +108,8 @@ test('dashboard distinguishes every roadmap failure cause and orders the root ca
   const stopped = buildB3Dashboard({ dependencies: deps(), runtime: { status: 'STOPPED', running: false }, health: { status: 'DOWN', alive: false }, log: parseB3Log(startup), config: null, server: serverUp });
   assert.deepEqual([stopped.checks.parser.ok, stopped.checks.rcon.ok, stopped.database, stopped.diagnosis], [null, null, 'NOT_RUNNING', []]);
 });
+
+test('Block 16: the B3 log shows when the auth plugin registered its event', () => {
+  assert.equal(parseB3Log("261106 01:00:00\tVERBOSE\t'AuthPlugin: registered CLIENT_AUTH event'").auth, 'STARTED');
+  assert.equal(parseB3Log('nothing here').auth, null);
+});
