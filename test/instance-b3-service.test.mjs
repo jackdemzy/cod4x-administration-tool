@@ -221,6 +221,7 @@ const plan = (overrides = {}) => ({ enabled: true, b3hide: { b3Prefix: '!', b3Hi
   rcon: { required: true, present: true }, blockers: [], warnings: [], fingerprint: 'f'.repeat(64), ...overrides });
 const vault = (values, { locked = false, sha256 = 'a'.repeat(64), abortAfter = false } = {}) => ({
   async status() { return { initialized: true, locked, sha256 }; },
+  async instanceStatus() { return { digest: locked ? null : 'd'.repeat(64) }; },
   async withRuntimeCredentials(id, fn) {
     if (locked) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
     const credentials = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === null ? null : Buffer.from(value)]));
@@ -245,7 +246,7 @@ test('Block 16: B3 start writes the rcon password and the auth config and record
   assert.ok(!ini.includes('not-used'), 'only the plan levels are written');
   const started = b3Service.startedWith('b3-int');
   assert.equal(started.fingerprint, 'f'.repeat(64));
-  assert.equal(started.vaultSha256, 'a'.repeat(64));
+  assert.equal(started.credentialDigest, 'd'.repeat(64));
   const view = await b3Service.config('b3-int');
   assert.ok(!JSON.stringify(view).includes('hunter22') && !JSON.stringify(view).includes('Rcon-Secret-1'));
   assert.match(view.authConfig.text, /^100: \[redacted\]$/m);

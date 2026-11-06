@@ -13,14 +13,14 @@ const codes = list => list.map(entry => entry.code);
 
 test('constants match the spec', () => {
   assert.deepEqual(B3_HIDE_LEVELS, [1, 2, 20, 40, 60, 80, 100]);
-  assert.equal(B3_PREFIX_CHARS, '!@#$%&*.,:?=~-');
+  assert.equal(B3_PREFIX_CHARS, '!');
   assert.equal(KNOWN_B3HIDE_HASHES.linux, 'f277087c8817c927ca28e96171c8a729ad319f3739cc360c8d3d74899b918a30');
   assert.equal(KNOWN_B3HIDE_HASHES.windows, '51fadd9ae0be0bb8855d37a56b53a04b289be775c9fdc38fe256e1f7cb8969bb');
 });
 
 test('normalize fills defaults and rejects invalid prefix and level', () => {
   assert.deepEqual(normalizeB3Integration(undefined), { hideCommands: false, prefix: '!', hideLevel: 20 });
-  assert.deepEqual(normalizeB3Integration({ hideCommands: true, prefix: '#', hideLevel: 40 }), { hideCommands: true, prefix: '#', hideLevel: 40 });
+  assert.deepEqual(normalizeB3Integration({ hideCommands: true, prefix: '!', hideLevel: 40 }), { hideCommands: true, prefix: '!', hideLevel: 40 });
   for (const prefix of ['!!', '', 'a', ' ', '"']) assert.equal(code(() => normalizeB3Integration({ prefix })), 'B3_PREFIX_INVALID', prefix);
   for (const hideLevel of [0, 21, '20', 101]) assert.equal(code(() => normalizeB3Integration({ hideLevel })), 'B3_HIDE_LEVEL_INVALID', String(hideLevel));
 });
@@ -64,7 +64,6 @@ test('fingerprint is stable and follows the non-secret settings', () => {
   const base = plan().fingerprint;
   assert.match(base, /^[0-9a-f]{64}$/);
   assert.equal(plan().fingerprint, base);
-  assert.notEqual(plan({ settings: settings({ prefix: '#' }) }).fingerprint, base);
   assert.notEqual(plan({ settings: settings({ hideLevel: 40 }) }).fingerprint, base);
   assert.notEqual(plan({ settings: settings({ hideCommands: false }) }).fingerprint, base);
 });
@@ -88,10 +87,10 @@ test('a locked vault is its own blocker when the switch is on and no warning whe
 test('restartHints: changed settings, changed credentials, or nothing recorded', async () => {
   const { restartHints } = await import('../lib/b3-integration.mjs');
   const current = plan();
-  const record = { fingerprint: current.fingerprint, vaultSha256: 'a'.repeat(64) };
-  assert.deepEqual(restartHints({ plan: current, vaultSha256: 'a'.repeat(64), launchedWith: record, startedWith: record }), { server: null, b3: null });
-  assert.deepEqual(restartHints({ plan: plan({ settings: settings({ prefix: '#' }) }), vaultSha256: 'a'.repeat(64), launchedWith: record, startedWith: null }), { server: 'SETTINGS_CHANGED', b3: null });
-  assert.deepEqual(restartHints({ plan: current, vaultSha256: 'b'.repeat(64), launchedWith: null, startedWith: record }), { server: null, b3: 'CREDENTIALS_CHANGED' });
+  const record = { fingerprint: current.fingerprint, serverFingerprint: current.serverFingerprint, credentialDigest: 'a'.repeat(64) };
+  assert.deepEqual(restartHints({ plan: current, credentialDigest: 'a'.repeat(64), launchedWith: record, startedWith: record }), { server: null, b3: null });
+  assert.deepEqual(restartHints({ plan: plan({ settings: settings({ hideLevel: 40 }) }), credentialDigest: 'a'.repeat(64), launchedWith: record, startedWith: null }), { server: 'SETTINGS_CHANGED', b3: null });
+  assert.deepEqual(restartHints({ plan: current, credentialDigest: 'b'.repeat(64), launchedWith: null, startedWith: record }), { server: null, b3: 'CREDENTIALS_CHANGED' });
 });
 
 test('integrationRow: off, blocked, not connected and ok', async () => {

@@ -14,7 +14,7 @@ const server = read("installer-server.mjs"), manager = read("lib/server-instance
 const throws = (fn, code) => { try { fn(); return false; } catch (error) { return error.code === code; } };
 const plan = (settings, overrides = {}) => planB3Integration({ settings: normalizeB3Integration(settings), b3hideState: "ENABLED", authPluginPresent: true, credentialsPresent: { rcon: true, b3authLevels: [100] }, ...overrides });
 
-const on = plan({ hideCommands: true, prefix: "#", hideLevel: 40 });
+const on = plan({ hideCommands: true, prefix: "!", hideLevel: 40 });
 const off = plan({}, { credentialsPresent: { rcon: false, b3authLevels: [] } });
 const paths = b3Paths({ homePath: "/srv/gate" });
 const xml = renderB3Config({ instance: { port: 28960 }, paths, gameLog: "/srv/gate/main/games_mp.log", rconPassword: "Gate-Rcon-1", authConfigPath: paths.authConfig });
@@ -23,19 +23,19 @@ const b3hideStatus = "map: mp_backlot\nnum score ping guid                      
 const routes = [...REMOTE_ROUTES, ...REMOTE_WRITE_ROUTES].map(route => JSON.stringify(route)).join(" ");
 
 const checks = [
-  ["Switch on: b3hide dvars come from the plan (#, 1, 40), auth on, RCON required", JSON.stringify(on.b3hide) === JSON.stringify({ b3Prefix: "#", b3Hide: "1", b3HideLvl: "40" }) && on.auth.enabled && on.rcon.required && !on.blockers.length],
+  ["Switch on: b3hide dvars come from the plan (!, 1, 40), auth on, RCON required", JSON.stringify(on.b3hide) === JSON.stringify({ b3Prefix: "!", b3Hide: "1", b3HideLvl: "40" }) && on.auth.enabled && on.rcon.required && !on.blockers.length],
   ["Switch off: no b3hide/auth; missing RCON is only a warning", off.b3hide === null && !off.auth.enabled && !off.blockers.length && off.warnings[0]?.code === "RCON_PASSWORD_MISSING"],
   ["Every gap is a named blocker", ["MISSING", "NOT_APPROVED", "INTEGRITY_MISMATCH", "WRONG_PLATFORM"].every(state => plan({ hideCommands: true }, { b3hideState: state }).blockers[0]?.code.startsWith("B3HIDE_"))
     && plan({ hideCommands: true }, { credentialsPresent: { rcon: false, b3authLevels: [] } }).blockers[0]?.code === "RCON_PASSWORD_MISSING"
     && plan({ hideCommands: true }, { credentialsPresent: { locked: true } }).blockers[0]?.code === "VAULT_LOCKED"
     && plan({ hideCommands: true }, { authPluginPresent: false }).blockers[0]?.code === "B3_AUTH_PLUGIN_MISSING"],
-  ["Prefix is one character of a fixed set, level a B3 group, !auth passwords are bounded", throws(() => normalizeB3Integration({ prefix: "!;" }), "B3_PREFIX_INVALID") && throws(() => normalizeB3Integration({ hideLevel: 21 }), "B3_HIDE_LEVEL_INVALID")
-    && ["a b c d", "pa;ss", "<pass>"].every(value => throws(() => validB3AuthPassword(value), "B3_AUTH_PASSWORD_INVALID"))],
+  ["Prefix is one character of a fixed set, level a B3 group, !auth passwords are bounded", throws(() => normalizeB3Integration({ prefix: "#" }), "B3_PREFIX_INVALID") && throws(() => normalizeB3Integration({ hideLevel: 21 }), "B3_HIDE_LEVEL_INVALID")
+    && ["a b c d", "pa;ss", "<pass>", "pa%ss"].every(value => throws(() => validB3AuthPassword(value), "B3_AUTH_PASSWORD_INVALID"))],
   ["Release hashes are pinned for both platforms", /^[0-9a-f]{64}$/.test(KNOWN_B3HIDE_HASHES.linux) && /^[0-9a-f]{64}$/.test(KNOWN_B3HIDE_HASHES.windows)],
   ["b3.xml carries the RCON password and the auth entry; the config views redact both files", xml.includes("<set name=\"rcon_password\">Gate-Rcon-1</set>") && xml.includes("name=\"auth\"")
     && !redactB3Config(xml).includes("Gate-Rcon-1") && !redactB3PluginAuth(ini).includes("gate-pass") && ini.includes("auth: 0")],
-  ["Restart hints follow settings and the vault", restartHints({ plan: on, vaultSha256: "b", launchedWith: { fingerprint: "x" }, startedWith: { fingerprint: on.fingerprint, vaultSha256: "a" } }).server === "SETTINGS_CHANGED"
-    && restartHints({ plan: on, vaultSha256: "b", launchedWith: null, startedWith: { fingerprint: on.fingerprint, vaultSha256: "a" } }).b3 === "CREDENTIALS_CHANGED"],
+  ["Restart hints follow settings and the vault", restartHints({ plan: on, credentialDigest: "b", launchedWith: { serverFingerprint: "x" }, startedWith: { fingerprint: on.fingerprint, credentialDigest: "a" } }).server === "SETTINGS_CHANGED"
+    && restartHints({ plan: on, credentialDigest: "b", launchedWith: null, startedWith: { fingerprint: on.fingerprint, credentialDigest: "a" } }).b3 === "CREDENTIALS_CHANGED"],
   ["b3hide status format is parsed with its limits; long names compare by the cut prefix", parseStatus(b3hideStatus, { format: "b3hide" }).limits?.connectionState === false && parseStatus(b3hideStatus, { format: "b3hide" }).players[0]?.bot === true
     && nameMatches({ name: "VeryLongPlaye", rawName: "^1VeryLongPlaye^7" }, "VeryLongPlayerName", "b3hide") && !nameMatches({ name: "VeryLongPlaye", rawName: "^1VeryLongPlaye^7" }, "VeryLongPlayerName", "core")],
   ["The server launch computes the plan before the plugin gate and forces b3hide with the plan dvars", /b3IntegrationPlan\(id, \{ forLaunch: true \}\)[\s\S]*pluginLaunchArguments\(launchInstance\)/.test(manager) && manager.includes("config: plan.b3hide")],

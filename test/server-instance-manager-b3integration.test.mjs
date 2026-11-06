@@ -43,10 +43,10 @@ test('the launch passes the plan dvars and blocks a tampered b3hide before spawn
   const context = await fixture(t);
   const { manager, children } = context;
   const file = await approvedB3hide(context, 'b3i-launch');
-  await manager.configureB3Integration('b3i-launch', { hideCommands: true, prefix: '#', hideLevel: 40 });
+  await manager.configureB3Integration('b3i-launch', { hideCommands: true, prefix: '!', hideLevel: 40 });
   const state = await manager.launch('b3i-launch');
   const args = children.get(state.pid).args, load = args.indexOf('+loadPlugin');
-  assert.deepEqual(args.slice(load, load + 11), ['+loadPlugin', 'b3hide', '+set', 'b3Prefix', '#', '+set', 'b3Hide', '1', '+set', 'b3HideLvl', '40']);
+  assert.deepEqual(args.slice(load, load + 11), ['+loadPlugin', 'b3hide', '+set', 'b3Prefix', '!', '+set', 'b3Hide', '1', '+set', 'b3HideLvl', '40']);
   assert.match(manager.launchedWith('b3i-launch').fingerprint, /^[0-9a-f]{64}$/);
   await manager.stop('b3i-launch');
   const spawned = children.size;

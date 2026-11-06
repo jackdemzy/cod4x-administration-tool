@@ -44,7 +44,7 @@ const home = path.join(root, "home");
 const port = 28950 + Math.floor(Math.random() * 20);
 const rconPassword = `Native${crypto.randomBytes(6).toString("hex")}`;
 const authPassword = `Auth${crypto.randomBytes(5).toString("hex")}`;
-const instance = { id: "b3-integration", homePath: home, port, platform: "linux", b3Integration: normalizeB3Integration({ hideCommands: true, prefix: "#", hideLevel: 40 }) };
+const instance = { id: "b3-integration", homePath: home, port, platform: "linux", b3Integration: normalizeB3Integration({ hideCommands: true, prefix: "!", hideLevel: 40 }) };
 let server = null, runtime = null, usedCore = null;
 const rconClient = new RconClient({ port, timeoutMs: 1500 });
 // Gate-only raw RCON for checks outside CONTROL's console allowlist (dvar reads,
@@ -94,7 +94,7 @@ try {
   check("The core loads b3hide (console load message)", Boolean(usedCore), usedCore || started?.load);
   if (!usedCore) throw Object.assign(new Error("b3hide did not load in any core"), { code: "B3HIDE_NOT_LOADED" });
   const dvars = await Promise.all(["b3Prefix", "b3Hide", "b3HideLvl"].map(raw));
-  check("b3Prefix/b3Hide/b3HideLvl read back as CONTROL's #, 1, 40 (not the plugin defaults)", /"b3Prefix" is:\s*"#/.test(dvars[0]) && /"b3Hide" is:\s*"1/.test(dvars[1]) && /"b3HideLvl" is:\s*"40/.test(dvars[2]), dvars.map(value => value.trim().split("\n")[0]).join(" | "));
+  check("b3Prefix/b3Hide/b3HideLvl read back as CONTROL's !, 1, 40 (level 40, not the plugin default 20)", /"b3Prefix" is:\s*"!/.test(dvars[0]) && /"b3Hide" is:\s*"1/.test(dvars[1]) && /"b3HideLvl" is:\s*"40/.test(dvars[2]), dvars.map(value => value.trim().split("\n")[0]).join(" | "));
 
   let status = { players: [] };
   await until(async () => { status = parseStatus(await raw("status"), { format: "b3hide" }); return status.players.length >= 2; }, 60000);

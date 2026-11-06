@@ -37,9 +37,9 @@ test('b3Integration defaults on create and on legacy records', async t => {
 test('setB3Integration persists across a reload and rejects invalid values', async t => {
   const { store, input, options } = await fixture(t);
   await store.create(input);
-  const updated = await store.setB3Integration('public-01', { hideCommands: true, prefix: '#', hideLevel: 40 });
-  assert.deepEqual(updated.b3Integration, { hideCommands: true, prefix: '#', hideLevel: 40 });
+  const updated = await store.setB3Integration('public-01', { hideCommands: true, prefix: '!', hideLevel: 40 });
+  assert.deepEqual(updated.b3Integration, { hideCommands: true, prefix: '!', hideLevel: 40 });
   const reloaded = new ServerInstanceStore(options); await reloaded.load();
-  assert.deepEqual(reloaded.get('public-01').b3Integration, { hideCommands: true, prefix: '#', hideLevel: 40 });
-  await assert.rejects(store.setB3Integration('public-01', { prefix: '!!' }), { code: 'B3_PREFIX_INVALID' });
+  assert.deepEqual(reloaded.get('public-01').b3Integration, { hideCommands: true, prefix: '!', hideLevel: 40 });
+  await assert.rejects(store.setB3Integration('public-01', { prefix: '#' }), { code: 'B3_PREFIX_INVALID' });
 });
