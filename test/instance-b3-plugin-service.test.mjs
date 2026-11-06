@@ -66,6 +66,8 @@ test('list order, unavailable rows and error codes', async t => {
   assert.ok(plugins[1].reason);
   assert.equal(plugins[2].state, 'UNAVAILABLE');
   assert.equal(revision, 0);
+  assert.equal(plugins[0].modulePath, 'b3/plugins/welcome');
+  assert.equal(plugins[2].modulePath, null, 'fixed rows have no module path');
   await assert.rejects(service.setEnabled('public-01', 'callvote', true), { code: 'B3_PLUGIN_FIXED' });
   await assert.rejects(service.setEnabled('public-01', 'admin', true), { code: 'B3_PLUGIN_FIXED' });
   await assert.rejects(service.setEnabled('public-01', 'nonesuch', true), { code: 'B3_PLUGIN_UNKNOWN' });

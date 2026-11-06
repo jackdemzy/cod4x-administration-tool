@@ -88,15 +88,37 @@ test('B3 plugins panel: the trust tick is bound to name and hash', { skip }, asy
   assert.match(changed.match(/<button[^>]*>Freigeben/)[0], /disabled/);
 });
 
-test('B3 plugins panel: editor conflict shows a hint and a reload action, de/en', { skip }, async () => {
+test('B3 plugins panel: stale save shows the file-changed text and a reload button, de/en', { skip }, async () => {
   const editor = { kind: 'config', name: 'myplug', text: 'my draft', sha256: HASH, conflict: true };
   const de = await panel({ data: data(), editor });
-  assert.match(de, /Die Datei wurde zwischenzeitlich geändert/);
-  assert.match(de, /Aktuelle Version laden/);
-  assert.ok(de.includes('my draft'));
+  assert.match(de, /Datei wurde inzwischen geändert – neu laden/);
+  assert.doesNotMatch(de, /bereits vergeben/);
+  assert.match(de, /<button[^>]*>Neu laden/);
   const en = await panel({ data: data(), de: false, editor });
-  assert.match(en, /The file changed in the meantime/);
-  assert.match(en, /Load current version/);
-  const plain = await panel({ data: data(), editor: { ...editor, conflict: false } });
-  assert.doesNotMatch(plain, /Aktuelle Version laden/);
+  assert.match(en, /File changed meanwhile – reload/);
+  assert.match(en, /<button[^>]*>Reload/);
+  assert.doesNotMatch(await panel({ data: data(), editor: { ...editor, conflict: false } }), /Neu laden/);
+  const approve = await panel({ data: data(), staleList: true });
+  assert.match(approve, /Datei wurde inzwischen geändert – neu laden/);
+  assert.match(approve, /<button[^>]*>Neu laden/);
+});
+
+test('B3 plugins panel: requirements column, missing-plugin warning and module path', { skip }, async () => {
+  const req = (plugins, pythonModules = []) => ({ plugins, pythonModules });
+  const rows = [
+    row({ name: 'geolocation', enabled: false, state: 'DISABLED', requires: req([], ['requests']) }),
+    row({ name: 'countryfilter', requires: req(['geolocation']) }),
+    row({ name: 'geowelcome', enabled: true, state: 'ENABLED', requires: req(['geolocation', 'admin']) }),
+    row({ name: 'admin', source: 'fixed', state: 'UNAVAILABLE', reason: 'B3_PLUGIN_FIXED', modulePath: null }),
+    row({ name: 'duel', enabled: true, state: 'NOT_APPROVED', sha256: HASH, modulePath: 'b3/plugins/duel' }),
+  ];
+  const html = await panel({ data: data({ plugins: rows }) });
+  assert.match(html, /Voraussetzungen/);
+  assert.match(html, /Python: requests – Python-Module werden beim B3-Start geprüft./);
+  assert.match(html, /role="alert">Das B3-Plugin benötigt ein anderes Plugin, das nicht aktiviert ist\. \(geolocation\)/);
+  assert.equal((html.match(/benötigt ein anderes Plugin/g) || []).length, 2, 'geolocation missing for both dependants; admin is fixed');
+  assert.match(html, /<code>b3\/plugins\/duel<\/code>/);
+  const ok = await panel({ data: data({ plugins: [row({ name: 'geolocation', enabled: true, state: 'ENABLED' }), row({ name: 'geowelcome', enabled: true, state: 'ENABLED', requires: req(['geolocation']) })] }) });
+  assert.doesNotMatch(ok, /benötigt ein anderes Plugin/);
+  assert.match(ok, /<button[^>]*>Deaktivieren/);
 });
