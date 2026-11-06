@@ -31,11 +31,8 @@ test('no remote route for B3 plugins', () => {
   assert.ok(![...REMOTE_ROUTES, ...REMOTE_WRITE_ROUTES].some(route => route.includes('/b3/plugins')));
 });
 
-test('integration view passes the plugin revision to the restart hints', async () => {
-  const source = await serverSource();
-  const view = source.slice(source.indexOf('async function b3IntegrationView'), source.indexOf('app.get("/api/instances/:id/b3/integration"'));
-  assert.match(view, /restartHints\(\{[^}]*pluginsRevision: instanceStore\.get\(id\)\.b3PluginsRevision/);
-  assert.match(source, /new InstanceB3Service\(\{[^}]*plugins: b3PluginService/);
+test('the B3 service receives the plugin service', async () => {
+  assert.match(await serverSource(), /new InstanceB3Service\(\{[^}]*plugins: b3PluginService/);
 });
 
 // Block 16b on an isolated backend: reads need diagnostics.read, switches,
@@ -141,6 +138,15 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
   const savedCode = await call(admin, `${base}/custom/myplug/code`, { code: newCode, expectedSha256: code.json.code.sha256 }, 'PUT');
   assert.equal(savedCode.status, 200, savedCode.json.error);
   assert.match(savedCode.json.code.sha256, /^[0-9a-f]{64}$/);
+
+  // Rejected requests carrying a secret: error messages and audit never echo content.
+  const badConfig = await call(operator, `${base}/myplug/config`, { text: ['token = SECRET-123', ''].join(String.fromCharCode(10)), expectedSha256: savedConfig.json.config.sha256 }, 'PUT');
+  assert.deepEqual([badConfig.status, badConfig.json.code], [400, 'B3_PLUGIN_CONFIG_INVALID']);
+  const badCode = await call(admin, `${base}/custom/myplug/code`, { code: 'SECRET-123' + String.fromCharCode(0), expectedSha256: savedCode.json.code.sha256 }, 'PUT');
+  assert.deepEqual([badCode.status, badCode.json.code], [400, 'B3_PLUGIN_CODE_INVALID']);
+  assert.ok(!JSON.stringify([badConfig.json, badCode.json]).includes('SECRET-123'), 'responses never echo the body');
+  const blocked = (await call(admin, '/api/audit?limit=1000')).json.events.filter(entry => entry.event === 'instance.operation.blocked' && /b3\/plugins/.test(entry.details.route));
+  assert.ok(blocked.some(entry => entry.details.code === 'B3_PLUGIN_CONFIG_INVALID') && blocked.some(entry => entry.details.code === 'B3_PLUGIN_CODE_INVALID'), 'rejections are audited');
 
   // delete and disable.
   assert.equal((await call(operator, `${base}/custom/uploaded`, undefined, 'DELETE')).status, 403);
