@@ -328,3 +328,56 @@ test('Block 16: the dashboard flags an auth command typed with another prefix wh
   b3Service.integration = { plan: async () => plan({ enabled: false }) };
   assert.equal((await b3Service.dashboard('b3-exposed')).integration.authExposed, undefined, 'only reported while the integration is on');
 });
+
+// Block 16b: plugin start plan, b3.xml plugins and the recorded revision.
+async function withPlugins(t, b3Service, environment, store) {
+  const { InstanceB3PluginService } = await import('../lib/instance-b3-plugin-service.mjs');
+  const { hashB3Module } = await import('../lib/b3-plugin-hash.mjs');
+  const os = await import('node:os');
+  const b3Path = await fs.mkdtemp(path.join(os.tmpdir(), 'b3-plugin-start-'));
+  t.after(() => fs.rm(b3Path, { recursive: true, force: true }));
+  const moduleDir = path.join(b3Path, 'b3', 'plugins', 'welcome');
+  await fs.mkdir(moduleDir, { recursive: true });
+  await fs.writeFile(path.join(moduleDir, '__init__.py'), 'class WelcomePlugin: pass\n');
+  await fs.mkdir(path.join(b3Path, 'b3', 'conf'));
+  await fs.writeFile(path.join(b3Path, 'b3', 'conf', 'plugin_welcome.ini'), '[settings]\n');
+  const { normalizedHash } = await import('../lib/b3-dependencies.mjs');
+  const catalog = [{ name: 'welcome', location: 'plugins', module: 'package', sha256: (await hashB3Module(moduleDir)).sha256, configTemplate: 'b3/conf/plugin_welcome.ini', configTemplateSha256: normalizedHash(Buffer.from('[settings]\n')), requiresConfigFile: true, requiresPlugins: [], requiresParsers: [], pythonModules: [] }];
+  const check = environment.check;
+  environment.check = async () => ({ ...(await check()), environment: { pythonPath: '/opt/py/python2.7', b3Path } });
+  b3Service.plugins = new InstanceB3PluginService({ store, environment: { read: async () => ({ b3Path }) }, catalog });
+  return b3Service.plugins;
+}
+
+test('Block 16b: changed custom code blocks the start and writes nothing', async t => {
+  const { b3Service, create, store, environment } = await fixture(t);
+  await create('b3-plug-block');
+  const plugins = await withPlugins(t, b3Service, environment, store);
+  const b3 = path.join(store.get('b3-plug-block').homePath, 'b3');
+  await plugins.createCustom('b3-plug-block', { name: 'myplug', from: 'template' });
+  await plugins.setEnabled('b3-plug-block', 'myplug', true);
+  b3Service.integration = { plan: async () => plan() };
+  b3Service.credentials = vault({ rcon: 'Rcon-Secret-1', b3auth: JSON.stringify({ 100: 'hunter22' }) });
+  await b3Service.start('b3-plug-block'); await b3Service.stop('b3-plug-block');
+  const before = await fs.readFile(path.join(b3, 'b3.xml'), 'utf8');
+  const beforeAuth = await fs.readFile(path.join(b3, 'plugin_auth.ini'), 'utf8');
+  assert.ok(before.includes('name="myplug"'));
+  await fs.appendFile(path.join(b3, 'extplugins', 'myplug.py'), '# edited outside CONTROL\n');
+  await assert.rejects(b3Service.start('b3-plug-block'), error => error.code === 'B3_PLUGIN_INTEGRITY_FAILED' && error.blockers[0].plugin === 'myplug');
+  assert.equal(await fs.readFile(path.join(b3, 'b3.xml'), 'utf8'), before);
+  assert.equal(await fs.readFile(path.join(b3, 'plugin_auth.ini'), 'utf8'), beforeAuth);
+  assert.equal((await b3Service.status('b3-plug-block')).runtime.running, false);
+});
+
+test('Block 16b: start writes the enabled plugins and records the revision', async t => {
+  const { b3Service, create, store, environment } = await fixture(t);
+  await create('b3-plug');
+  const plugins = await withPlugins(t, b3Service, environment, store);
+  await plugins.setEnabled('b3-plug', 'welcome', true);
+  await b3Service.start('b3-plug');
+  const xml = await fs.readFile(path.join(store.get('b3-plug').homePath, 'b3', 'b3.xml'), 'utf8');
+  assert.ok(xml.includes(`<plugin name="welcome" config="${path.join(store.get('b3-plug').homePath, 'b3', 'plugins', 'welcome.ini')}"/>`));
+  assert.ok(xml.indexOf('name="admin"') < xml.indexOf('name="welcome"'));
+  assert.equal(b3Service.startedWith('b3-plug').pluginsRevision, store.get('b3-plug').b3PluginsRevision);
+  assert.ok(store.get('b3-plug').b3PluginsRevision > 0);
+});
