@@ -102,6 +102,10 @@ Version 4.18.19 · development source, not a release
 
 Development Status: 
 
+## 4.18.20 B3 integration note
+
+4.18.20 implements roadmap Block 16: B3 and the CoD4x core are connected through the `b3hide` CoD4x plugin and the eBc-B3 `auth` plugin. One switch in the B3 manager ("hide B3 commands") enables both with the same prefix and level threshold; B3 receives the RCON password from the vault at its start, and optional `!auth` passwords per B3 level are kept in the vault. Missing pieces (b3hide file or approval, RCON password, locked vault, auth plugin) block the start with a precise reason. With b3hide loaded, `status` has a reduced format (names cut to 15 bytes, no connection state); CONTROL parses it and says so in the online list. Use the official CoD4x 21.2 release `b3hide.so`/`b3hide.dll` and approve its hash in the plugin manager; CONTROL names the release hashes but never trusts a file on its own.
+
 ## 4.18.19 Remote Actions note
 
 4.18.19 implements roadmap Block 24d: from the phone app an admin or operator can send a chat message to all players, kick a listed player and restart a server. Off by default (gateway switch and a per-user switch); every action needs a fresh code from the authenticator app (a 5-minute window for message and kick, its own code for each restart, never a recovery code), with limits and a full audit. Works over Tailscale, LAN and the public Caddy domain. Setup: `docs/REMOTE-ACCESS.md`. Development source, not a release.
