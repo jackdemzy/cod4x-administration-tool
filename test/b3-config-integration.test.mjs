@@ -76,3 +76,29 @@ test('CodeQL: the returned fingerprints never derive from a password (non-secret
   assert.equal(mysql.fingerprint, (await dsn('db-pass-2')).fingerprint, 'b3.xml fingerprint does not follow the database password');
   assert.notEqual(mysql.fingerprint, withoutAuth.fingerprint, 'MySQL instead of SQLite changes the b3.xml fingerprint');
 });
+
+test('b3.xml order and attributes: admin, registry plugins, then auth', () => {
+  const paths = b3Paths({ homePath: '/srv/b3i' });
+  const plugins = [
+    { name: 'welcome', source: 'shipped', configPath: path.join('/srv/b3i', 'b3', 'plugins', 'welcome.ini'), path: null },
+    { name: 'duel', source: 'shipped', configPath: null, path: null },
+    { name: 'myplug', source: 'custom', configPath: path.join('/srv/b3i', 'b3', 'plugins', 'myplug.ini'), path: path.join('/srv/b3i', 'b3', 'extplugins') },
+  ];
+  const xml = renderB3Config({ instance: { port: 28960 }, paths, gameLog: '/srv/b3i/main/games_mp.log', authConfigPath: paths.authConfig, plugins });
+  const order = ['admin', 'welcome', 'duel', 'myplug', 'auth'].map(name => xml.indexOf(`<plugin name="${name}"`));
+  assert.ok(order.every((value, index) => value > 0 && (index === 0 || value > order[index - 1])), `order ${order}`);
+  assert.ok(xml.includes(`<plugin name="welcome" config="${plugins[0].configPath}"/>`));
+  assert.ok(xml.includes('<plugin name="duel"/>'));
+  assert.ok(xml.includes(`<plugin name="myplug" config="${plugins[2].configPath}" path="${plugins[2].path}"/>`));
+  const escaped = renderB3Config({ instance: { port: 28960 }, paths, gameLog: '/x.log', plugins: [{ name: 'a"b', source: 'custom', configPath: "/h&o<m>e/'c.ini", path: '/h&o"me/ext' }] });
+  assert.ok(escaped.includes('<plugin name="a&quot;b" config="/h&amp;o&lt;m&gt;e/&apos;c.ini" path="/h&amp;o&quot;me/ext"/>'));
+});
+
+test('prepareB3Runtime writes the plugin list and its fingerprint follows it', async t => {
+  const instance = await home(t);
+  const without = await prepareB3Runtime(instance, 'games_mp.log');
+  const plugins = [{ name: 'duel', source: 'shipped', configPath: null, path: null }];
+  const withPlugins = await prepareB3Runtime(instance, 'games_mp.log', { plugins });
+  assert.ok((await fs.readFile(withPlugins.config, 'utf8')).includes('<plugin name="duel"/>'));
+  assert.notEqual(without.fingerprint, withPlugins.fingerprint);
+});

@@ -115,3 +115,17 @@ test('PR #23 review: a known different B3 command prefix blocks the integration,
   assert.ok(B3_INTEGRATION_CODES.includes('B3_COMMAND_PREFIX_MISMATCH'));
   assert.notEqual(b3IntegrationMessage('B3_COMMAND_PREFIX_MISMATCH', 'en'), 'B3_COMMAND_PREFIX_MISMATCH');
 });
+
+test('restartHints (Block 16b): PLUGINS_CHANGED for a newer revision, null when equal', async () => {
+  const plan = { fingerprint: 'f'.repeat(64), serverFingerprint: 's'.repeat(64) };
+  const startedWith = { fingerprint: plan.fingerprint, credentialDigest: 'd', pluginsRevision: 2 };
+  const { restartHints } = await import('../lib/b3-integration.mjs');
+  assert.deepEqual(restartHints({ plan, credentialDigest: 'd', startedWith, pluginsRevision: 3 }), { server: null, b3: 'PLUGINS_CHANGED' });
+  assert.deepEqual(restartHints({ plan, credentialDigest: 'd', startedWith, pluginsRevision: 2 }), { server: null, b3: null });
+  // Existing hints win; a start without a recorded revision counts as 0; no start, no hint.
+  assert.equal(restartHints({ plan: { ...plan, fingerprint: 'x' }, credentialDigest: 'd', startedWith, pluginsRevision: 3 }).b3, 'SETTINGS_CHANGED');
+  assert.equal(restartHints({ plan, credentialDigest: 'e', startedWith, pluginsRevision: 3 }).b3, 'CREDENTIALS_CHANGED');
+  assert.equal(restartHints({ plan, startedWith: { fingerprint: plan.fingerprint }, pluginsRevision: 0 }).b3, null);
+  assert.equal(restartHints({ plan, startedWith: { fingerprint: plan.fingerprint }, pluginsRevision: 1 }).b3, 'PLUGINS_CHANGED');
+  assert.equal(restartHints({ plan, startedWith: null, pluginsRevision: 3 }).b3, null);
+});
