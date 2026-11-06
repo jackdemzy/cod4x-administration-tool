@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { InstanceB3Integration } from './instance-b3-integration.jsx';
+import { b3IntegrationMessage } from './b3-integration-messages.mjs';
 
 const STATUS_TEXT = {
   RUNNING: ['läuft', 'running'], STARTING: ['startet', 'starting'], STOPPING: ['stoppt', 'stopping'], STOPPED: ['gestoppt', 'stopped'],
@@ -9,6 +10,21 @@ const HEALTH_TEXT = {
   HEALTHY: ['bereit (liest Spielereignisse)', 'ready (reading game events)'], STARTING: ['startet', 'starting'], DEGRADED: ['Fehler im B3-Log', 'errors in B3 log'],
   DOWN: ['nicht aktiv', 'not active'], UNKNOWN: ['Prozessidentität unklar', 'process identity unclear'],
 };
+// Block 16: the runtime state of b3hide/auth (integrationRow), not only the prerequisites.
+const INTEGRATION_TEXT = {
+  OFF: ['aus', 'off'], OK: ['verbunden – B3-Befehle werden ausgeblendet', 'connected – B3 commands are hidden'],
+  BLOCKED: ['blockiert', 'blocked'], NOT_CONNECTED: ['nicht verbunden – B3-Befehle werden NICHT ausgeblendet', 'not connected – B3 commands are NOT hidden'], UNKNOWN: ['unbekannt', 'unknown'],
+};
+export function B3IntegrationStatus({ integration, de }) {
+  if (!integration) return null;
+  const text = (INTEGRATION_TEXT[integration.status] || [integration.status, integration.status])[de ? 0 : 1];
+  const problem = integration.status === 'BLOCKED' || integration.status === 'NOT_CONNECTED';
+  return <p role={problem ? 'alert' : 'status'} aria-label={de ? 'b3hide/auth' : 'b3hide/auth'}>
+    <strong>b3hide/auth:</strong> {text}{integration.code && ` – ${b3IntegrationMessage(integration.code, de ? 'de' : 'en')}`}
+    {integration.status === 'NOT_CONNECTED' && (de ? ' Bis dahin keine !auth-Passwörter im Chat eingeben.' : ' Until then, do not type !auth passwords in chat.')}
+  </p>;
+}
+
 // Roadmap Block 13: CONTROL must tell these failure causes apart.
 const DIAGNOSIS_TEXT = {
   PYTHON_MISSING: ['Python fehlt – Python-2.7-Pfad in den B3-Abhängigkeiten hinterlegen.', 'Python missing – set the Python 2.7 path in the B3 dependencies.'],
@@ -57,6 +73,7 @@ export function B3Dashboard({ dashboard, de }) {
     </table>
     {dashboard.diagnosis.length > 0 ? <ul role="alert">{dashboard.diagnosis.map(code => <li key={code}><strong>{code}</strong>{code === dashboard.primary && (de ? ' (Hauptursache)' : ' (primary cause)')} – {(DIAGNOSIS_TEXT[code] || [code, code])[de ? 0 : 1]}{code === 'RCON_OFFLINE' && dashboard.rconCause && (de ? ' Folge von CoD4X offline.' : ' Caused by CoD4X offline.')}</li>)}</ul>
       : <p role="status">{de ? 'Keine Fehlerdiagnose.' : 'No diagnosis.'}</p>}
+    <B3IntegrationStatus integration={dashboard.integration} de={de}/>
   </div>;
 }
 

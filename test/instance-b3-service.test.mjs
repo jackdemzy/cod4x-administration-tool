@@ -286,3 +286,30 @@ test('Block 16: a vault lock after the write stops B3, restores b3.xml and remov
   assert.equal(await fs.readFile(path.join(b3, 'b3.xml'), 'utf8'), before);
   await assert.rejects(fs.stat(path.join(b3, 'plugin_auth.ini')), { code: 'ENOENT' });
 });
+
+// PR #23 review: an integration change never overlaps a B3 start.
+test('Block 16: integration changes and B3 starts exclude each other', async t => {
+  const { b3Service, create } = await fixture(t);
+  await create('b3-race');
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  b3Service.integration = { plan: async () => { await gate; return plan({ enabled: false, auth: { enabled: false, passwordLevels: [] }, rcon: { required: false, present: false } }); } };
+  const starting = b3Service.start('b3-race');
+  await new Promise(resolve => setImmediate(resolve));
+  let ran = false;
+  await assert.rejects(b3Service.whileIdle('b3-race', async () => { ran = true; }), { code: 'B3_INTEGRATION_BUSY' });
+  assert.equal(ran, false, 'no settings change while a start is in flight');
+  release();
+  await starting;
+  await b3Service.stop('b3-race');
+  let finish;
+  const saving = b3Service.whileIdle('b3-race', () => new Promise(resolve => { finish = resolve; }));
+  await assert.rejects(b3Service.start('b3-race'), { code: 'B3_INTEGRATION_BUSY' });
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(b3Service.start('b3-race'), { code: 'B3_INTEGRATION_BUSY' }, 'still blocked while the change is saved');
+  finish('saved');
+  assert.equal(await saving, 'saved');
+  await b3Service.start('b3-race');
+  await assert.rejects(b3Service.whileIdle('b3-race', async () => {}), { code: 'B3_INTEGRATION_BUSY' }, 'a running B3 also blocks');
+  await b3Service.stop('b3-race');
+});

@@ -172,3 +172,15 @@ test('b3hide format: online() reports the limits and numeric ping', async () => 
   assert.equal(online.players[0].ping, 0);
   assert.equal(online.players[0].name, 'VeryLongPlaye');
 });
+
+// PR #23 review: a name cut to 15 bytes by b3hide is no identity.
+test('b3hide format: a name-only kick of a truncated row is refused, a short name still works', async () => {
+  let ctx = service({ statusFormat: async () => 'b3hide', statuses: [b3status(b3row(4, '2310346613472386', '^1VeryLongPlaye'))] });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 4, name: 'VeryLongPlaye' }), { code: 'RCON_KICK_TARGET_AMBIGUOUS' });
+  assert.equal(ctx.kicks.length, 0, 'never kicks a lookalike');
+  ctx = service({ statusFormat: async () => 'b3hide', statuses: [b3status(b3row(4, '0', '^1VeryLongPlaye'))] });
+  await assert.rejects(ctx.rcon.kick('srv', { slot: 4, playerid: '0', name: 'VeryLongPlayerName' }), { code: 'RCON_KICK_TARGET_AMBIGUOUS' });
+  assert.equal(ctx.kicks.length, 0);
+  ctx = service({ statusFormat: async () => 'b3hide', statuses: [b3status(b3row(4, '2310346613472386', 'Wolf')), b3status()] });
+  assert.deepEqual(await ctx.rcon.kick('srv', { slot: 4, name: 'Wolf' }), { kicked: true, slot: 4 });
+});
