@@ -128,4 +128,7 @@ test('restartHints (Block 16b): PLUGINS_CHANGED for a newer revision, null when 
   assert.equal(restartHints({ plan, startedWith: { fingerprint: plan.fingerprint }, pluginsRevision: 0 }).b3, null);
   assert.equal(restartHints({ plan, startedWith: { fingerprint: plan.fingerprint }, pluginsRevision: 1 }).b3, 'PLUGINS_CHANGED');
   assert.equal(restartHints({ plan, startedWith: null, pluginsRevision: 3 }).b3, null);
+  // No current revision (caller passes none): no plugin hint, whatever the start recorded.
+  assert.equal(restartHints({ plan, credentialDigest: 'd', startedWith }).b3, null);
+  assert.equal(restartHints({ plan, credentialDigest: 'd', startedWith, pluginsRevision: null }).b3, null);
 });

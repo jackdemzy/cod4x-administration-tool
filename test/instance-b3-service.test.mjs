@@ -381,3 +381,18 @@ test('Block 16b: start writes the enabled plugins and records the revision', asy
   assert.equal(b3Service.startedWith('b3-plug').pluginsRevision, store.get('b3-plug').b3PluginsRevision);
   assert.ok(store.get('b3-plug').b3PluginsRevision > 0);
 });
+
+// The integration view's restart hint: a plugin change while B3 runs asks for a B3 restart.
+test('Block 16b: plugin change while B3 runs gives PLUGINS_CHANGED', async t => {
+  const { restartHints } = await import('../lib/b3-integration.mjs');
+  const { b3Service, create, store, environment } = await fixture(t);
+  await create('b3-plug-hint');
+  const plugins = await withPlugins(t, b3Service, environment, store);
+  await plugins.setEnabled('b3-plug-hint', 'welcome', true);
+  await b3Service.start('b3-plug-hint');
+  const startedWith = b3Service.startedWith('b3-plug-hint');
+  const hint = () => restartHints({ plan: { fingerprint: startedWith.fingerprint }, startedWith, pluginsRevision: store.get('b3-plug-hint').b3PluginsRevision }).b3;
+  assert.equal(hint(), null);
+  await plugins.setEnabled('b3-plug-hint', 'welcome', false);
+  assert.equal(hint(), 'PLUGINS_CHANGED');
+});

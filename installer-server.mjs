@@ -40,6 +40,7 @@ import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
 import { restartHints } from "./lib/b3-integration.mjs";
 import { InstanceB3DatabaseService } from "./lib/instance-b3-database-service.mjs";
 import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
+import { InstanceB3PluginService } from "./lib/instance-b3-plugin-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
 import { MonitorStore, monitorRange } from "./lib/monitor-store.mjs";
 import { MonitorCollector } from "./lib/monitor-collector.mjs";
@@ -255,6 +256,8 @@ const RBAC_PERMISSIONS = [
   { id: "audit.read", label: "Audit", description: "Audit-Trail und persistente Audit-Daten lesen." },
   { id: "user.manage", label: "Benutzerverwaltung", description: "Benutzer, Rollen und Benutzer-Sessions verwalten." },
   { id: "monitor.read", label: "Monitoring", description: "Serverstatus, Spielerzahlen, Verlauf und Ausfälle lesen (Block 24)." },
+  // Block 16b: custom B3 plugin code runs as the B3 process user; admin only.
+  { id: "b3.plugins.code", label: "B3-Plugin-Code", description: "Eigene B3-Plugins anlegen, hochladen und bearbeiten." },
 ];
 const RBAC_PERMISSION_IDS = RBAC_PERMISSIONS.map(p => p.id);
 const RBAC_MATRIX = Object.freeze({
@@ -310,6 +313,7 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
+  { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
 ]);
 
@@ -355,7 +359,10 @@ app.use((req, res, next) => {
   if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress)) return res.status(403).json({ ok: false, code: "CREDENTIAL_LOCAL_ONLY", error: "Credential transport requires a local connection." });
   next();
 });
-app.use(express.json({ limit: "64kb" }));
+// Block 16b: B3 plugin config and code may be up to 256 KB of text; JSON escaping can grow it.
+const isB3PluginTextRequest = req => /^\/api\/instances\/[^/]+\/b3\/plugins\/(?:custom(?:\/[^/]+\/code)?|[^/]+\/config)$/.test(req.path);
+const jsonBody = express.json({ limit: "64kb" }), b3PluginJsonBody = express.json({ limit: "2mb" });
+app.use((req, res, next) => (isB3PluginTextRequest(req) ? b3PluginJsonBody : jsonBody)(req, res, next));
 app.use((error, req, res, next) => {
   if (!isCredentialRequest(req)) return next(error);
   res.status(400).json({ ok: false, code: "CREDENTIAL_REQUEST_INVALID", error: "Credential request is invalid." });
@@ -2381,7 +2388,9 @@ async function b3ServerStatus(id) {
 const b3AdminService = new InstanceB3AdminService({ store: instanceStore, rcon: { findOnline: id => rconService.findOnline(id), kick: (id, target, actor) => rconService.kick(id, target, actor) }, database: { read: id => b3DatabaseService.read(id), query: (...args) => b3DatabaseService.query(...args), withStartGuard: (id, action) => b3DatabaseService.withStartGuard(id, action) },
   environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit("info", entry.event, entry) });
 const b3DatabaseService = new InstanceB3DatabaseService({ store: instanceStore, credentials: credentialService, environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, entry) });
-const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
+// Block 16b: B3 plugins per instance; the B3 start re-verifies them and records the revision.
+const b3PluginService = new InstanceB3PluginService({ store: instanceStore, environment: b3EnvironmentForRuntime });
+const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, plugins: b3PluginService, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
 instanceManager = new ServerInstanceManager({
   store: instanceStore,
   credentialService,
@@ -2423,7 +2432,7 @@ function instanceRoute(action, status = 200) {
       res.status(status).json({ ok: true, correlationId, ...result });
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
-      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
+      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY", "B3_PLUGIN_CONFLICT"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
       res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
     }
   };
@@ -2571,7 +2580,7 @@ async function b3IntegrationView(id, full = false) {
   const serverRunning = (await instanceManager.runtime(id)).state?.status === "RUNNING";
   const b3Running = await b3Service.isRunning(id);
   const own = await credentialService.instanceStatus(id);
-  const hints = restartHints({ plan: view.plan, credentialDigest: own.digest, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null });
+  const hints = restartHints({ plan: view.plan, credentialDigest: own.digest, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null, pluginsRevision: instanceStore.get(id).b3PluginsRevision });
   const status = await credentialService.instanceStatus(id);
   return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: full ? vault.sha256 : null } };
 }
@@ -2589,6 +2598,66 @@ app.post("/api/instances/:id/b3/integration/auth-password", requirePermission("c
   const result = await credentialService.setB3AuthPassword(req.params.id, body);
   audit("info", result.set ? "b3.auth.password.set" : "b3.auth.password.cleared", { instanceId: req.params.id, actor: req.auth.username, level: result.level });
   return { password: result, integration: await b3IntegrationView(req.params.id, true) };
+}));
+// Block 16b: B3 plugin management. Local only (no gateway route). Switches,
+// configs and approvals need config.manage; custom code needs b3.plugins.code.
+// The audit carries names and hashes, never config or code content.
+async function b3PluginsRestart(id) {
+  if (!(await b3Service.isRunning(id))) return null;
+  const { plan } = await instanceManager.b3Integration(id);
+  const own = await credentialService.instanceStatus(id);
+  return restartHints({ plan, credentialDigest: own.digest, startedWith: b3Service.startedWith(id), pluginsRevision: instanceStore.get(id).b3PluginsRevision }).b3;
+}
+// Exact key set; anything else is the given request code.
+function b3PluginBody(req, keys, code) {
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== [...keys].sort().join(",")) throw Object.assign(new Error(code), { code });
+  return body;
+}
+function auditB3Plugin(event, req, name, sha256) {
+  audit("info", `b3.plugin.${event}`, { instanceId: req.params.id, actor: req.auth.username, name, ...(sha256 === undefined ? {} : { sha256 }) });
+}
+const b3PluginsBase = "/api/instances/:id/b3/plugins";
+app.get(b3PluginsBase, requirePermission("diagnostics.read"), instanceRoute(async req => ({ ...await b3PluginService.list(req.params.id), restart: await b3PluginsRestart(req.params.id) })));
+for (const [action, enabled] of [["enable", true], ["disable", false]]) {
+  app.post(`${b3PluginsBase}/:name/${action}`, requirePermission("config.manage"), instanceRoute(async req => {
+    const plugin = await b3PluginService.setEnabled(req.params.id, req.params.name, enabled);
+    auditB3Plugin(enabled ? "enabled" : "disabled", req, plugin.name);
+    return { plugin };
+  }));
+}
+app.get(`${b3PluginsBase}/:name/config`, requirePermission("config.manage"), instanceRoute(async req => ({ config: await b3PluginService.readConfig(req.params.id, req.params.name) })));
+app.put(`${b3PluginsBase}/:name/config`, requirePermission("config.manage"), instanceRoute(async req => {
+  const { text, expectedSha256 } = b3PluginBody(req, ["text", "expectedSha256"], "B3_PLUGIN_CONFIG_INVALID");
+  const config = await b3PluginService.saveConfig(req.params.id, req.params.name, { text, expectedSha256 });
+  auditB3Plugin("config_saved", req, req.params.name);
+  return { config };
+}));
+app.post(`${b3PluginsBase}/:name/approve`, requirePermission("config.manage"), instanceRoute(async req => {
+  const { sha256 } = b3PluginBody(req, ["sha256"], "B3_PLUGIN_CONFIG_INVALID");
+  const plugin = await b3PluginService.approve(req.params.id, req.params.name, sha256);
+  auditB3Plugin("approved", req, plugin.name, plugin.sha256);
+  return { plugin };
+}));
+app.post(`${b3PluginsBase}/custom`, requirePermission("b3.plugins.code"), instanceRoute(async req => {
+  const fromTemplate = req.body && typeof req.body === "object" && "from" in req.body;
+  const body = b3PluginBody(req, fromTemplate ? ["name", "from"] : ["name", "code"], "B3_PLUGIN_CODE_INVALID");
+  if (fromTemplate && body.from !== "template") throw Object.assign(new Error("B3_PLUGIN_CODE_INVALID"), { code: "B3_PLUGIN_CODE_INVALID" });
+  const plugin = await b3PluginService.createCustom(req.params.id, fromTemplate ? { name: body.name, from: "template" } : { name: body.name, code: body.code });
+  auditB3Plugin("custom_created", req, plugin.name, plugin.sha256);
+  return { plugin };
+}));
+app.get(`${b3PluginsBase}/custom/:name/code`, requirePermission("b3.plugins.code"), instanceRoute(async req => ({ code: await b3PluginService.readCode(req.params.id, req.params.name) })));
+app.put(`${b3PluginsBase}/custom/:name/code`, requirePermission("b3.plugins.code"), instanceRoute(async req => {
+  const { code, expectedSha256 } = b3PluginBody(req, ["code", "expectedSha256"], "B3_PLUGIN_CODE_INVALID");
+  const saved = await b3PluginService.saveCode(req.params.id, req.params.name, { code, expectedSha256 });
+  auditB3Plugin("code_saved", req, req.params.name, saved.sha256);
+  return { code: saved };
+}));
+app.delete(`${b3PluginsBase}/custom/:name`, requirePermission("b3.plugins.code"), instanceRoute(async req => {
+  const result = await b3PluginService.deleteCustom(req.params.id, req.params.name);
+  auditB3Plugin("deleted", req, result.name);
+  return { plugin: result };
 }));
 app.post("/api/instances/:id/b3/start", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id) })));
 app.post("/api/instances/:id/b3/stop", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.stop(req.params.id) })));
