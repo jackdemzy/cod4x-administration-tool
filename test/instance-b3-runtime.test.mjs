@@ -41,6 +41,8 @@ test('B3 runtime view shows crash, health and RCON reachability without fetching
   assert.match(lost, /do not type !auth passwords in chat/);
   assert.match(render('B3IntegrationStatus', { de: true, integration: { status: 'OK', code: null } }), /role="status".*verbunden – B3-Befehle werden ausgeblendet/);
   assert.equal(render('B3IntegrationStatus', { de: true, integration: null }), '');
+  assert.match(render('B3IntegrationStatus', { de: false, integration: { status: 'OK', code: null, authExposed: true } }), /role="alert">Since the last B3 start, an auth command was typed publicly/);
+  assert.doesNotMatch(render('B3IntegrationStatus', { de: false, integration: { status: 'OK', code: null } }), /typed publicly/);
   assert.match(render('B3Dashboard', { de: true, dashboard: { status: 'RUNNING', health: 'HEALTHY', version: { label: 'eBc/B3' }, checks: {}, diagnosis: [], publist: 'SUPPRESSED', integration: { status: 'BLOCKED', code: 'B3_COMMAND_PREFIX_MISMATCH' } } }), /b3hide\/auth:<\/strong> blockiert – B3 nutzt einen anderen Befehls-Prefix/);
   const panel = render('InstanceB3Runtime', { de: true, instance: { id: 'x' }, request: () => { throw new Error('SSR must not fetch'); } });
   assert.match(panel, /unabhängig vom CoD4x-Server/);
