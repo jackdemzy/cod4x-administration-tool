@@ -22,6 +22,7 @@ export function B3IntegrationStatus({ integration, de }) {
   return <p role={problem ? 'alert' : 'status'} aria-label={de ? 'b3hide/auth' : 'b3hide/auth'}>
     <strong>b3hide/auth:</strong> {text}{integration.code && ` – ${b3IntegrationMessage(integration.code, de ? 'de' : 'en')}`}
     {integration.status === 'NOT_CONNECTED' && (de ? ' Bis dahin keine !auth-Passwörter im Chat eingeben.' : ' Until then, do not type !auth passwords in chat.')}
+    {integration.authExposed && <><br/><strong role="alert">{b3IntegrationMessage('B3_AUTH_PASSWORD_EXPOSED', de ? 'de' : 'en')}</strong></>}
   </p>;
 }
 

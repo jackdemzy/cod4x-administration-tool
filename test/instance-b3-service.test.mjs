@@ -313,3 +313,18 @@ test('Block 16: integration changes and B3 starts exclude each other', async t =
   await assert.rejects(b3Service.whileIdle('b3-race', async () => {}), { code: 'B3_INTEGRATION_BUSY' }, 'a running B3 also blocks');
   await b3Service.stop('b3-race');
 });
+
+// b3hide hides only "!": the dashboard reports a public auth command with another prefix.
+test('Block 16: the dashboard flags an auth command typed with another prefix while the integration is on', async t => {
+  const { b3Service, create, store } = await fixture(t);
+  await create('b3-exposed');
+  const logFile = path.join(store.get('b3-exposed').homePath, 'b3', 'b3.log');
+  await fs.mkdir(path.dirname(logFile), { recursive: true });
+  await fs.writeFile(logFile, "x BOT 'Starting Cod4XParser v0.4 for server 127.0.0.1:1 (autorestart = True)'\n261106 02:00:00 VERBOSE 'Queueing event EVT_CLIENT_SAY : @auth hunter22'\n");
+  b3Service.integration = { plan: async () => plan() };
+  const board = await b3Service.dashboard('b3-exposed');
+  assert.equal(board.integration.authExposed, true);
+  assert.ok(!JSON.stringify(board).includes('hunter22'));
+  b3Service.integration = { plan: async () => plan({ enabled: false }) };
+  assert.equal((await b3Service.dashboard('b3-exposed')).integration.authExposed, undefined, 'only reported while the integration is on');
+});

@@ -28,7 +28,7 @@ test('b3.xml carries the escaped rcon password and the auth entry only when aske
 test('plugin_auth.ini has the auth command, the default messages and passwords only when set', () => {
   const ini = renderAuthConfig({ passwords: { 100: 'hunter22', 20: 'mod-pass' } });
   assert.match(ini, /^\[commands\]\nauth: 0$/m);
-  assert.match(ini, /^auth_message: \^7Please authenticate yourself with \^1!auth <password>$/m);
+  assert.match(ini, /^auth_message: \^7Please authenticate yourself with \^1!auth <password> \^7\(only with \^1!\^7, never @ & \/\)$/m);
   assert.match(ini, /^no_password: \^1Missing password!\^7 Usage: !auth <password>$/m);
   assert.match(ini, /^\[passwords\]\n20: mod-pass\n100: hunter22$/m);
   assert.ok(!renderAuthConfig({ passwords: {} }).includes('[passwords]'));

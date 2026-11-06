@@ -48,3 +48,9 @@ test('B3 integration panel: blockers, restart hints and disabled controls withou
   assert.match(en, /Hide B3 commands/);
   assert.match(en, /its SHA-256 is not approved/);
 });
+
+// b3hide hides only "!", B3 also runs @, & and / commands: the panel says so while the switch is on.
+test('B3 integration panel warns about the other B3 prefixes only while hiding is on', { skip }, async () => {
+  assert.match(await panel({ data: data(), canManage: true }), /role="note">B3 führt Befehle auch mit @, &amp; und \/ aus/);
+  assert.doesNotMatch(await panel({ data: data({ settings: { hideCommands: false, prefix: '!', hideLevel: 20 } }), canManage: true }), /B3 führt Befehle auch mit @/);
+});

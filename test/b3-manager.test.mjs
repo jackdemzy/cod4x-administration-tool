@@ -113,3 +113,18 @@ test('Block 16: the B3 log shows when the auth plugin registered its event', () 
   assert.equal(parseB3Log("261106 01:00:00\tVERBOSE\t'AuthPlugin: registered CLIENT_AUTH event'").auth, 'STARTED');
   assert.equal(parseB3Log('nothing here').auth, null);
 });
+
+// b3hide hides only "!": a public auth command with another prefix was visible in chat.
+test('parseB3Log flags a public auth command with another prefix, never !auth or a private message', () => {
+  const run = 'Starting Cod4XParser v0.4 for server\n';
+  assert.equal(parseB3Log(run).authExposed, false);
+  assert.equal(parseB3Log(run + "261106 02:00:00\tVERBOSE\t'Queueing event EVT_CLIENT_SAY : !auth hunter22'").authExposed, false, 'hidden by b3hide');
+  for (const line of ["'Queueing event EVT_CLIENT_SAY : @auth hunter22'", "'Queueing event EVT_CLIENT_TEAM_SAY : &AUTH hunter22'", "'Queueing event EVT_CLIENT_SAY : /auth x'"]) {
+    const log = parseB3Log(run + `261106 02:00:00\tVERBOSE\t${line}`);
+    assert.equal(log.authExposed, true, line);
+    assert.ok(!JSON.stringify(log).includes('hunter22'), 'the value is never kept');
+  }
+  assert.equal(parseB3Log(run + "'Queueing event EVT_CLIENT_PRIVATE_SAY : @auth hunter22'").authExposed, false, 'a private message is not public chat');
+  assert.equal(parseB3Log(run + "'Queueing event EVT_CLIENT_SAY : @authors rock'").authExposed, false);
+  assert.equal(parseB3Log("'Queueing event EVT_CLIENT_SAY : @auth hunter22'\n" + run).authExposed, false, 'a new B3 run starts clean');
+});
