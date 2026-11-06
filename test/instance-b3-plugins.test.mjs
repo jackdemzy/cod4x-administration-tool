@@ -73,3 +73,30 @@ test('B3 plugins panel: restart hint', { skip }, async () => {
   assert.match(await panel({ data: data({ restart: 'PLUGINS_CHANGED' }) }), /Plugin-Änderungen wirken erst nach einem B3-Neustart\./);
   assert.doesNotMatch(await panel({ data: data() }), /Plugin-Änderungen wirken erst/);
 });
+
+test('B3 plugins panel: the trust tick is bound to name and hash', { skip }, async () => {
+  const HASH_A = 'a'.repeat(64);
+  const one = sha => ({ plugins: [row({ name: 'duel', enabled: true, state: 'NOT_APPROVED', sha256: sha, reason: 'B3_PLUGIN_NOT_APPROVED' })], revision: 1, restart: null });
+  const render = await renderer();
+  const props = initialTrusted => ({ de: true, busy: false, permissions: { manage: true, code: true }, onToggle: noop, onApprove: noop, onOpenConfig: noop, onOpenCode: noop, onSaveEditor: noop, onCloseEditor: noop, onCreate: noop, onDelete: noop, onReloadEditor: noop, initialTrusted });
+  const ticked = { [`duel:${HASH_A}`]: true };
+  const same = render('B3PluginsPanel', { ...props(ticked), data: one(HASH_A) });
+  assert.match(same, /checked=""/);
+  assert.doesNotMatch(same.match(/<button[^>]*>Freigeben/)[0], /disabled/);
+  const changed = render('B3PluginsPanel', { ...props(ticked), data: one(HASH) });
+  assert.doesNotMatch(changed, /checked=""/, 'tick for hash A does not carry over to hash B');
+  assert.match(changed.match(/<button[^>]*>Freigeben/)[0], /disabled/);
+});
+
+test('B3 plugins panel: editor conflict shows a hint and a reload action, de/en', { skip }, async () => {
+  const editor = { kind: 'config', name: 'myplug', text: 'my draft', sha256: HASH, conflict: true };
+  const de = await panel({ data: data(), editor });
+  assert.match(de, /Die Datei wurde zwischenzeitlich geändert/);
+  assert.match(de, /Aktuelle Version laden/);
+  assert.ok(de.includes('my draft'));
+  const en = await panel({ data: data(), de: false, editor });
+  assert.match(en, /The file changed in the meantime/);
+  assert.match(en, /Load current version/);
+  const plain = await panel({ data: data(), editor: { ...editor, conflict: false } });
+  assert.doesNotMatch(plain, /Aktuelle Version laden/);
+});
