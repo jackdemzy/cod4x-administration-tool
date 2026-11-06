@@ -85,7 +85,7 @@ The deferred minor findings are listed in the PR description.
 ### Checks
 
 - Gate: `scripts/verify-4.18.20-b3-integration-gate.mjs` (13 checks).
-- Native gate: `scripts/verify-4.18.20-b3-integration-native.mjs` in WSL passed 12/12. It ran against the real CoD4x 21.2 core with the release `b3hide.so`, eBc-B3 9096624 and two bots:
+- Native gate: `scripts/verify-4.18.20-b3-integration-native.mjs` in WSL passed 13/13. It ran against the real CoD4x 21.2 core with the release `b3hide.so`, eBc-B3 9096624 and two bots:
   - the release hash matched;
   - the core loaded b3hide;
   - the dvars arrived as CONTROL's `#`, `1`, `40`;
@@ -94,6 +94,7 @@ The deferred minor findings are listed in the PR description.
   - `client_checkin` is b3hide's command: a valid call was accepted and a malformed one printed its usage;
   - a verified slot kick worked in the b3hide format;
   - no RCON or `!auth` password appeared in the B3 logs, the output or the audit.
+  - B3 writes VERBOSE lines at `log_level 9`, which the `B3_AUTH_PASSWORD_EXPOSED` detection needs. The "Queueing event EVT_CLIENT_SAY" line itself needs a real client: bots never become B3 clients, because the cod4x parser matches `b3status` rows by IP. The line shape comes from `b3/parser.py` queueEvent and is covered by `test/b3-manager.test.mjs`.
 - Tests:
   - new: `test/b3-integration.test.mjs`, `test/server-instance-store-b3integration.test.mjs`, `test/b3-config-integration.test.mjs`, `test/server-instance-manager-b3integration.test.mjs`, `test/b3-integration-http.test.mjs`, `test/instance-b3-integration.test.mjs`;
   - extended: `test/instance-credential-service.test.mjs`, `test/instance-b3-service.test.mjs`, `test/rcon-status.test.mjs`, `test/instance-rcon-kick.test.mjs`, `test/b3-manager.test.mjs`, `test/instance-plugin-manager.test.mjs`, `test/instance-online-players.test.mjs`.
