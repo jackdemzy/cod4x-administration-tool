@@ -366,6 +366,13 @@ app.use((req, res, next) => {
 const isB3PluginTextRequest = req => /^\/api\/instances\/[^/]+\/b3\/plugins\/(?:custom(?:\/[^/]+\/code)?|[^/]+\/config)$/.test(req.path);
 const jsonBody = express.json({ limit: "64kb" }), b3PluginJsonBody = express.json({ limit: "2mb" });
 app.use((req, res, next) => (isB3PluginTextRequest(req) ? b3PluginJsonBody : jsonBody)(req, res, next));
+// Plugin bodies can hold tokens: a malformed or oversized body gets a fixed
+// code, never the parser message, and is not passed to the default handler (which logs).
+app.use((error, req, res, next) => {
+  if (!isB3PluginTextRequest(req)) return next(error);
+  const code = /\/code$|\/custom$/.test(req.path) ? "B3_PLUGIN_CODE_INVALID" : "B3_PLUGIN_CONFIG_INVALID";
+  res.status(400).json({ ok: false, code, error: code });
+});
 app.use((error, req, res, next) => {
   if (!isCredentialRequest(req)) return next(error);
   res.status(400).json({ ok: false, code: "CREDENTIAL_REQUEST_INVALID", error: "Credential request is invalid." });
@@ -2436,7 +2443,7 @@ function instanceRoute(action, status = 200) {
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
       const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY", "B3_PLUGIN_CONFLICT"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
-      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
+      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message, ...(Number.isInteger(error.line) ? { line: error.line } : {}) });
     }
   };
 }
