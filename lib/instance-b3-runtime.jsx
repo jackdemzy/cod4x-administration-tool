@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { InstanceB3Integration } from './instance-b3-integration.jsx';
 
 const STATUS_TEXT = {
   RUNNING: ['läuft', 'running'], STARTING: ['startet', 'starting'], STOPPING: ['stoppt', 'stopping'], STOPPED: ['gestoppt', 'stopped'],
@@ -105,6 +106,7 @@ export function InstanceB3Runtime({ instance, request, de }) {
     {error && <p role="alert">{error}</p>}
     <B3Dashboard dashboard={dashboard} de={de}/>
     <B3RuntimeView b3={b3} de={de}/>
+    <InstanceB3Integration instance={instance} request={request} de={de}/>
     {panel && <pre aria-label={panel.kind} style={{ maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{panel.text}</pre>}
   </details>;
 }

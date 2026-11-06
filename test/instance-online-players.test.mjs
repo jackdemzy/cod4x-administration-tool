@@ -36,3 +36,9 @@ test('R4: kick reasons are not shown pre-filled for a slot after a reload', { sk
   const { reasonsAfterLoad } = await import('../lib/online-players-state.mjs');
   assert.deepEqual(reasonsAfterLoad({ 3: 'Cheating' }), {});
 });
+
+test('Block 16: the online list says when b3hide limits the status', { skip }, async () => {
+  const html = await view({ permissions: { manage: false }, online: { ...online, limits: { nameLength: 15, connectionState: false } } });
+  assert.match(html, /b3hide aktiv: Status eingeschränkt/);
+  assert.ok(!(await view({ permissions: { manage: false }, online })).includes('b3hide aktiv'));
+});
