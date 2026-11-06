@@ -15,21 +15,26 @@ const STATE_TEXT = {
 const EXTRA_REASON = { B3_PLUGIN_PARSER_UNSUPPORTED: ['Nicht unterstützt (Parser fehlt).', 'Not supported (parser missing).'] };
 const WARNING = ['Dieser Code läuft mit den Rechten des B3-Prozesses.', 'This code runs with the rights of the B3 process.'];
 const TRUST = ['Ich habe diese Datei geprüft und vertraue ihr', 'I checked this file and trust it'];
+const CONFLICT = ['Die Datei wurde zwischenzeitlich geändert. Lade die aktuelle Version; dein Entwurf bleibt erhalten.', 'The file changed in the meantime. Load the current version; your draft is kept.'];
+// A trust tick only counts for the exact file content the user saw.
+export const trustKey = (name, sha256) => `${name}:${sha256}`;
 const reasonText = (code, lang) => (EXTRA_REASON[code] ? EXTRA_REASON[code][lang === 'en' ? 1 : 0] : b3PluginMessage(code, lang));
 
-function EditorForm({ editor, de, busy, onSave, onClose }) {
+function EditorForm({ editor, de, busy, onSave, onClose, onReload }) {
   const [text, setText] = useState(editor.text);
   return <div role="group" aria-label={`${editor.kind} ${editor.name}`}>
     <p><strong>{editor.name}</strong> – {editor.kind === 'code' ? (de ? 'Code' : 'Code') : (de ? 'Konfiguration' : 'Config')}</p>
     {editor.kind === 'code' && <p role="note">{WARNING[de ? 0 : 1]}</p>}
     <textarea spellCheck={false} style={{ fontFamily: 'monospace', width: '100%', minHeight: 220 }} value={text} disabled={busy} onChange={event => setText(event.target.value)} aria-label={`${editor.kind} ${editor.name}`}/>
     <button disabled={busy} onClick={() => onSave(text)}>{de ? 'Speichern' : 'Save'}</button>
+    {editor.conflict && <p role="note">{CONFLICT[de ? 0 : 1]}</p>}
+    {editor.conflict && <button disabled={busy} onClick={() => onReload(text)}>{de ? 'Aktuelle Version laden' : 'Load current version'}</button>}
     <button disabled={busy} onClick={onClose}>{de ? 'Schließen' : 'Close'}</button>
   </div>;
 }
 
-export function B3PluginsPanel({ data, permissions = {}, de, busy, editor, onToggle, onApprove, onOpenConfig, onOpenCode, onSaveEditor, onCloseEditor, onCreate, onDelete }) {
-  const [trusted, setTrusted] = useState({});
+export function B3PluginsPanel({ data, permissions = {}, de, busy, editor, onToggle, onApprove, onOpenConfig, onOpenCode, onSaveEditor, onReloadEditor, onCloseEditor, onCreate, onDelete, initialTrusted = {} }) {
+  const [trusted, setTrusted] = useState(initialTrusted);
   const [newName, setNewName] = useState('');
   const lang = de ? 'de' : 'en';
   const { manage, code } = permissions;
@@ -53,6 +58,7 @@ export function B3PluginsPanel({ data, permissions = {}, de, busy, editor, onTog
       <tbody>{plugins.map(plugin => {
         const fixed = plugin.source === 'fixed';
         const custom = plugin.source === 'custom';
+        const tick = trustKey(plugin.name, plugin.sha256);
         const approvable = plugin.state === 'NOT_APPROVED' && plugin.sha256;
         const stateText = (STATE_TEXT[plugin.state] || [plugin.state, plugin.state])[de ? 0 : 1];
         return <tr key={plugin.name}>
@@ -62,8 +68,8 @@ export function B3PluginsPanel({ data, permissions = {}, de, busy, editor, onTog
             {plugin.reason && <div>{reasonText(plugin.reason, lang)}</div>}
             {approvable && <div>
               <code>{plugin.sha256}</code>
-              {manage && <label style={{ display: 'block' }}><input type="checkbox" checked={Boolean(trusted[plugin.name])} disabled={busy} onChange={event => setTrusted({ ...trusted, [plugin.name]: event.target.checked })}/> {TRUST[de ? 0 : 1]}</label>}
-              {manage && <button disabled={busy || !trusted[plugin.name]} onClick={() => onApprove(plugin.name, plugin.sha256)}>{de ? 'Freigeben' : 'Approve'}</button>}
+              {manage && <label style={{ display: 'block' }}><input type="checkbox" checked={Boolean(trusted[tick])} disabled={busy} onChange={event => setTrusted({ ...trusted, [tick]: event.target.checked })}/> {TRUST[de ? 0 : 1]}</label>}
+              {manage && <button disabled={busy || !trusted[tick]} onClick={() => onApprove(plugin.name, plugin.sha256)}>{de ? 'Freigeben' : 'Approve'}</button>}
             </div>}
           </td>
           <td>
@@ -77,7 +83,7 @@ export function B3PluginsPanel({ data, permissions = {}, de, busy, editor, onTog
         </tr>;
       })}</tbody>
     </table>
-    {visibleEditor && <EditorForm key={`${visibleEditor.kind}:${visibleEditor.name}:${visibleEditor.sha256}`} editor={visibleEditor} de={de} busy={busy} onSave={onSaveEditor} onClose={onCloseEditor}/>}
+    {visibleEditor && <EditorForm key={`${visibleEditor.kind}:${visibleEditor.name}:${visibleEditor.sha256}`} editor={visibleEditor} de={de} busy={busy} onSave={onSaveEditor} onClose={onCloseEditor} onReload={onReloadEditor}/>}
     {code && <div>
       <h4>{de ? 'Eigene Plugins' : 'Custom plugins'}</h4>
       <p role="note">{WARNING[de ? 0 : 1]}</p>
@@ -123,11 +129,25 @@ export function InstanceB3Plugins({ instance, request, de }) {
       onOpenConfig={plugin => run(async () => { const { config } = await call(`${base}/${name(plugin)}/config`); if (mounted.current) setEditor({ kind: 'config', name: plugin, text: config.text, sha256: config.sha256 }); })}
       onOpenCode={plugin => run(async () => { const { code } = await call(`${base}/custom/${name(plugin)}/code`); if (mounted.current) setEditor({ kind: 'code', name: plugin, text: code.code, sha256: code.sha256 }); })}
       onSaveEditor={text => run(async () => {
-        const saved = editor.kind === 'config'
-          ? (await call(`${base}/${name(editor.name)}/config`, { text, expectedSha256: editor.sha256 }, 'PUT')).config
-          : (await call(`${base}/custom/${name(editor.name)}/code`, { code: text, expectedSha256: editor.sha256 }, 'PUT')).code;
-        if (mounted.current) setEditor({ ...editor, text, sha256: saved.sha256 });
+        let saved;
+        try {
+          saved = editor.kind === 'config'
+            ? (await call(`${base}/${name(editor.name)}/config`, { text, expectedSha256: editor.sha256 }, 'PUT')).config
+            : (await call(`${base}/custom/${name(editor.name)}/code`, { code: text, expectedSha256: editor.sha256 }, 'PUT')).code;
+        } catch (failure) {
+          // Stale hash: keep the editor (and its draft) open and offer a reload instead of a misleading name error.
+          if (failure.message === 'B3_PLUGIN_CONFLICT') { if (mounted.current) setEditor({ ...editor, conflict: true }); return; }
+          throw failure;
+        }
+        if (mounted.current) setEditor({ ...editor, text, sha256: saved.sha256, conflict: false });
         await refresh();
+      })}
+      onReloadEditor={draft => run(async () => {
+        // Fetch the current hash only; the typed draft replaces the loaded text so a retry overwrites knowingly.
+        const current = editor.kind === 'config'
+          ? (await call(`${base}/${name(editor.name)}/config`)).config
+          : (await call(`${base}/custom/${name(editor.name)}/code`)).code;
+        if (mounted.current) setEditor({ kind: editor.kind, name: editor.name, text: draft, sha256: current.sha256 });
       })}
       onCloseEditor={() => setEditor(null)}
       onCreate={body => run(async () => { await call(`${base}/custom`, body); await refresh(); })}
