@@ -84,3 +84,24 @@ test('a locked vault is its own blocker when the switch is on and no warning whe
   assert.deepEqual(codes(plan({ credentialsPresent: locked }).blockers), ['VAULT_LOCKED']);
   assert.deepEqual(planB3Integration({ settings: normalizeB3Integration({}), b3hideState: null, authPluginPresent: true, credentialsPresent: locked }).warnings, []);
 });
+
+test('restartHints: changed settings, changed credentials, or nothing recorded', async () => {
+  const { restartHints } = await import('../lib/b3-integration.mjs');
+  const current = plan();
+  const record = { fingerprint: current.fingerprint, vaultSha256: 'a'.repeat(64) };
+  assert.deepEqual(restartHints({ plan: current, vaultSha256: 'a'.repeat(64), launchedWith: record, startedWith: record }), { server: null, b3: null });
+  assert.deepEqual(restartHints({ plan: plan({ settings: settings({ prefix: '#' }) }), vaultSha256: 'a'.repeat(64), launchedWith: record, startedWith: null }), { server: 'SETTINGS_CHANGED', b3: null });
+  assert.deepEqual(restartHints({ plan: current, vaultSha256: 'b'.repeat(64), launchedWith: null, startedWith: record }), { server: null, b3: 'CREDENTIALS_CHANGED' });
+});
+
+test('integrationRow: off, blocked, not connected and ok', async () => {
+  const { integrationRow } = await import('../lib/b3-integration.mjs');
+  const on = plan();
+  const started = { fingerprint: on.fingerprint };
+  assert.deepEqual(integrationRow({ plan: planB3Integration({ settings: normalizeB3Integration({}), credentialsPresent: { rcon: true } }) }), { status: 'OFF', code: null });
+  assert.deepEqual(integrationRow({ plan: plan({ b3hideState: 'NOT_APPROVED' }) }), { status: 'BLOCKED', code: 'B3HIDE_NOT_APPROVED' });
+  assert.deepEqual(integrationRow({ plan: on, b3hideLoad: 'PENDING', b3Running: true, startedWith: started, authStarted: true }), { status: 'NOT_CONNECTED', code: 'B3HIDE_NOT_LOADED' });
+  assert.deepEqual(integrationRow({ plan: on, b3hideLoad: 'LOADED', b3Running: true, startedWith: started, authStarted: false }), { status: 'NOT_CONNECTED', code: 'B3_AUTH_NOT_STARTED' });
+  assert.deepEqual(integrationRow({ plan: on, b3hideLoad: 'LOADED', b3Running: true, startedWith: { fingerprint: 'x' }, authStarted: true }), { status: 'NOT_CONNECTED', code: 'B3_AUTH_NOT_STARTED' });
+  assert.deepEqual(integrationRow({ plan: on, b3hideLoad: 'LOADED', b3Running: true, startedWith: started, authStarted: true }), { status: 'OK', code: null });
+});

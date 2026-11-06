@@ -37,6 +37,7 @@ import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
 import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
 import { InstanceB3Service } from "./lib/instance-b3-service.mjs";
+import { restartHints } from "./lib/b3-integration.mjs";
 import { InstanceB3DatabaseService } from "./lib/instance-b3-database-service.mjs";
 import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
@@ -2398,7 +2399,10 @@ instanceManager = new ServerInstanceManager({
   }, options),
 });
 // Block 16: the B3 start uses the same integration plan as the server launch.
-b3Service.integration = { plan: async id => (await instanceManager.b3IntegrationPlan(id)).plan };
+b3Service.integration = {
+  plan: async id => (await instanceManager.b3IntegrationPlan(id)).plan,
+  b3hideLoad: async id => (await instanceManager.plugins(id)).plugins.find(plugin => plugin.name.toLowerCase() === "b3hide")?.load ?? null,
+};
 try { await instanceManager.load(); }
 catch (error) { console.error(`[instances] registry unavailable: ${error.message}`); }
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
@@ -2419,7 +2423,7 @@ function instanceRoute(action, status = 200) {
       res.status(status).json({ ok: true, correlationId, ...result });
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
-      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
+      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
       res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
     }
   };
@@ -2560,6 +2564,31 @@ app.get("/api/instances/:id/b3/dashboard", requirePermission("diagnostics.read")
 app.get("/api/instances/:id/b3/logs", requirePermission("diagnostics.read"), instanceRoute(async req => ({ logs: await b3Service.logs(req.params.id) })));
 // Generated config with credential values redacted.
 app.get("/api/instances/:id/b3/config", requirePermission("config.manage"), instanceRoute(async req => ({ config: await b3Service.config(req.params.id) })));
+// Block 16: B3 <-> CoD4x integration (b3hide + auth). No gateway route exists for it.
+async function b3IntegrationView(id) {
+  const view = await instanceManager.b3Integration(id);
+  const vault = await credentialService.status();
+  const serverRunning = (await instanceManager.runtime(id)).state?.status === "RUNNING";
+  const b3Running = await b3Service.isRunning(id);
+  const hints = restartHints({ plan: view.plan, vaultSha256: vault.sha256, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null });
+  const status = await credentialService.instanceStatus(id);
+  return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: vault.sha256 } };
+}
+app.get("/api/instances/:id/b3/integration", requirePermission("diagnostics.read"), instanceRoute(async req => ({ integration: await b3IntegrationView(req.params.id) })));
+app.post("/api/instances/:id/b3/integration", requirePermission("config.manage"), instanceRoute(async req => {
+  const result = await instanceManager.configureB3Integration(req.params.id, req.body);
+  audit("info", "b3.integration.configured", { instanceId: req.params.id, actor: req.auth.username, ...result.settings });
+  return { integration: await b3IntegrationView(req.params.id) };
+}));
+app.post("/api/instances/:id/b3/integration/auth-password", requirePermission("config.manage"), instanceRoute(async req => {
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== "expectedSha256,level,value") throw Object.assign(new Error("B3_AUTH_PASSWORD_INVALID"), { code: "B3_AUTH_PASSWORD_INVALID" });
+  const vault = await credentialService.status();
+  if (!vault.initialized || vault.locked) throw Object.assign(new Error("VAULT_LOCKED"), { code: "VAULT_LOCKED" });
+  const result = await credentialService.setB3AuthPassword(req.params.id, body);
+  audit("info", result.set ? "b3.auth.password.set" : "b3.auth.password.cleared", { instanceId: req.params.id, actor: req.auth.username, level: result.level });
+  return { password: result, integration: await b3IntegrationView(req.params.id) };
+}));
 app.post("/api/instances/:id/b3/start", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id) })));
 app.post("/api/instances/:id/b3/stop", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.stop(req.params.id) })));
 app.post("/api/instances/:id/b3/restart", requirePermission("server.manage"), instanceRoute(async req => ({ b3: await b3Service.start(req.params.id, true) })));
