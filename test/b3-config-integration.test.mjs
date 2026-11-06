@@ -57,3 +57,12 @@ test('the config views redact the rcon password and the auth passwords', () => {
   assert.match(shown, /^100: \[redacted\]$/m);
   assert.match(shown, /^auth: 0$/m);
 });
+
+test('CodeQL: the returned hashes never derive from a password (computed over the redacted text)', async t => {
+  const instance = await home(t);
+  const one = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: { passwords: { 100: 'hunter22' } } });
+  const two = await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-2', auth: { passwords: { 100: 'other-pass' } } });
+  assert.equal(one.sha256, two.sha256, 'b3.xml hash does not follow the RCON password');
+  assert.equal(one.authSha256, two.authSha256, 'plugin_auth.ini hash does not follow the !auth password');
+  assert.notEqual((await prepareB3Runtime(instance, 'games_mp.log', { rconPassword: 'Rcon-Pass-1', auth: null })).sha256, one.sha256, 'the auth entry still changes the b3.xml hash');
+});
