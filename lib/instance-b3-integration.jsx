@@ -23,7 +23,7 @@ export function B3IntegrationPanel({ data, canManage, de, busy, onSave, onSetPas
   return <fieldset>
     <legend>{de ? 'CoD4x-Verbindung (b3hide + auth)' : 'CoD4x connection (b3hide + auth)'}</legend>
     <label><input type="checkbox" checked={form.hideCommands} disabled={locked} onChange={event => setForm({ ...form, hideCommands: event.target.checked })}/> {de ? 'B3-Befehle ausblenden' : 'Hide B3 commands'}</label>
-    <label style={{ marginLeft: 8 }}>Prefix <input type="text" maxLength={1} size={2} value={form.prefix} disabled={locked} title={B3_PREFIX_CHARS} onChange={event => setForm({ ...form, prefix: event.target.value })}/></label>
+    <label style={{ marginLeft: 8 }}>Prefix <input type="text" maxLength={1} size={2} value={form.prefix} readOnly disabled title={de ? `B3-Befehls-Prefix (${B3_PREFIX_CHARS}) aus plugin_admin.ini` : `B3 command prefix (${B3_PREFIX_CHARS}) from plugin_admin.ini`}/></label>
     <label style={{ marginLeft: 8 }}>{de ? 'Ausblenden ab Level' : 'Hide from level'} <select value={form.hideLevel} disabled={locked} onChange={event => setForm({ ...form, hideLevel: Number(event.target.value) })}>
       {B3_HIDE_LEVELS.map(level => <option key={level} value={level}>{levelLabel(level)}</option>)}
     </select></label>
@@ -42,12 +42,14 @@ export function B3IntegrationPanel({ data, canManage, de, busy, onSave, onSetPas
       <caption>{de ? '!auth-Passwörter pro Level (optional)' : '!auth passwords per level (optional)'}</caption>
       <tbody>{B3_HIDE_LEVELS.map(level => {
         const set = (data.authLevels || []).includes(level);
-        return <tr key={level}>
+        // b3hide only hides chat at or above the hide level; a lower level's password would be public.
+        const below = level < form.hideLevel;
+        return <tr key={level} title={below ? b3IntegrationMessage('B3_AUTH_LEVEL_BELOW_HIDE', lang) : undefined}>
           <td>{levelLabel(level)}</td>
           <td>{set ? (de ? 'gesetzt' : 'set') : (de ? 'nicht gesetzt' : 'not set')}</td>
-          <td><input type="password" autoComplete="new-password" minLength={4} maxLength={64} aria-label={`${levelLabel(level)} !auth`} disabled={locked || vaultClosed}
+          <td><input type="password" autoComplete="new-password" minLength={4} maxLength={64} aria-label={`${levelLabel(level)} !auth`} disabled={locked || vaultClosed || below}
             value={passwords[level] || ''} onChange={event => setPasswords({ ...passwords, [level]: event.target.value })}/></td>
-          <td><button disabled={locked || vaultClosed || !passwords[level]} onClick={() => { onSetPassword(level, passwords[level]); setPasswords({ ...passwords, [level]: '' }); }}>{de ? 'Setzen' : 'Set'}</button>
+          <td><button disabled={locked || vaultClosed || below || !passwords[level]} onClick={() => { onSetPassword(level, passwords[level]); setPasswords({ ...passwords, [level]: '' }); }}>{de ? 'Setzen' : 'Set'}</button>
             <button disabled={locked || vaultClosed || !set} onClick={() => onSetPassword(level, null)}>{de ? 'Entfernen' : 'Remove'}</button></td>
         </tr>;
       })}</tbody>

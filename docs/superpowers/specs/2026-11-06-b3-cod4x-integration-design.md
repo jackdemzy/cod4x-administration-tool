@@ -9,7 +9,7 @@ Block 16 connects B3 and the CoD4x core through the `b3hide` CoD4x plugin and th
 After Block 16, CONTROL generates and validates the complete B3/CoD4x wiring:
 
 - B3 gets the RCON password from the vault, so it can talk to the server.
-- One switch, "Hide B3 commands", enables `b3hide` in the core and `auth` in B3 together, with the same prefix and level threshold on both sides.
+- One switch, "Hide B3 commands", enables `b3hide` in the core and `auth` in B3 together, with the same prefix and level threshold on both sides. Review finding: the prefix is B3's own command prefix `!` (from `plugin_admin.ini`, which CONTROL does not change), and `!auth` passwords only count for levels at or above the threshold.
 - Optional `!auth` passwords per B3 level, kept in the vault.
 - Every missing piece blocks the start with a precise reason; nothing restarts on its own.
 - Gate: CoD4x -> b3hide -> B3 -> RCON/parser end to end, natively in WSL with bots.

@@ -17,7 +17,7 @@ Design: `docs/superpowers/specs/2026-11-06-b3-cod4x-integration-design.md`. Plan
 ### Implementation
 
 - `lib/b3-integration.mjs`: one pure plan, `planB3Integration`.
-  - Inputs: switch, prefix (one of `!@#$%&*.,:?=~-`), level (B3 group 1/2/20/40/60/80/100), b3hide state, auth plugin present, RCON / `!auth` presence and vault lock.
+  - Inputs: switch, prefix (only B3's own command prefix `!`, because CONTROL does not rewrite `plugin_admin.ini`), level (B3 group 1/2/20/40/60/80/100), b3hide state, auth plugin present, RCON / `!auth` presence and vault lock.
   - It returns the b3hide dvars, the auth entry, named blockers and warnings, and a fingerprint of the non-secret values.
   - Also `restartHints` and the health row `integrationRow`.
   - Browser-safe constants live in `lib/b3-integration-constants.mjs`, and the texts (German/English) in `lib/b3-integration-messages.mjs`.
@@ -25,14 +25,14 @@ Design: `docs/superpowers/specs/2026-11-06-b3-cod4x-integration-design.md`. Plan
   - `configureB3Integration` needs a stopped server and B3. It enables or disables the registered b3hide record and writes the plan dvars.
   - While the switch is on, the b3hide fields in the plugin manager are locked (`B3_INTEGRATION_CONTROLLED`).
 - Vault: new kind `b3auth`, a JSON map of level to password. It is changed only through `setB3AuthPassword`.
-  - Rule: 4-64 printable ASCII characters, no spaces and none of `" ; \ < > &`.
+  - Rule: 4-64 printable ASCII characters, no spaces and none of `" ; \ < > & %` (Python 2.7's ConfigParser would not return a `%` value intact).
   - `instanceStatus` lists levels only.
 - Server launch:
   - The plan is computed before the plugin gate. A `B3HIDE_*` blocker stops the start before anything is spawned.
   - With the switch on, b3hide is loaded with the plan dvars, whatever its record says.
   - The launch fingerprint and vault hash are recorded.
 - B3 start:
-  - Inside the vault scope, `b3.xml` gets `rcon_password`, and with the switch on also the `auth` plugin entry. `plugin_auth.ini` gets `[commands] auth: 0`, the default messages and the set passwords (`%` doubled for B3's interpolating ConfigParser).
+  - Inside the vault scope, `b3.xml` gets `rcon_password`, and with the switch on also the `auth` plugin entry. `plugin_auth.ini` gets `[commands] auth: 0`, the default messages and the set passwords for levels at or above the hide level.
   - Both files are written atomically with mode 0600. Both are restored, or removed, on a vault lock or a failed start.
   - A SQLite instance with the switch off and a locked vault still starts as before, without RCON.
 - `lib/rcon-status.mjs`:
@@ -48,6 +48,22 @@ Design: `docs/superpowers/specs/2026-11-06-b3-cod4x-integration-design.md`. Plan
   - The B3 manager gets the section "CoD4x connection": the switch, prefix, level with B3 group names, write-only `!auth` password fields per level, a requirement list, blockers and restart hints.
   - The plugin manager shows "matches the CoD4x 21.2 release" for the known hashes.
   - The online list says when b3hide limits the status.
+
+### Review before the PR (superpowers:requesting-code-review)
+
+Fixed with regression tests (`test/b3-integration-review.test.mjs`, `test/instance-credential-service.test.mjs`):
+
+- **Typed `!auth` passwords.** B3 logs chat lines at VERBOSE (`Queueing event EVT_CLIENT_SAY : !auth …`), and the game log and `qconsole.log` carry chat too.
+  - Every CONTROL log view now redacts `<prefix>auth <value>` (`redactAuthCommands`), both in the runtime/B3/RCON output redaction and in the console log view.
+  - The game server's and B3's own files on disk still contain what players type. That is inherent to `auth.py` and a known residual risk.
+- **Prefix.** B3's command prefix comes from `plugin_admin.ini` (`command_prefix = !`), which CONTROL does not change. Another b3hide prefix would hide nothing B3 executes and would leave `!auth` in public chat, so the prefix is fixed to `!`.
+- **`%` in passwords** is now rejected instead of doubled: Python 2.7's ConfigParser only interpolates values containing `%(` and returns `%%` unchanged.
+- **Passwords below the hide level** are not written (warning `B3_AUTH_LEVEL_BELOW_HIDE`; those UI rows are disabled), because b3hide would show them in chat.
+- **Restart hints.**
+  - The server has its own fingerprint over the b3hide values only, so an `!auth` change asks for a B3 restart, never a server restart.
+  - Credentials compare by a per-instance digest (record ids and change times, never values) instead of the global vault hash.
+
+The deferred minor findings are listed in the PR description.
 
 ### Checks
 

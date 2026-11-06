@@ -229,3 +229,16 @@ test('b3auth rejects invalid passwords and levels, the generic path and a locked
   service.lock();
   await assert.rejects(service.setB3AuthPassword('server-a', { level: 100, value: 'goodpass', expectedSha256: snapshot.sha256 }), { code: 'VAULT_LOCKED' });
 }));
+
+test('I5: the per-instance credential digest follows only that instance and carries no value', () => fixture(async service => {
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  const a0 = (await service.instanceStatus('server-a')).digest, b0 = (await service.instanceStatus('server-b')).digest;
+  assert.match(a0, /^[0-9a-f]{64}$/);
+  await service.set('server-a', 'rcon', { value: 'Digest-Rcon-1', expectedSha256: (await service.status()).sha256 });
+  const a1 = (await service.instanceStatus('server-a')).digest;
+  assert.notEqual(a1, a0);
+  assert.equal((await service.instanceStatus('server-b')).digest, b0, 'another instance is not affected');
+  assert.equal((await service.instanceStatus('server-a')).digest, a1, 'stable without a change');
+  service.lock();
+  assert.equal((await service.instanceStatus('server-a')).digest, null);
+}));

@@ -107,7 +107,7 @@ if (monitoring.status !== 0) {
   console.error("Monitoring, remote access, alert and remote action behavior checks FAIL");
   process.exit(monitoring.status || 1);
 }
-const integration = spawnSync(process.execPath, ["--test", "test/b3-integration.test.mjs", "test/server-instance-store-b3integration.test.mjs", "test/b3-config-integration.test.mjs", "test/server-instance-manager-b3integration.test.mjs", "test/b3-integration-http.test.mjs", "test/instance-b3-integration.test.mjs"], { encoding: "utf8" });
+const integration = spawnSync(process.execPath, ["--test", "test/b3-integration.test.mjs", "test/server-instance-store-b3integration.test.mjs", "test/b3-config-integration.test.mjs", "test/server-instance-manager-b3integration.test.mjs", "test/b3-integration-http.test.mjs", "test/instance-b3-integration.test.mjs", "test/b3-integration-review.test.mjs"], { encoding: "utf8" });
 process.stdout.write(integration.stdout || "");
 process.stderr.write(integration.stderr || "");
 if (integration.status !== 0) {

@@ -71,7 +71,7 @@ test('B3 integration API on the real backend', { timeout: 60000 }, async t => {
   assert.equal((await call(viewer, '/api/instances/b3i-01/b3/integration', { hideCommands: true, prefix: '!', hideLevel: 20 })).status, 403);
   assert.equal((await call(viewer, '/api/instances/b3i-01/b3/integration/auth-password', { level: 100, value: 'hunter22', expectedSha256: null })).status, 403);
   assert.equal((await call(admin, '/api/instances/b3i-01/b3/integration', { hideCommands: true, prefix: '!', hideLevel: 20, extra: 1 })).status, 400);
-  const saved = await call(admin, '/api/instances/b3i-01/b3/integration', { hideCommands: true, prefix: '#', hideLevel: 40 });
+  const saved = await call(admin, '/api/instances/b3i-01/b3/integration', { hideCommands: true, prefix: '!', hideLevel: 40 });
   assert.equal(saved.status, 200, saved.json.error);
   assert.deepEqual(saved.json.integration.plan.blockers.map(entry => entry.code), ['B3HIDE_MISSING', 'VAULT_LOCKED', 'B3_AUTH_PLUGIN_MISSING']);
 
@@ -89,7 +89,7 @@ test('B3 integration API on the real backend', { timeout: 60000 }, async t => {
   assert.deepEqual((await call(admin, '/api/instances/b3i-01/b3/integration')).json.integration.authLevels, [100]);
 
   const events = (await call(admin, '/api/audit?limit=500')).json.events;
-  assert.ok(events.some(entry => entry.event === 'b3.integration.configured' && entry.details.prefix === '#' && entry.details.hideLevel === 40));
+  assert.ok(events.some(entry => entry.event === 'b3.integration.configured' && entry.details.prefix === '!' && entry.details.hideLevel === 40));
   assert.ok(events.some(entry => entry.event === 'b3.auth.password.set' && entry.details.level === 100));
   const everything = JSON.stringify(events) + JSON.stringify(set.json) + diagnostics;
   assert.ok(!everything.includes('hunter22'), 'no !auth password in audit, responses or output');
