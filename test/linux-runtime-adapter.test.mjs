@@ -74,3 +74,45 @@ test('native Linux output is run-owned, bounded even for invalid UTF8, and rejec
     await assert.rejects(adapter.readOutput(home, runId, 16), /exclusively owned/);
   } finally { await fs.rm(home, { recursive: true, force: true }); }
 });
+
+// Block 18: the adapter also serves remote servers whose paths are POSIX while this program may run on Windows.
+test('output paths are built with the path API passed in, not the host default', async () => {
+  const seen = [];
+  const stat = { isDirectory: () => true, isSymbolicLink: () => false, uid: 1000, mode: 0o40700 };
+  const filesystem = { lstat: async file => { seen.push(['lstat', file]); return stat; }, realpath: async file => { seen.push(['realpath', file]); return file; } };
+  const pathApi = { join: (...parts) => parts.join('|'), resolve: value => value };
+  const adapter = createLinuxRuntimeAdapter({ filesystem, hostProcess: { platform: 'linux', getuid: () => 1000, geteuid: () => 1000, getgid: () => 1000 }, pathApi });
+  const runId = '0123abcd-0123-0123-0123-0123456789ab';
+  assert.deepEqual(await adapter.outputPaths('/srv/home', runId), [`/srv/home|logs|runtime-${runId}-stdout.log`, `/srv/home|logs|runtime-${runId}-stderr.log`]);
+  assert.deepEqual(seen.filter(([call]) => call === 'lstat').map(([, file]) => file), ['/srv/home', '/srv/home|logs']);
+});
+
+test('signal waits for an asynchronous kill before it reports success', async () => {
+  const order = [];
+  const info = { alive: true, executable: 'cod4x18_dedrun', executablePath: '/core/cod4x18_dedrun', argv: ['/core/cod4x18_dedrun', '+set', 'fs_homepath', '/srv/a', '+set', 'net_port', '28960'], uid: 1000, gid: 1000, createdAt: 'boot:1' };
+  const filesystem = {
+    readdir: async () => [], stat: async () => ({}), readlink: async () => info.executablePath,
+    open: async file => ({
+      cursor: 0,
+      close: async () => {},
+      read: async function read(buffer, offset, length) {
+        const text = file.endsWith('/stat') ? `1 (cod4x18_dedrun) S ${'0 '.repeat(18)}1 0\n`
+          : file.endsWith('/status') ? 'Uid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n'
+          : file.endsWith('/cmdline') ? `${info.argv.join('\0')}\0` : 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\n';
+        const bytesRead = Buffer.from(text).copy(buffer, offset, this.cursor, this.cursor + length);
+        this.cursor += bytesRead; // 0 at the end, like a real file
+        return { bytesRead };
+      },
+    }),
+  };
+  let killed = false;
+  const hostProcess = { platform: 'linux', getuid: () => 1000, geteuid: () => 1000, getgid: () => 1000, kill: async () => { await new Promise(resolve => setTimeout(resolve, 30)); killed = true; order.push('kill done'); } };
+  const adapter = createLinuxRuntimeAdapter({ filesystem, hostProcess });
+  const live = await adapter.inspectProcess(4321);
+  assert.equal(live.alive, true);
+  const result = await adapter.signal(4321, { homePath: '/srv/a', port: 28960, createdAt: live.createdAt, executablePath: info.executablePath }, 'SIGTERM');
+  order.push('signal returned');
+  assert.equal(result, true);
+  assert.equal(killed, true);
+  assert.deepEqual(order, ['kill done', 'signal returned']);
+});

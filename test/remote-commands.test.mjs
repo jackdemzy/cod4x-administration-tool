@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {
   probeCommand, parseProbe, makeDirectoriesCommand, startCoreCommand, parsePid, signalCommand,
-  getinfoProbeCommand, diskFreeCommand, parseDiskFree,
+  getinfoProbeCommand, diskFreeCommand, parseDiskFree, statCommand, parseStat,
 } from '../lib/remote-commands.mjs';
 import { createLoopbackServer, buildFakeCore, loopbackAvailable } from './support/loopback-transport.mjs';
 import { startFakeCod4xServer } from './support/fake-cod4x-udp.mjs';
@@ -157,4 +157,31 @@ test('diskFreeCommand reports free kibibytes for a path', { skip }, async t => {
   const result = await loopback.session.exec(diskFreeCommand(loopback.root));
   assert.equal(result.code, 0, result.stderr.toString());
   assert.ok(parseDiskFree(result.stdout) > 0);
+});
+
+test('parseStat reads exactly what statCommand prints and refuses anything else', () => {
+  assert.deepEqual(parseStat(Buffer.from('81a4 1000 1001 42 2 2049 777\n')), { mode: 0o100644, uid: 1000, gid: 1001, size: 42, nlink: 2, dev: 2049, ino: 777 });
+  for (const bad of ['', 'garbage', '81a4 1000 1001 42 2 2049\n', '81a4 x 1001 42 2 2049 7\n', 'zz 1 1 1 1 1 1\n', '81a4 1 1 1 1 1 1\nextra\n']) assert.equal(code(() => parseStat(Buffer.from(bad))), 'REMOTE_STAT_INVALID', JSON.stringify(bad));
+  assert.equal(code(() => statCommand('relative')), 'REMOTE_PATH_INVALID');
+  assert.equal(code(() => statCommand('/srv/../x')), 'REMOTE_PATH_INVALID');
+  assert.match(statCommand('/srv/x'), /^LC_ALL=C stat -c /);
+  assert.match(statCommand('/srv/x', { follow: true }), /^LC_ALL=C stat -L -c /);
+});
+
+test('statCommand reports link count, device, inode and the type, with or without following a symlink', { skip }, async t => {
+  const loopback = await server(t);
+  const file = loopback.path('file'), hard = loopback.path('hard'), link = loopback.path('link');
+  await fs.writeFile(file, 'hello', { mode: 0o640 });
+  const before = parseStat((await loopback.session.exec(statCommand(file))).stdout);
+  assert.deepEqual([before.mode & 0o170000, before.mode & 0o777, before.size, before.nlink, before.uid], [0o100000, 0o640, 5, 1, process.getuid()]);
+  await fs.link(file, hard); await fs.symlink(file, link);
+  const after = parseStat((await loopback.session.exec(statCommand(file))).stdout);
+  assert.equal(after.nlink, 2);
+  assert.deepEqual([after.dev, after.ino], [before.dev, before.ino]);
+  assert.equal(parseStat((await loopback.session.exec(statCommand(link))).stdout).mode & 0o170000, 0o120000, 'not following: a symlink');
+  assert.equal(parseStat((await loopback.session.exec(statCommand(link, { follow: true }))).stdout).mode & 0o170000, 0o100000, 'following: the target');
+  assert.equal(parseStat((await loopback.session.exec(statCommand(loopback.root))).stdout).mode & 0o170000, 0o040000);
+  const missing = await loopback.session.exec(statCommand(loopback.path('nope')));
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.stderr.toString(), /No such file or directory/, 'messages are in C locale');
 });

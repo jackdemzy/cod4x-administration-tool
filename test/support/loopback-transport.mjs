@@ -33,9 +33,73 @@ export async function buildFakeCore(directory, name = 'cod4x18_dedrun') {
   return executable;
 }
 
+// An emulation of the ssh2 SFTP client (SFTPWrapper) over node:fs, with the quirks of the real one that
+// matter here: handles are Buffers, read() refuses a null position, readdir() includes "." and "..",
+// errors carry a numeric status code (2 no such file, 3 permission denied, 4 failure) and Stats has
+// no nlink, dev or ino.
+export function createSftpEmulation() {
+  const handles = new Map();
+  let nextHandle = 1;
+  const failure = error => {
+    const code = error.code === 'ENOENT' ? 2 : (error.code === 'EACCES' || error.code === 'EPERM') ? 3 : 4;
+    return Object.assign(new Error(code === 2 ? 'No such file' : code === 3 ? 'Permission denied' : 'Failure'), { code });
+  };
+  const call = (promise, cb, project = () => []) => { promise.then(value => cb(undefined, ...project(value)), error => cb(failure(error))); };
+  const stats = value => ({
+    mode: value.mode, uid: value.uid, gid: value.gid, size: value.size, atime: Math.floor(value.atimeMs / 1000), mtime: Math.floor(value.mtimeMs / 1000),
+    isFile: () => value.isFile(), isDirectory: () => value.isDirectory(), isSymbolicLink: () => value.isSymbolicLink(),
+  });
+  const handleOf = handle => {
+    const entry = Buffer.isBuffer(handle) ? handles.get(handle.readUInt32BE(0)) : undefined;
+    if (!entry) throw new Error('unknown handle');
+    return entry;
+  };
+  return {
+    open(file, flags, attrs, cb) {
+      if (typeof attrs === 'function') { cb = attrs; attrs = undefined; }
+      call(fs.open(file, flags, attrs?.mode), cb, fileHandle => {
+        const id = nextHandle++, handle = Buffer.alloc(4); handle.writeUInt32BE(id);
+        handles.set(id, fileHandle);
+        return [handle];
+      });
+    },
+    close(handle, cb) {
+      const id = handle.readUInt32BE(0), fileHandle = handles.get(id);
+      handles.delete(id);
+      call(fileHandle.close(), cb);
+    },
+    read(handle, buffer, offset, length, position, cb) {
+      if (position === null) throw new Error('null position currently unsupported');
+      call(handleOf(handle).read(buffer, offset, length, position), cb, ({ bytesRead }) => [bytesRead, buffer, position]);
+    },
+    write(handle, buffer, offset, length, position, cb) {
+      call(handleOf(handle).write(buffer, offset, length, position), cb);
+    },
+    fstat(handle, cb) { call(handleOf(handle).stat(), cb, value => [stats(value)]); },
+    lstat(file, cb) { call(fs.lstat(file), cb, value => [stats(value)]); },
+    stat(file, cb) { call(fs.stat(file), cb, value => [stats(value)]); },
+    async readdir(where, opts, cb) {
+      if (typeof opts === 'function') cb = opts;
+      call(fs.readdir(where), cb, names => [[...['.', '..', ...names].map(filename => ({ filename, longname: filename, attrs: {} }))]]);
+    },
+    readlink(file, cb) { call(fs.readlink(file), cb, target => [target]); },
+    realpath(file, cb) { call(fs.realpath(file), cb, resolved => [resolved]); },
+    rename(from, to, cb) { call(fs.rename(from, to), cb); },
+    unlink(file, cb) { call(fs.unlink(file), cb); },
+    rmdir(file, cb) { call(fs.rmdir(file), cb); },
+    mkdir(file, attrs, cb) {
+      if (typeof attrs === 'function') { cb = attrs; attrs = undefined; }
+      call(fs.mkdir(file, attrs?.mode), cb);
+    },
+    chmod(file, mode, cb) { call(fs.chmod(file, mode), cb); },
+    async closeAll() { for (const fileHandle of handles.values()) await fileHandle.close().catch(() => {}); handles.clear(); },
+  };
+}
+
 export async function createLoopbackServer() {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-loopback-')));
   const calls = [];
+  let emulation = null;
   const session = {
     hostKeySha256: 'loopback',
     calls,
@@ -62,7 +126,8 @@ export async function createLoopbackServer() {
         child.on('close', (code, signal) => finish(resolve, { code: typeof code === 'number' ? code : -1, signal: signal || null, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), truncated }));
       });
     },
-    close() {},
+    sftp: async () => { emulation ??= createSftpEmulation(); return emulation; },
+    close() { emulation?.closeAll(); },
   };
   // Safety net: stop every process whose executable lives below the temp root.
   async function killStrays() {
