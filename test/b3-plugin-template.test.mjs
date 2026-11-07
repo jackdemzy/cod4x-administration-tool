@@ -95,3 +95,10 @@ test('messages: every code has German and English text', () => {
   }
   assert.equal(b3PluginMessage('NOPE'), 'NOPE');
 });
+
+test('validateB3PluginCode matches the class line without a name-built RegExp (CodeQL)', () => {
+  assert.doesNotThrow(() => validateB3PluginCode('myplug', 'import b3\r\nclass MyplugPlugin(b3.plugin.Plugin):\r\n    pass\r\n'));
+  assert.doesNotThrow(() => validateB3PluginCode('myplug', 'class MyplugPlugin:\n    pass\n'));
+  assert.throws(() => validateB3PluginCode('myplug', 'class MyplugPluginX(object):\n    pass\n'), { code: 'B3_PLUGIN_CODE_INVALID' });
+  assert.throws(() => validateB3PluginCode('myplug', '  class MyplugPlugin(object):\n'), { code: 'B3_PLUGIN_CODE_INVALID' });
+});
