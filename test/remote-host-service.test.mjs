@@ -124,7 +124,7 @@ test('createHost and removeHost are audited; the subject resolver knows only exi
   assert.equal(created.id, 'lab-2');
   assert.ok(audits.some(entry => entry.event === 'remote.host.created' && entry.hostId === 'lab-2'));
   const resolve = sshSubjectResolver({ hosts: store, dataRoot: '/data' });
-  assert.deepEqual(resolve('ssh_lab-2'), { id: 'ssh_lab-2', homePath: path.join('/data', 'ssh-hosts', 'lab-2'), createdAt: store.get('lab-2').createdAt });
+  assert.deepEqual(resolve('ssh_lab-2'), { id: 'ssh_lab-2', homePath: path.join(path.resolve('/data'), 'ssh-hosts', 'lab-2'), createdAt: store.get('lab-2').createdAt });
   assert.throws(() => resolve('ssh_nope'), error => error.code === 'REMOTE_HOST_NOT_FOUND');
   assert.throws(() => resolve('server-a'), error => error.code === 'INSTANCE_NOT_FOUND');
   await service.removeHost('lab-2');
