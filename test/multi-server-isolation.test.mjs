@@ -40,20 +40,51 @@ test('B3 database: another database name, port or host is accepted; re-saving th
   await service.save('server-b', { ...SETTINGS, host: '10.0.0.5' });
 });
 
-test('B3 database: sharedTarget reports another instance that has MySQL enabled, not one that only saved settings', async t => {
+test('B3 database: a saved target belongs to its instance; sharedTarget reports it to the other once that one runs on MySQL', async t => {
   const { service, file, enable } = await databaseFixture(t);
   await service.save('server-a', SETTINGS);
   await service.save('server-b', { ...SETTINGS, database: 'b3_two' });
   assert.equal(await service.sharedTarget('server-a'), null);
-  // server-b is changed on disk to the target of server-a; both then run on MySQL.
+  // server-b is changed on disk to the target of server-a (e.g. an install from before this check).
   const document = JSON.parse(await fs.readFile(file('server-b'), 'utf8'));
   document.settings.database = 'b3';
   await fs.writeFile(file('server-b'), JSON.stringify(document));
+  assert.equal(await service.sharedTarget('server-a'), null, 'server-a does not use MySQL yet');
   await enable('server-a');
-  assert.equal(await service.sharedTarget('server-a'), null, 'the other instance has not enabled MySQL yet');
+  assert.equal(await service.sharedTarget('server-a'), 'server-b', 'server-b only saved the target, which is enough');
+  assert.equal(await service.sharedTarget('server-b'), null, 'server-b does not use MySQL yet');
   await enable('server-b');
-  assert.equal(await service.sharedTarget('server-a'), 'server-b');
   assert.equal(await service.sharedTarget('server-b'), 'server-a');
+});
+
+test('B3 database: saving the unchanged own target is allowed even where it is already shared; a change to another taken target is not', async t => {
+  const { service, file } = await databaseFixture(t);
+  await service.save('server-a', SETTINGS);
+  await service.save('server-b', { ...SETTINGS, database: 'b3_two' });
+  const document = JSON.parse(await fs.readFile(file('server-b'), 'utf8'));
+  document.settings.database = 'b3';
+  await fs.writeFile(file('server-b'), JSON.stringify(document));
+  await service.save('server-b', SETTINGS);
+  await service.save('server-b', { ...SETTINGS, username: 'rebound' });
+  await service.save('server-b', { ...SETTINGS, database: 'b3_two' });
+  await assert.rejects(service.save('server-b', SETTINGS), { code: 'B3_DATABASE_TARGET_SHARED' }, 'moving back onto the taken target is refused');
+});
+
+test('B3 database: two saves of the same target at the same moment let exactly one through', async t => {
+  const { service } = await databaseFixture(t);
+  const outcomes = await Promise.allSettled([service.save('server-a', SETTINGS), service.save('server-b', SETTINGS)]);
+  assert.deepEqual(outcomes.map(outcome => outcome.status).sort(), ['fulfilled', 'rejected']);
+  assert.equal(outcomes.find(outcome => outcome.status === 'rejected').reason.code, 'B3_DATABASE_TARGET_SHARED');
+});
+
+test('B3 database: a sibling whose b3 directory is a symlink is ignored, not followed', async t => {
+  const { service, file } = await databaseFixture(t);
+  const outside = path.join(path.dirname(path.dirname(file('server-a'))), 'outside-b3');
+  await fs.mkdir(outside, { recursive: true });
+  await fs.writeFile(path.join(outside, 'database.json'), JSON.stringify({ version: 1, settings: SETTINGS, mysqlEnabled: true }));
+  await fs.symlink(outside, path.dirname(file('server-a')), 'dir');
+  await service.save('server-b', SETTINGS);
+  assert.equal((await service.read('server-b')).settings.database, 'b3');
 });
 
 test('B3 database: a corrupt database.json of a sibling does not block this instance', async t => {
@@ -282,4 +313,57 @@ test('B3 assignment: each instance gets its own b3.xml (own port, home, database
   await b3Service.stop('multi-1');
   assert.equal(await b3Service.isRunning('multi-1'), false);
   assert.equal(await b3Service.isRunning('multi-2'), true);
+});
+
+// ---- Block 17 review: runtime credential scopes take turns inside the vault ----
+async function scopeFixture(t, options = {}) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-multi-scope-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const resolveInstance = id => ({ id, homePath: path.join(root, 'servers', id), createdAt: '2026-10-04T10:00:00.000Z' });
+  const service = new InstanceCredentialService({ dataRoot: root, resolveInstance, ...options });
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  for (const id of ['server-a', 'server-b', 'server-c']) await service.set(id, 'rcon', { value: `Rcon-${id}-Value1!`, expectedSha256: (await service.status()).sha256 });
+  return service;
+}
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('vault scopes: parallel callers take turns instead of failing with VAULT_OPERATION_BUSY', async t => {
+  const service = await scopeFixture(t);
+  const log = [];
+  const scope = (id, ms) => service.withRuntimeCredentials(id, async credentials => {
+    log.push(`start ${id}`); const seen = credentials.rcon.toString(); await pause(ms); log.push(`end ${id}`); return seen;
+  });
+  const results = await Promise.all([scope('server-a', 40), scope('server-b', 5), scope('server-c', 5)]);
+  assert.deepEqual(results, ['Rcon-server-a-Value1!', 'Rcon-server-b-Value1!', 'Rcon-server-c-Value1!']);
+  assert.deepEqual(log, ['start server-a', 'end server-a', 'start server-b', 'end server-b', 'start server-c', 'end server-c'], 'scopes never overlap');
+});
+
+test('vault scopes: a scope opened inside a scope still fails at once (no deadlock) and mutations stay refused', async t => {
+  const service = await scopeFixture(t);
+  await service.withRuntimeCredentials('server-a', async () => {
+    await assert.rejects(Promise.race([service.withRuntimeCredentials('server-b', async () => 'nested'), pause(2000).then(() => 'HUNG')]), { code: 'VAULT_OPERATION_BUSY' });
+    await assert.rejects(service.remove('server-b', 'rcon', { expectedSha256: (await service.status()).sha256 }), { code: 'VAULT_OPERATION_BUSY' });
+  });
+});
+
+test('vault scopes: a waiter gives up with VAULT_OPERATION_BUSY after the wait limit and later callers still run', async t => {
+  const service = await scopeFixture(t, { scopeWaitMs: 60 });
+  let release;
+  const holder = service.withRuntimeCredentials('server-a', () => new Promise(resolve => { release = resolve; }));
+  await pause(10);
+  await assert.rejects(service.withRuntimeCredentials('server-b', async () => 'never'), { code: 'VAULT_OPERATION_BUSY' });
+  release('done'); await holder;
+  assert.equal(await service.withRuntimeCredentials('server-c', async () => 'after'), 'after');
+});
+
+test('vault scopes: a vault locked while a caller waits fails that caller with VAULT_LOCKED', async t => {
+  const service = await scopeFixture(t);
+  let release;
+  const holder = service.withRuntimeCredentials('server-a', () => new Promise(resolve => { release = resolve; })).catch(error => error.code);
+  await pause(10);
+  const waiter = service.withRuntimeCredentials('server-b', async () => assert.fail('must not run on a locked vault')).catch(error => error.code);
+  await pause(10);
+  service.lock(); release('late');
+  assert.equal(await waiter, 'VAULT_LOCKED');
+  assert.equal(await holder, 'VAULT_LOCKED');
 });

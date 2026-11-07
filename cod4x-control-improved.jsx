@@ -1395,7 +1395,7 @@ function ProductionRuntimePanel({lang}){
   return <>
     <Header
       title={de ? "Production Runtime" : "Production Runtime"}
-      sub={de ? "4.18.22 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick" : "4.18.14 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Remote Access"}
+      sub={de ? "4.18.22 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Fernzugriff" : "4.18.22 · Windows / Linux Dedicated Runtime · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Remote Access"}
     />
 
     <ServerInstancesPanel lang={lang} executablePath={executablePath} baseGamePath={baseGamePath} platform={platform} cod4x={cod4x}/>

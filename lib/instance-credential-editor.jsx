@@ -96,12 +96,12 @@ export function InstanceCredentialEditor({ instance, request, de }) {
     <p>{de ? 'Das Entsperrpasswort wird nicht gespeichert. Nach einem Backend-Neustart erneut entsperren. Ohne dieses Passwort ist keine Entschlüsselung möglich.' : 'The unlock passphrase is not saved. Unlock again after a backend restart. Without this passphrase the vault cannot be decrypted.'}</p>
     <button disabled={busy || !unlocked} onClick={() => action('lock')}>{de ? 'Tresor sperren' : 'Lock vault'}</button>
     {active && <p>{de ? 'RCON-Passwort, Master-Token und Join-Passwort nur bei vollständig gestopptem Server ändern. Das B3-Datenbank-Passwort kann bei laufendem Server geändert werden.' : 'Change the RCON password, master token and join password only with the server fully stopped. The B3 database password can be changed while the server runs.'}</p>}
-    {KINDS.map(kind => <form key={kind} onSubmit={event => submit(event, 'save', kind)} style={{ marginTop: 10 }}>
+    {KINDS.map(kind => { const warning = sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de); return <form key={kind} onSubmit={event => submit(event, 'save', kind)} style={{ marginTop: 10 }}>
       <label>{labels[kind]} <input ref={input => { secrets.current[kind] = input; }} type="password" autoComplete="new-password" minLength={kind === 'master' ? 32 : 8} maxLength={kind === 'master' ? 32 : kind === 'join' ? 64 : 128} required disabled={busy || !unlocked || (active && kind !== 'b3db')} /></label>
       <span> {credentials?.[kind]?.configured === true ? (de ? 'Gespeichert' : 'Stored') : credentials?.[kind]?.configured === false ? (de ? 'Nicht eingerichtet' : 'Not configured') : (de ? 'Unbekannt' : 'Unknown')}</span>
       <button type="submit" disabled={busy || !unlocked || (active && kind !== 'b3db')}>{de ? 'Verschlüsselt speichern' : 'Save encrypted'}</button>
       <button type="button" disabled={busy || !unlocked || (active && kind !== 'b3db') || credentials?.[kind]?.configured !== true} onClick={() => action('remove', kind)}>{de ? 'Entfernen' : 'Remove'}</button>
-      {sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de) && <p role="status">{sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de)}</p>}
-    </form>)}
+      {warning && <p role="status">{warning}</p>}
+    </form>; })}
   </details>;
 }
