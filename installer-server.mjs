@@ -2482,7 +2482,7 @@ app.post("/api/credentials/vault/lock", requirePermission("config.manage"), cred
 app.get("/api/instances/:id/credentials", requirePermission("config.manage"), credentialRoute(async req => ({ credentials: await credentialService.instanceStatus(req.params.id) })));
 // Block 8 audit names for the master token; the generic credential event stays.
 function auditMasterToken(req, removed, credential) {
-  if (req.params.kind === "master" && credential.changed !== false) audit("info", removed ? "master.token.removed" : "master.token.configured", { instanceId: req.params.id, actor: req.auth.username, backupId: credential.backupId || null });
+  if (req.params.kind === "master" && credential.changed !== false) audit("info", removed ? "master.token.removed" : "master.token.configured", { instanceId: req.params.id, actor: req.auth.username, backupId: credential.backupId || null, sharedWith: credential.warnings?.find(warning => warning.code === "MASTER_TOKEN_SHARED")?.instances || [] });
   return credential;
 }
 app.post("/api/instances/:id/credentials/:kind", requirePermission("config.manage"), credentialRoute(async req => ({ credential: auditMasterToken(req, false, await instanceManager.changeCredential(req.params.id, req.params.kind, req.body)) })));

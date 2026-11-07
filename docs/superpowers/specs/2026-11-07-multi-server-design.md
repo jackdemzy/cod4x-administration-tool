@@ -65,7 +65,7 @@ In `InstanceCredentialService`, while the vault is unlocked:
 - `set(id, 'master' | 'rcon', ...)` compares the new value with the same kind of every other instance (`crypto.timingSafeEqual` on equal-length buffers) and returns `warnings: [{ code: 'MASTER_TOKEN_SHARED' | 'RCON_PASSWORD_SHARED', instances: [<ids>] }]` next to the normal result. The save still succeeds.
 - `instanceStatus(id)` adds `sharedWith: [<ids>]` per kind (empty list when unique). While the vault is locked the value is `null` (unknown), never `[]`.
 - The audit event for the change gets `sharedWith` (IDs only). No value, no hash, no length is logged or returned.
-- UI (`instance-credential-editor.jsx`): a warning line under the field, DE and EN, naming the other instances. Wording for master: a shared token makes the master list show one server for both.
+- UI (`instance-credential-editor.jsx`): a warning line under the field, DE and EN, naming the other instances. Wording for master: a plain recommendation of one token per server. What the master does with a duplicate token is not verified, so the text makes no claim about it.
 
 Why a warning: sharing a RCON password across your own servers is a deliberate choice for some operators, and the master only cares about one token per listed server. The operator decides.
 

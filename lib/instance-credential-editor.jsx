@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { sharedCredentialWarning } from './credential-warnings.mjs';
 
 // Only invalidation callbacks live here, never credentials or passphrases.
 const editors = new Set();
@@ -100,6 +101,7 @@ export function InstanceCredentialEditor({ instance, request, de }) {
       <span> {credentials?.[kind]?.configured === true ? (de ? 'Gespeichert' : 'Stored') : credentials?.[kind]?.configured === false ? (de ? 'Nicht eingerichtet' : 'Not configured') : (de ? 'Unbekannt' : 'Unknown')}</span>
       <button type="submit" disabled={busy || !unlocked || (active && kind !== 'b3db')}>{de ? 'Verschlüsselt speichern' : 'Save encrypted'}</button>
       <button type="button" disabled={busy || !unlocked || (active && kind !== 'b3db') || credentials?.[kind]?.configured !== true} onClick={() => action('remove', kind)}>{de ? 'Entfernen' : 'Remove'}</button>
+      {sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de) && <p role="status">{sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de)}</p>}
     </form>)}
   </details>;
 }

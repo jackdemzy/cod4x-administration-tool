@@ -1,0 +1,285 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { InstanceB3DatabaseService } from '../lib/instance-b3-database-service.mjs';
+
+// Block 17 (4.18.22): cross-contamination between instances.
+const SETTINGS = { host: '127.0.0.1', port: 3306, database: 'b3', username: 'b3' };
+
+async function databaseFixture(t, ids = ['server-a', 'server-b']) {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-multi-db-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const instances = new Map(ids.map(id => [id, { id, homePath: path.join(root, id) }]));
+  for (const { homePath } of instances.values()) await fs.mkdir(homePath, { recursive: true });
+  const store = {
+    get: id => { if (!instances.has(id)) throw Object.assign(new Error('INSTANCE_NOT_FOUND'), { code: 'INSTANCE_NOT_FOUND' }); return instances.get(id); },
+    list: () => [...instances.values()],
+  };
+  const service = new InstanceB3DatabaseService({ store, credentials: { instanceStatus: async () => ({ b3db: { configured: true } }) }, environment: {}, b3IsRunning: async () => false });
+  const file = id => path.join(instances.get(id).homePath, 'b3', 'database.json');
+  const enable = async id => { const document = JSON.parse(await fs.readFile(file(id), 'utf8')); document.mysqlEnabled = true; await fs.writeFile(file(id), JSON.stringify(document)); };
+  return { service, file, enable };
+}
+
+test('B3 database: a second instance cannot save the same MySQL target (named code, other instance only)', async t => {
+  const { service } = await databaseFixture(t);
+  await service.save('server-a', SETTINGS);
+  await assert.rejects(service.save('server-b', SETTINGS), error => error.code === 'B3_DATABASE_TARGET_SHARED' && error.otherInstanceId === 'server-a' && !/username|host|password/i.test(JSON.stringify(error)));
+  await assert.rejects(service.save('server-b', { ...SETTINGS, host: 'localhost', username: 'someone_else' }), { code: 'B3_DATABASE_TARGET_SHARED' });
+  assert.equal((await service.read('server-b')).settings, null, 'nothing was stored for the rejected instance');
+});
+
+test('B3 database: another database name, port or host is accepted; re-saving the own target is fine', async t => {
+  const { service } = await databaseFixture(t);
+  await service.save('server-a', SETTINGS);
+  await service.save('server-b', { ...SETTINGS, database: 'b3_two' });
+  await service.save('server-a', SETTINGS);
+  await service.save('server-a', { ...SETTINGS, port: 3307 });
+  await service.save('server-b', { ...SETTINGS, host: '10.0.0.5' });
+});
+
+test('B3 database: sharedTarget reports another instance that has MySQL enabled, not one that only saved settings', async t => {
+  const { service, file, enable } = await databaseFixture(t);
+  await service.save('server-a', SETTINGS);
+  await service.save('server-b', { ...SETTINGS, database: 'b3_two' });
+  assert.equal(await service.sharedTarget('server-a'), null);
+  // server-b is changed on disk to the target of server-a; both then run on MySQL.
+  const document = JSON.parse(await fs.readFile(file('server-b'), 'utf8'));
+  document.settings.database = 'b3';
+  await fs.writeFile(file('server-b'), JSON.stringify(document));
+  await enable('server-a');
+  assert.equal(await service.sharedTarget('server-a'), null, 'the other instance has not enabled MySQL yet');
+  await enable('server-b');
+  assert.equal(await service.sharedTarget('server-a'), 'server-b');
+  assert.equal(await service.sharedTarget('server-b'), 'server-a');
+});
+
+test('B3 database: a corrupt database.json of a sibling does not block this instance', async t => {
+  const { service, file } = await databaseFixture(t);
+  await service.save('server-a', SETTINGS);
+  await fs.writeFile(file('server-a'), '{ not json');
+  await service.save('server-b', SETTINGS);
+  assert.equal(await service.sharedTarget('server-b'), null);
+});
+
+test('B3 start: blocked while another instance runs B3 on the same MySQL database, nothing written', async t => {
+  const { createB3InstanceFixture } = await import('./support/b3-instance-fixture.mjs');
+  const { b3Service, create, store } = await createB3InstanceFixture();
+  t.after(async () => { try { await b3Service.stop('b3-one'); } catch { /* best effort */ } });
+  await create('b3-one');
+  const config = path.join(store.get('b3-one').homePath, 'b3', 'b3.xml');
+  let shared = null;
+  const database = { read: async () => ({ ready: true, mysqlEnabled: true }), isBusy: () => false, sharedTarget: async () => shared, connectionFor: async () => null };
+  b3Service.database = database;
+  shared = 'b3-two';
+  await assert.rejects(b3Service.start('b3-one'), error => error.code === 'B3_DATABASE_TARGET_SHARED');
+  await assert.rejects(fs.access(config), { code: 'ENOENT' });
+  // Plain SQLite instances never ask: the check only applies to MySQL.
+  b3Service.database = { ...database, read: async () => ({ ready: false, mysqlEnabled: false }), sharedTarget: async () => { throw new Error('must not be asked'); } };
+  await b3Service.start('b3-one');
+});
+
+// ---- Block 17: shared master token / RCON password is a warning, never a block ----
+import { InstanceCredentialService } from '../lib/instance-credential-service.mjs';
+
+const passphrase = 'Disposable multi-server passphrase!';
+async function vaultFixture(t, ids = ['server-a', 'server-b', 'server-c']) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-multi-vault-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const births = new Map(ids.map((id, index) => [id, `2026-10-04T10:00:0${index}.000Z`]));
+  const resolveInstance = id => {
+    if (!births.has(id)) throw Object.assign(new Error('Missing test instance'), { code: 'INSTANCE_NOT_FOUND' });
+    return { id, homePath: path.join(root, 'servers', id), createdAt: births.get(id) };
+  };
+  const service = new InstanceCredentialService({ dataRoot: root, resolveInstance });
+  await service.initialize(passphrase); await service.unlock(passphrase);
+  const set = async (id, kind, value) => service.set(id, kind, { value, expectedSha256: (await service.status()).sha256 });
+  return { service, set, births, resolveInstance, root };
+}
+const MASTER = 'A'.repeat(32);
+
+test('credentials: a master token shared with another instance saves with a warning naming only that instance', async t => {
+  const { service, set } = await vaultFixture(t);
+  const first = await set('server-a', 'master', MASTER);
+  assert.equal(first.warnings, undefined, 'a unique value carries no warning');
+  const second = await set('server-b', 'master', MASTER);
+  assert.deepEqual(second.warnings, [{ code: 'MASTER_TOKEN_SHARED', instances: ['server-a'] }]);
+  assert.ok(!JSON.stringify(second).includes(MASTER));
+  assert.equal((await service.instanceStatus('server-b')).master.configured, true, 'the value was stored');
+  const third = await set('server-c', 'master', MASTER);
+  assert.deepEqual(third.warnings, [{ code: 'MASTER_TOKEN_SHARED', instances: ['server-a', 'server-b'] }]);
+});
+
+test('credentials: a shared RCON password warns, a different value or a different kind does not', async t => {
+  const { set } = await vaultFixture(t);
+  await set('server-a', 'rcon', 'Shared-Rcon-123!');
+  assert.deepEqual((await set('server-b', 'rcon', 'Shared-Rcon-123!')).warnings, [{ code: 'RCON_PASSWORD_SHARED', instances: ['server-a'] }]);
+  assert.equal((await set('server-c', 'rcon', 'Another-Rcon-123!')).warnings, undefined);
+  // The same text as a join password is not a shared RCON password.
+  assert.equal((await set('server-c', 'join', 'Shared-Rcon-123!')).warnings, undefined);
+});
+
+test('credentials: instanceStatus lists sharedWith (ids only), [] when unique, null while locked', async t => {
+  const { service, set } = await vaultFixture(t);
+  await set('server-a', 'master', MASTER); await set('server-b', 'master', MASTER); await set('server-c', 'rcon', 'Only-Mine-Rcon-1!');
+  const a = await service.instanceStatus('server-a');
+  assert.deepEqual([a.master.sharedWith, a.rcon.sharedWith], [['server-b'], []]);
+  assert.deepEqual((await service.instanceStatus('server-c')).rcon.sharedWith, []);
+  assert.ok(!JSON.stringify(a).includes(MASTER));
+  service.lock();
+  const locked = await service.instanceStatus('server-a');
+  assert.deepEqual([locked.master.sharedWith, locked.rcon.sharedWith], [null, null]);
+});
+
+test('credentials: removing the other instance token clears the warning; a recreated or removed instance record is ignored', async t => {
+  const { service, set, births } = await vaultFixture(t);
+  await set('server-a', 'master', MASTER); await set('server-b', 'master', MASTER);
+  await service.remove('server-b', 'master', { expectedSha256: (await service.status()).sha256 });
+  assert.deepEqual((await service.instanceStatus('server-a')).master.sharedWith, []);
+  await set('server-b', 'master', MASTER);
+  // server-b is archived and a new instance reuses the ID: its old record is stale.
+  births.set('server-b', '2026-10-05T10:00:00.000Z');
+  assert.deepEqual((await service.instanceStatus('server-a')).master.sharedWith, []);
+  assert.equal((await set('server-c', 'master', MASTER)).warnings.length, 1, 'only server-a is still a live holder');
+  assert.deepEqual((await service.instanceStatus('server-c')).master.sharedWith, ['server-a']);
+});
+
+test('credential warning text: German and English, names the other instances, empty when unique or unknown', async () => {
+  const { sharedCredentialWarning } = await import('../lib/credential-warnings.mjs');
+  assert.equal(sharedCredentialWarning('master', [], true), '');
+  assert.equal(sharedCredentialWarning('master', null, true), '');
+  assert.equal(sharedCredentialWarning('join', ['server-b'], true), '', 'only master and RCON are compared');
+  assert.match(sharedCredentialWarning('master', ['server-b', 'server-c'], true), /Master-Token.*server-b, server-c/s);
+  assert.match(sharedCredentialWarning('master', ['server-b'], false), /master token.*server-b/is);
+  assert.match(sharedCredentialWarning('rcon', ['server-b'], true), /RCON-Passwort.*server-b/s);
+  assert.match(sharedCredentialWarning('rcon', ['server-b'], false), /RCON password.*server-b/s);
+});
+
+// ---- Block 17: a hand-edited server.cfg cannot point the game log outside the instance ----
+test('managed config: g_log and logfile follow the same rules as the config engine', async () => {
+  const { validateManagedConfigText, GAME_LOG_PATH } = await import('../lib/instance-config-validator.mjs');
+  const instance = { port: 28960, network: { scope: 'LOOPBACK' } };
+  const code = text => { try { validateManagedConfigText(text, instance); return null; } catch (error) { return error.code; } };
+  for (const ok of ['set g_log "games_mp.log"', 'set g_log "logs/games_mp.log"', 'set logfile "2"', 'seta logfile 0']) assert.equal(code(ok), null, ok);
+  for (const bad of ['set g_log "../../other/main/games_mp.log"', 'set g_log "/etc/x.log"', 'set g_log "C:\\\\x.log"', 'set g_log "logs/../x.log"', 'set g_log "x.txt"', 'set g_log ""', 'set logfile "7"', 'set logfile "two"', 'set logfile "-1"']) {
+    assert.equal(code(bad), 'INSTANCE_CONFIG_INVALID', bad);
+  }
+  // One rule for both modules: the engine imports the validator's pattern.
+  assert.ok(GAME_LOG_PATH.test('logs/games_mp.log') && !GAME_LOG_PATH.test('../a.log'));
+  const engine = await fs.readFile(new URL('../lib/config-engine.mjs', import.meta.url), 'utf8');
+  assert.match(engine, /GAME_LOG_PATH/);
+  assert.ok(!engine.includes('[a-zA-Z0-9_-]+\\.log$/'), 'config-engine no longer carries its own copy of the pattern');
+});
+
+// ---- Block 17: three parallel instances, real vault / RCON service / UDP doubles ----
+import { createRconFixture } from './support/rcon-instance-fixture.mjs';
+import { createB3InstanceFixture } from './support/b3-instance-fixture.mjs';
+import { RconClient } from '../lib/rcon-client.mjs';
+
+const IDS = ['multi-1', 'multi-2', 'multi-3'];
+const RCON = Object.fromEntries(IDS.map((id, index) => [id, `Rcon-Pass-${index + 1}-Unique`]));
+const TOKEN = Object.fromEntries(IDS.map((id, index) => [id, String(index + 1).repeat(32)]));
+const argAfter = (args, name) => { const index = args.findIndex((value, i) => value === '+set' && args[i + 1] === name); return index < 0 ? null : args[index + 2]; };
+
+async function threeInstances(t) {
+  const fixture = await createRconFixture();
+  t.after(fixture.cleanup);
+  for (const id of IDS) { await fixture.create(id); await fixture.setRcon(id, RCON[id]); await fixture.setMaster(id, TOKEN[id]); }
+  const states = await Promise.all(IDS.map(id => fixture.manager.launch(id)));
+  return { ...fixture, states: Object.fromEntries(IDS.map((id, index) => [id, states[index]])) };
+}
+
+test('three parallel instances: own port, home, RCON, master token and answers; no secret reaches a sibling', async t => {
+  const { manager, children, store, states } = await threeInstances(t);
+  const processes = IDS.map(id => children.get(states[id].pid));
+  assert.equal(new Set(IDS.map(id => states[id].status)).size, 1);
+  assert.equal(states['multi-1'].status, 'RUNNING');
+  assert.equal(new Set(IDS.map(id => store.get(id).port)).size, 3);
+  for (const id of IDS) {
+    const instance = store.get(id), child = children.get(states[id].pid), others = IDS.filter(other => other !== id);
+    assert.equal(argAfter(child.args, 'net_port'), String(instance.port));
+    assert.equal(argAfter(child.args, 'fs_homepath'), instance.homePath);
+    assert.equal(argAfter(child.args, 'rcon_password'), RCON[id]);
+    assert.equal(argAfter(child.args, 'sv_authtoken'), TOKEN[id]);
+    const commandLine = child.args.join(' ');
+    for (const other of others) {
+      assert.ok(!commandLine.includes(RCON[other]) && !commandLine.includes(TOKEN[other]) && !commandLine.includes(store.get(other).homePath), `${id} must not see ${other}`);
+    }
+    // The server on this port is this instance: its own hostname, only its own password works.
+    const client = new RconClient({ port: instance.port, timeoutMs: 400 });
+    const own = await client.execute(Buffer.from(RCON[id]), 'serverinfo');
+    assert.match(JSON.stringify(own), new RegExp(`RCON ${id}`));
+    for (const other of others) {
+      assert.ok(!JSON.stringify(own).includes(`RCON ${other}`));
+      await assert.rejects(new RconClient({ port: instance.port, timeoutMs: 400 }).execute(Buffer.from(RCON[other]), 'serverinfo'), error => /RCON/.test(error.code || ''), `${other} password on ${id}`);
+    }
+  }
+  assert.equal(new Set(processes.map(child => child.pid)).size, 3);
+  // Runtime state files live in each own home.
+  for (const id of IDS) {
+    const state = JSON.parse(await fs.readFile(path.join(store.get(id).homePath, 'logs', 'runtime-state.json'), 'utf8'));
+    assert.equal(state.instanceId, id);
+    assert.ok(!JSON.stringify(state).includes(RCON[id]) && !JSON.stringify(state).includes(TOKEN[id]));
+  }
+  // Stopping one leaves the other two serving.
+  await manager.stop('multi-2');
+  assert.equal((await manager.status('multi-2')).runtime.status, 'STOPPED');
+  for (const id of ['multi-1', 'multi-3']) {
+    assert.equal((await manager.status(id)).runtime.status, 'RUNNING');
+    assert.match(JSON.stringify(await new RconClient({ port: store.get(id).port, timeoutMs: 400 }).execute(Buffer.from(RCON[id]), 'serverinfo')), new RegExp(`RCON ${id}`));
+  }
+});
+
+test('RCON commands for one instance reach only that instance (wrong-RCON error case)', async t => {
+  const { rconService, children, states, store } = await threeInstances(t);
+  await rconService.connect('multi-1', 'tester');
+  await rconService.execute('multi-1', 'serverinfo', 'tester');
+  const seen = id => children.get(states[id].pid).server.state.commands;
+  assert.ok(seen('multi-1').includes('serverinfo'));
+  assert.deepEqual(seen('multi-2'), []);
+  assert.deepEqual(seen('multi-3'), []);
+  assert.equal(store.get('multi-1').port !== store.get('multi-2').port, true);
+});
+
+test('roadmap error cases: taken port, taken ID, foreign homepath and a config with a sibling port', async t => {
+  const fixture = await createRconFixture();
+  t.after(fixture.cleanup);
+  const { manager, store, children } = fixture;
+  const one = await fixture.create('multi-1');
+  const two = await fixture.create('multi-2');
+  const base = { name: 'X', platform: 'windows', serverCore: store.get('multi-1').serverCore, basePath: store.get('multi-1').basePath };
+  await assert.rejects(manager.create({ ...base, id: 'multi-3', port: one.port }), { code: 'INSTANCE_PORT_CONFLICT' });
+  await assert.rejects(manager.create({ ...base, id: 'multi-1', port: two.port + 1 }), { code: 'INSTANCE_ID_CONFLICT' });
+  await assert.rejects(manager.create({ ...base, id: 'multi-3', port: two.port + 2, homePath: store.get('multi-1').homePath }), { code: 'INSTANCE_HOME_INVALID' });
+  // server.cfg of multi-1 carries the port of multi-2: the launch is blocked before any process exists.
+  await fs.writeFile(store.get('multi-1').configPath, `set sv_hostname "x"\nset net_port "${two.port}"\n`);
+  await assert.rejects(manager.launch('multi-1'), { code: 'INSTANCE_CONFIG_INVALID' });
+  assert.equal(children.size, 0);
+  // ... and a hand-edited g_log pointing into the sibling is blocked the same way.
+  await fs.writeFile(store.get('multi-1').configPath, 'set sv_hostname "x"\nset g_log "../../multi-2/main/games_mp.log"\n');
+  await assert.rejects(manager.launch('multi-1'), { code: 'INSTANCE_CONFIG_INVALID' });
+  assert.equal(children.size, 0);
+});
+
+test('B3 assignment: each instance gets its own b3.xml (own port, home, database file, game log)', async t => {
+  const fixture = await createB3InstanceFixture();
+  t.after(fixture.cleanup);
+  const { b3Service, create, store } = fixture;
+  await create('multi-1'); await create('multi-2');
+  await b3Service.start('multi-1');
+  const xml = id => path.join(store.get(id).homePath, 'b3', 'b3.xml');
+  await assert.rejects(fs.access(xml('multi-2')), { code: 'ENOENT' }, 'starting B3 for multi-1 writes nothing for multi-2');
+  await b3Service.start('multi-2');
+  for (const [id, other] of [['multi-1', 'multi-2'], ['multi-2', 'multi-1']]) {
+    const text = await fs.readFile(xml(id), 'utf8');
+    assert.ok(text.includes(`<set name="port">${store.get(id).port}</set>`));
+    assert.ok(text.includes(store.get(id).homePath.replace(/\\/g, '/')) || text.includes(store.get(id).homePath));
+    assert.ok(!text.includes(String(store.get(other).port)) && !text.includes(store.get(other).homePath), `${id} b3.xml must not mention ${other}`);
+  }
+  // Stopping one B3 leaves the other running.
+  await b3Service.stop('multi-1');
+  assert.equal(await b3Service.isRunning('multi-1'), false);
+  assert.equal(await b3Service.isRunning('multi-2'), true);
+});

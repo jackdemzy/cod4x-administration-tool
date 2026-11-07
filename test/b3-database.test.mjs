@@ -100,3 +100,15 @@ test('splits SQL into statements and finds each target table', async () => {
   assert.equal(statementTable('ALTER TABLE `prestige_log` ADD KEY `x` (`x`)'), 'prestige_log');
   assert.equal(statementTable('SET time_zone = "+00:00"'), null);
 });
+
+// Block 17: two instances must not share one B3 MySQL database.
+test('databaseTargetKey ignores the user, case and the loopback spelling', async () => {
+  const { databaseTargetKey } = await import('../lib/b3-database.mjs');
+  const key = databaseTargetKey({ host: '127.0.0.1', port: 3306, database: 'b3', username: 'a' });
+  assert.equal(key, databaseTargetKey({ host: 'localhost', port: 3306, database: 'b3', username: 'other' }));
+  assert.equal(key, databaseTargetKey({ host: 'LOCALHOST', port: 3306, database: 'b3' }));
+  assert.equal(databaseTargetKey({ host: 'DB.Example.org', port: 3306, database: 'b3', username: 'a' }), databaseTargetKey({ host: 'db.example.org', port: 3306, database: 'b3', username: 'a' }));
+  assert.notEqual(key, databaseTargetKey({ host: '127.0.0.1', port: 3307, database: 'b3' }));
+  assert.notEqual(key, databaseTargetKey({ host: '127.0.0.1', port: 3306, database: 'b3_two' }));
+  assert.notEqual(key, databaseTargetKey({ host: '10.0.0.5', port: 3306, database: 'b3' }));
+});
