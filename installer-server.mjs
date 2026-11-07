@@ -54,6 +54,7 @@ import { REMOTE_DEFAULT_PORT, REMOTE_ROUTES, REMOTE_PROXY_MAX_FAILURES, caddyfil
 import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecoveryCode, totpUri, verifyTotp } from "./lib/totp.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
+import { isB3PluginCodePath, isB3PluginTextPath, localOnlyGuard, publicBlockers } from "./lib/b3-plugin-routes.mjs";
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -359,18 +360,20 @@ const isCredentialRequest = req => req.path.startsWith("/api/credentials/") || /
 app.use((req, res, next) => {
   if (!isCredentialRequest(req)) return next();
   res.setHeader("Cache-Control", "no-store");
-  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress)) return res.status(403).json({ ok: false, code: "CREDENTIAL_LOCAL_ONLY", error: "Credential transport requires a local connection." });
   next();
 });
+app.use(localOnlyGuard(isCredentialRequest));
+// Block 16b: custom plugin code (create, read/write, delete) is admin only and local only.
+app.use(localOnlyGuard(req => isB3PluginCodePath(req.path)));
 // Block 16b: B3 plugin config and code may be up to 256 KB of text; JSON escaping can grow it.
-const isB3PluginTextRequest = req => /^\/api\/instances\/[^/]+\/b3\/plugins\/(?:custom(?:\/[^/]+\/code)?|[^/]+\/config)$/.test(req.path);
+const isB3PluginTextRequest = req => isB3PluginTextPath(req.path);
 const jsonBody = express.json({ limit: "64kb" }), b3PluginJsonBody = express.json({ limit: "2mb" });
 app.use((req, res, next) => (isB3PluginTextRequest(req) ? b3PluginJsonBody : jsonBody)(req, res, next));
 // Plugin bodies can hold tokens: a malformed or oversized body gets a fixed
 // code, never the parser message, and is not passed to the default handler (which logs).
 app.use((error, req, res, next) => {
   if (!isB3PluginTextRequest(req)) return next(error);
-  const code = /\/code$|\/custom$/.test(req.path) ? "B3_PLUGIN_CODE_INVALID" : "B3_PLUGIN_CONFIG_INVALID";
+  const code = /\/(?:code|custom)\/?$/i.test(req.path) ? "B3_PLUGIN_CODE_INVALID" : "B3_PLUGIN_CONFIG_INVALID";
   res.status(400).json({ ok: false, code, error: code });
 });
 app.use((error, req, res, next) => {
@@ -2443,7 +2446,9 @@ function instanceRoute(action, status = 200) {
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
       const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY", "B3_PLUGIN_CONFLICT"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
-      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message, ...(Number.isInteger(error.line) ? { line: error.line } : {}) });
+      // Start blockers carry only their code and plugin name, so the UI can say which plugin blocks.
+      const blockers = publicBlockers(error);
+      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message, ...(Number.isInteger(error.line) ? { line: error.line } : {}), ...(blockers ? { blockers } : {}) });
     }
   };
 }
