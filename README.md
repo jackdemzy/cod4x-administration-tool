@@ -1,6 +1,6 @@
 # COD4X CONTROL – Features
 
-Version 4.18.19 · development source, not a release
+Version 4.18.21 · development source, not a release
 
 - Desktop app for Windows and Linux
 - Install, configure, run and monitor CoD4x dedicated servers
@@ -101,6 +101,10 @@ Version 4.18.19 · development source, not a release
 <img width="2800" height="2742" alt="admin-monitoring" src="https://github.com/user-attachments/assets/9abcd216-7c2e-4969-b333-ee2812899904" />
 
 Development Status: 
+
+## 4.18.21 B3 plugin management note
+
+4.18.21 implements roadmap Block 16b: the B3 manager gets a plugin table per server. The shipped plugins of the pinned eBc-B3 (9096624) can be switched on and configured; CONTROL knows their hashes and asks for an approval of the shown SHA-256 when a module differs. `admin` and `publist` are fixed, `auth` belongs to the B3 integration (4.18.20), and `callvote` does not run with the CoD4x parser. Admins can add their own plugins from a template or as Python code (permission `b3.plugins.code`); that code runs with the rights of the B3 process, and CONTROL never runs it itself. Before every B3 start CONTROL checks each enabled plugin again (file present and unchanged, approved, Python dependencies, required plugins, config file) and refuses the start with a precise reason. Plugin configs can hold tokens: they are stored with mode 0600 and never logged. Changes take effect after a B3 restart, which CONTROL points out. Development source, not a release.
 
 ## 4.18.20 B3 integration note
 
