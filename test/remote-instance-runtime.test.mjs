@@ -8,6 +8,7 @@ import { startFakeCod4xServer } from './support/fake-cod4x-udp.mjs';
 
 const available = await loopbackAvailable();
 const skip = available ? false : 'needs Linux, a non-root user, gcc and setsid';
+const gone = pid => until(() => !alive(pid), 5000);
 const rejects = (promise, code) => assert.rejects(promise, error => error.code === code, code);
 const cmdline = async pid => (await fs.readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').slice(0, -1);
 const managedArguments = (instance, { ipv4 = '127.0.0.1', ipv6 = '::1' } = {}) => [
@@ -102,7 +103,7 @@ test('status after an external kill shows FAILED, after a stop through CONTROL S
   assert.notEqual(restarted.runtime.pid, runtime.pid);
   const stopped = await f.manager.stop('public-01');
   assert.deepEqual([stopped.runtime.status, stopped.runtime.pid, stopped.runtime.exitReason], ['STOPPED', null, null]);
-  assert.ok(!alive(restarted.runtime.pid));
+  assert.ok(await gone(restarted.runtime.pid));
 });
 
 test('stop ends only this instance core; a sibling on the same host keeps running', { skip }, async t => {
@@ -110,7 +111,7 @@ test('stop ends only this instance core; a sibling on the same host keeps runnin
   await f.install('public-01'); await f.install('public-02');
   const one = (await f.manager.start('public-01')).runtime, two = (await f.manager.start('public-02')).runtime;
   await f.manager.stop('public-01');
-  assert.ok(!alive(one.pid));
+  assert.ok(await gone(one.pid));
   assert.ok(alive(two.pid));
   assert.equal((await f.manager.status('public-02')).runtime.status, 'RUNNING');
   assert.ok(f.loopback.session.calls.includes(`kill -s TERM ${one.pid}`));
@@ -123,7 +124,7 @@ test('stop escalates to KILL for a core that ignores TERM', { skip }, async t =>
   const { runtime } = await f.manager.start('public-01');
   const stopped = await f.manager.stop('public-01');
   assert.equal(stopped.runtime.status, 'STOPPED');
-  assert.ok(!alive(runtime.pid));
+  assert.ok(await gone(runtime.pid));
   const calls = f.loopback.session.calls;
   assert.ok(calls.indexOf(`kill -s TERM ${runtime.pid}`) >= 0 && calls.indexOf(`kill -s KILL ${runtime.pid}`) > calls.indexOf(`kill -s TERM ${runtime.pid}`));
 });
@@ -161,7 +162,7 @@ test('a lost connection during start leaves STARTING with recoveryBlocked, a ret
   const recovered = await f.manager.recover('public-01');
   assert.deepEqual([recovered.runtime.status, recovered.runtime.pid, recovered.runtime.recoveryBlocked], ['RUNNING', strays[0], false]);
   assert.equal((await f.manager.stop('public-01')).runtime.status, 'STOPPED');
-  assert.ok(!alive(strays[0]));
+  assert.ok(await gone(strays[0]));
 });
 
 test('recover finds nothing when the start never happened, and a start works again afterwards', { skip }, async t => {
@@ -198,7 +199,8 @@ test('restart keeps the port and gets a new pid and run id; restart of a stopped
   const first = (await f.manager.start('public-01')).runtime;
   const second = (await f.manager.restart('public-01')).runtime;
   assert.notEqual(second.pid, first.pid); assert.notEqual(second.runId, first.runId);
-  assert.ok(!alive(first.pid) && alive(second.pid));
+  assert.ok(await gone(first.pid));
+  assert.ok(alive(second.pid));
   assert.ok((await cmdline(second.pid)).includes(String(instance.port)));
   await f.manager.stop('public-01');
   assert.equal((await f.manager.restart('public-01')).runtime.status, 'RUNNING');
@@ -229,9 +231,10 @@ test('three instances on one host start in parallel and stop independently', { s
   assert.equal(new Set(started.map(entry => entry.runtime.pid)).size, 3);
   for (const entry of started) assert.deepEqual((await cmdline(entry.runtime.pid)).slice(0, 1), [entry.instance.core.path]);
   await f.manager.stop('public-02');
-  assert.deepEqual([alive(started[0].runtime.pid), alive(started[1].runtime.pid), alive(started[2].runtime.pid)], [true, false, true]);
+  assert.ok(await gone(started[1].runtime.pid));
+  assert.deepEqual([alive(started[0].runtime.pid), alive(started[2].runtime.pid)], [true, true]);
   await Promise.all([f.manager.stop('public-01'), f.manager.stop('public-03')]);
-  assert.ok(started.every(entry => !alive(entry.runtime.pid)));
+  for (const entry of started) assert.ok(await gone(entry.runtime.pid));
 });
 
 test('statusAll uses one connection per host for all active instances', { skip }, async t => {
