@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { RuntimePersistenceWarning } from "./lib/runtime-persistence-warning.mjs";
 import { InstanceConfigEditor } from "./lib/instance-config-editor.jsx";
 import { InstanceCredentialEditor } from "./lib/instance-credential-editor.jsx";
+import { RemoteHostsPanel } from "./lib/remote-hosts.jsx";
 import { InstanceRconConsole } from "./lib/instance-rcon-console.jsx";
 import { InstanceMasterStatus } from "./lib/instance-master-status.jsx";
 import { InstancePluginManager } from "./lib/instance-plugin-manager.jsx";
@@ -1598,7 +1599,7 @@ function ProductionRuntimePanel({lang}){
 
 }
 
-const TABS=[["overview","⌂"],["monitor","◷"],["config","⚙"],["mods","▣"],["security","✓"],["diagnostics","◉"],["runtime","▶"],["audit","≡"],["rcon","⌘"],["versions","⇩"],["tools","•"]];
+const TABS=[["overview","⌂"],["monitor","◷"],["config","⚙"],["mods","▣"],["security","✓"],["diagnostics","◉"],["runtime","▶"],["remote","⇄"],["audit","≡"],["rcon","⌘"],["versions","⇩"],["tools","•"]];
 
 
 function RBACPanel({lang}){
@@ -2458,7 +2459,7 @@ function ControlApp({user,onLogout}){
   const labels={
     overview:lang==="de"?"Übersicht":"Overview",monitor:"Monitoring",
     config:t.config,rotation:t.rotation,mods:lang==="de"?"Mods":"Mods",
-    security:lang==="de"?"Sicherheit":"Security",diagnostics:lang==="de"?"Diagnose":"Diagnostics",runtime:lang==="de"?"Runtime":"Runtime",audit:lang==="de"?"Audit":"Audit",rcon:t.rcon,
+    security:lang==="de"?"Sicherheit":"Security",diagnostics:lang==="de"?"Diagnose":"Diagnostics",runtime:lang==="de"?"Runtime":"Runtime",remote:"Remote Linux",audit:lang==="de"?"Audit":"Audit",rcon:t.rcon,
     versions:t.versionManager,tools:lang==="de"?"Werkzeuge":"Tools"
   };
   const currentLabel=labels[tab]||"COD4X CONTROL";
@@ -2489,6 +2490,7 @@ function ControlApp({user,onLogout}){
         {tab==="security"&&<SecurityPanel t={t} lang={lang}/>}
         {tab==="diagnostics"&&<DiagnosticsPanel t={t} lang={lang}/>}
         {tab==="runtime"&&<ProductionRuntimePanel lang={lang}/>}
+        {tab==="remote"&&<><Header title="Remote Linux" sub={lang==="de"?"Linux-Server über SSH verwalten":"Manage Linux servers over SSH"}/><RemoteHostsPanel de={lang==="de"} request={(route,options)=>apiFetch(apiUrl(route),options)}/></>}
         {tab==="audit"&&<><RBACPanel lang={lang}/><UserAdministrationPanel lang={lang} user={user}/><SessionManagementPanel lang={lang} user={user}/><BackupRecoveryPanel lang={lang}/><AuditTrailPanel lang={lang}/><PersistentAuditPanel lang={lang}/><PersistentLogHardeningPanel lang={lang}/><ConfigurationPolicyPanel lang={lang}/><ConfigurationProfilesPanel lang={lang}/></>}
         {tab==="rcon"&&<RCONCommands t={t}/>}
         {tab==="versions"&&<VersionManager t={t} lang={lang}/>}
