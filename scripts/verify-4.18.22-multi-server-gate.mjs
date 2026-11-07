@@ -39,8 +39,9 @@ for (const [name, ok] of checks) console.log(`${ok ? "PASS" : "FAIL"} ${name}`);
 if (checks.some(([, ok]) => !ok)) process.exit(1);
 
 // Behaviour: three instances in parallel and every roadmap error case.
+// The summary line is "# pass N" (TAP) or "ℹ pass N" (spec reporter, the default on newer Node versions).
 const run = spawnSync(process.execPath, ["--test", "test/multi-server-isolation.test.mjs"], { encoding: "utf8" });
-const summary = Object.fromEntries([...run.stdout.matchAll(/^# (tests|pass|fail|skipped) (\d+)/gm)].map(match => [match[1], Number(match[2])]));
+const summary = Object.fromEntries([...run.stdout.matchAll(/^(?:# |ℹ )(tests|pass|fail|skipped) (\d+)/gm)].map(match => [match[1], Number(match[2])]));
 console.log(`${run.status === 0 && summary.fail === 0 && summary.pass >= 15 ? "PASS" : "FAIL"} multi-server isolation tests (${summary.pass ?? "?"} pass, ${summary.fail ?? "?"} fail)`);
 if (run.status !== 0 || summary.fail !== 0 || !(summary.pass >= 15)) { process.stdout.write(run.stdout); process.stderr.write(run.stderr); process.exit(1); }
 console.log("4.18.22 multi-server gate PASS (three parallel instances without cross-contamination, fake core; the native check is separate)");
