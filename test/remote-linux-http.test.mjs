@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import ssh2 from 'ssh2';
 import { REMOTE_ROUTES, REMOTE_WRITE_ROUTES } from '../lib/remote-gateway.mjs';
+import { generateTestKeyPair } from './support/ssh-keys.mjs';
 
 const { Server, utils } = ssh2;
 const freePort = async () => {
@@ -23,7 +24,7 @@ const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
 // An SSH server for the backend to talk to: it knows one client key, answers the platform probe, and has no sftp.
 async function sshServer(t, { clientPublic, probe }) {
-  const hostKey = utils.generateKeyPairSync('ed25519');
+  const hostKey = generateTestKeyPair();
   const allowed = utils.parseKey(clientPublic);
   const state = { attempts: 0, commands: [] };
   const clients = new Set();
@@ -96,7 +97,7 @@ test('remote Linux API on the real backend: permissions, host key, vault key, lo
   const operator = (await call(null, '/api/auth/login', { username: 'ops', password })).json.token;
 
   // the SSH servers: one normal login, one that reports root
-  const clientKey = utils.generateKeyPairSync('ed25519');
+  const clientKey = generateTestKeyPair();
   const normal = await sshServer(t, { clientPublic: clientKey.public, probe: 'Linux x86_64\n1000\n1000\n' });
   const rooted = await sshServer(t, { clientPublic: clientKey.public, probe: 'Linux x86_64\n0\n0\n' });
 

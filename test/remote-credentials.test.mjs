@@ -5,10 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import ssh2 from 'ssh2';
 import { InstanceCredentialService } from '../lib/instance-credential-service.mjs';
+import { generateTestKeyPair } from './support/ssh-keys.mjs';
 
 const passphrase = 'Disposable remote vault passphrase!';
 const SUBJECT = 'ssh_lab-1';
-const key = () => ssh2.utils.generateKeyPairSync('ed25519').private;
+const key = () => generateTestKeyPair().private;
 const secret = (privateKey, extra = {}) => JSON.stringify({ privateKey, ...extra });
 const rejects = (promise, code) => assert.rejects(promise, error => error.code === code, code);
 

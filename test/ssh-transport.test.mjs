@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
 import { openSession, probeHostKey } from '../lib/ssh-transport.mjs';
+import { generateTestKeyPair } from './support/ssh-keys.mjs';
 
 const { Server, utils } = ssh2;
 const sha256Hex = blob => crypto.createHash('sha256').update(blob).digest('hex');
-const generate = () => utils.generateKeyPairSync('ed25519');
+const generate = () => generateTestKeyPair();
 
 // In-process SSH server: counts authentication attempts, accepts one client key,
 // and offers a handful of fixed "commands" over exec.
