@@ -87,7 +87,11 @@ export function createSftpEmulation() {
       const list = async () => {
         const names = await fs.readdir(where);
         const entries = [];
-        for (const filename of ['.', '..', ...names]) entries.push({ filename, longname: filename, attrs: stats(await fs.lstat(`${where}/${filename}`)) });
+        // like a real server, an entry that disappears while the listing is built (a process leaving /proc) is skipped
+        for (const filename of ['.', '..', ...names]) {
+          try { entries.push({ filename, longname: filename, attrs: stats(await fs.lstat(`${where}/${filename}`)) }); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+        }
         return entries;
       };
       call(list(), cb, entries => [entries]);
