@@ -58,7 +58,7 @@ test('unknown error codes never show server text, only a fixed message plus the 
   const html = render('RemoteError', { de: false, code: 'REMOTE_AUTH_FAILED' });
   assert.match(html, /REMOTE_AUTH_FAILED/);
   const odd = render('RemoteError', { de: false, code: '<script>alert(1)</script>' });
-  assert.doesNotMatch(odd, /<script>/);
+  assert.doesNotMatch(odd, /<script/i);
   assert.match(odd, /REMOTE_OPERATION_FAILED/);
 });
 

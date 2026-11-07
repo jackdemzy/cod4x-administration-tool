@@ -30,7 +30,8 @@ In scope:
 - the CONTROL backend (`installer-server.mjs`, `lib/`) and its admin API on `127.0.0.1:8787`,
 - the remote gateway and the phone app (`/remote/`), including login, second factor, sessions, push and the remote actions,
 - the credential vault, RCON handling and the B3 integration,
-- the Electron desktop app.
+- the Electron desktop app,
+- remote Linux management over SSH (`lib/ssh-transport.mjs`, `lib/remote-*.mjs`): host-key pinning, the vault-held SSH key, the fixed command list and remote path validation.
 
 Out of scope:
 
