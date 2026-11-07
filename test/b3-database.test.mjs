@@ -108,6 +108,8 @@ test('databaseTargetKey ignores the user, case and the loopback spelling', async
   assert.equal(key, databaseTargetKey({ host: 'localhost', port: 3306, database: 'b3', username: 'other' }));
   assert.equal(key, databaseTargetKey({ host: 'LOCALHOST', port: 3306, database: 'b3' }));
   assert.equal(databaseTargetKey({ host: 'DB.Example.org', port: 3306, database: 'b3', username: 'a' }), databaseTargetKey({ host: 'db.example.org', port: 3306, database: 'b3', username: 'a' }));
+  // MySQL on Windows (lower_case_table_names) does not tell B3 from b3.
+  assert.equal(key, databaseTargetKey({ host: '127.0.0.1', port: 3306, database: 'B3' }));
   assert.notEqual(key, databaseTargetKey({ host: '127.0.0.1', port: 3307, database: 'b3' }));
   assert.notEqual(key, databaseTargetKey({ host: '127.0.0.1', port: 3306, database: 'b3_two' }));
   assert.notEqual(key, databaseTargetKey({ host: '10.0.0.5', port: 3306, database: 'b3' }));

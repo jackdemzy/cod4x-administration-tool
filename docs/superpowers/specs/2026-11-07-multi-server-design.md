@@ -45,16 +45,16 @@ New pure function in `lib/b3-database.mjs`:
 databaseTargetKey(settings) -> "<host>:<port>/<database>"
 ```
 
-- `host` lower-cased; `localhost`, `127.0.0.1`, `::1` and `[::1]` map to one loopback token.
+- `host` lower-cased; `localhost`, `127.0.0.1`, `::1` and `[::1]` map to one loopback token. The database name is compared without case (MySQL on Windows does not tell `B3` from `b3`).
 - The user name is not part of the key: another user on the same database still shares the tables.
 - Different host names that resolve to the same server cannot be detected. This is a documented limit, not a promise.
 
-Checks (error code `B3_DATABASE_TARGET_SHARED`, details carry only the other instance ID, never settings or passwords):
+Rule (error code `B3_DATABASE_TARGET_SHARED`, details carry only the other instance ID, never settings or passwords): saved settings claim a target, whether MySQL is enabled or not. `remove` gives it back.
 
-- **On `save`:** compare against the saved settings of every other instance. Reject.
-- **On B3 start** (existing start plan, new blocker): compare against every other instance with `mysqlEnabled`. This catches a database file edited later or a settings change on the other instance.
+- **On `save`:** compare against the saved settings of every other instance. Reject. Saving the instance's own unchanged target is always allowed. Saves of all instances run one after another, so two saves at the same moment cannot both pass.
+- **On B3 start** (existing start plan, new blocker): when this instance runs on MySQL, compare against the saved settings of every other instance. This catches settings that were there before the check existed or were edited on disk.
 
-Enumeration goes through the instance store; the service reads `<home>/b3/database.json` of the other instances through the same `#load` path. A corrupt file of a sibling is skipped for the comparison and does not block this instance.
+Enumeration goes through the instance store; the service reads `<home>/b3/database.json` of the other instances through the same `#load` path. A missing, corrupt or symlinked file or `b3` directory of a sibling is skipped for the comparison and does not block this instance; it is never followed.
 
 SQLite needs no check: the file lies in the instance home.
 
@@ -62,12 +62,20 @@ SQLite needs no check: the file lies in the instance home.
 
 In `InstanceCredentialService`, while the vault is unlocked:
 
-- `set(id, 'master' | 'rcon', ...)` compares the new value with the same kind of every other instance (`crypto.timingSafeEqual` on equal-length buffers) and returns `warnings: [{ code: 'MASTER_TOKEN_SHARED' | 'RCON_PASSWORD_SHARED', instances: [<ids>] }]` next to the normal result. The save still succeeds.
+- `set(id, 'master' | 'rcon', ...)` compares the new value with the same kind of every other instance (plain comparison of the decoded values; they are shown to the operator anyway) and returns `warnings: [{ code: 'MASTER_TOKEN_SHARED' | 'RCON_PASSWORD_SHARED', instances: [<ids>] }]` next to the normal result. The save still succeeds.
 - `instanceStatus(id)` adds `sharedWith: [<ids>]` per kind (empty list when unique). While the vault is locked the value is `null` (unknown), never `[]`.
 - The audit event for the change gets `sharedWith` (IDs only). No value, no hash, no length is logged or returned.
 - UI (`instance-credential-editor.jsx`): a warning line under the field, DE and EN, naming the other instances. Wording for master: a plain recommendation of one token per server. What the master does with a duplicate token is not verified, so the text makes no claim about it.
 
 Why a warning: sharing a RCON password across your own servers is a deliberate choice for some operators, and the master only cares about one token per listed server. The operator decides.
+
+### B2. Runtime credential scopes take turns (found while testing the gate)
+
+Launching several instances at once with stored credentials failed: `InstanceCredentialService.withRuntimeCredentials` refused a second scope at once with `VAULT_OPERATION_BUSY`, and the old two-instance tests ran without a vault. Fix inside the vault, so every caller benefits (server launch, RCON connect, B3 start, database helper):
+
+- scopes run one at a time, in arrival order; the wait is bounded (`scopeWaitMs`, default 20 s, then `VAULT_OPERATION_BUSY`), and a caller that gives up still passes its turn on;
+- a scope opened inside a running scope (detected with `AsyncLocalStorage`) fails at once as before, because it would wait for itself;
+- a vault locked while a caller waits fails that caller with `VAULT_LOCKED`; mutations (set, remove, unlock) still fail fast.
 
 ### C. Config validator hardening
 
@@ -77,7 +85,7 @@ In `validateManagedConfigText`, for `g_log` and `logfile` reuse the config engin
 
 New file `test/multi-server-isolation.test.mjs`, real store and services, fake runtime/UDP from `test/support`:
 
-- two instances with the same MySQL target: second `save` rejected, error names the first instance; case and `localhost` / `127.0.0.1` variants rejected; different database name accepted; start blocker fires when the first instance is enabled afterwards.
+- two instances with the same MySQL target: second `save` rejected, error names the first instance; case and `localhost` / `127.0.0.1` variants rejected; different database name accepted; start blocker fires for an instance on MySQL when another instance has saved the same target.
 - master and RCON duplicate: save succeeds, warning lists the other instance, value never appears in the result, the audit entry or the status; locked vault yields `null`; unique values yield `[]`.
 - `g_log "../../other/main/games_mp.log"`, `g_log "/abs.log"`, `logfile 7` in `server.cfg`: launch blocked.
 - roadmap error cases between two instances: second create on a taken port, create with a foreign homepath, config with the other instance's `net_port`, B3 plugin / config change on instance 1 leaves instance 2's `b3.xml`, registry revision and state untouched, RCON command for instance 1 is sent to port 1 only, master token provisioning for instance 1 carries only instance 1's value.
