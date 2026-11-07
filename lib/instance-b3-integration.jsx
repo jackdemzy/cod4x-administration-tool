@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { B3_HIDE_LEVELS, B3_LEVEL_NAMES, B3_PREFIX_CHARS } from './b3-integration-constants.mjs';
 import { b3IntegrationMessage } from './b3-integration-messages.mjs';
+import { B3_PLUGIN_MESSAGES } from './b3-plugin-messages.mjs';
 
 // Block 16: "CoD4x connection" section of the B3 view. One switch wires the
 // b3hide core plugin and the eBc-B3 auth plugin together; !auth passwords are
 // write-only (the API returns levels, never values).
 const RESTART_TEXT = {
   server: { SETTINGS_CHANGED: ['Server neu starten: Einstellungen seit dem Start geändert.', 'Restart the server: settings changed since the start.'], CREDENTIALS_CHANGED: ['Server neu starten: Zugangsdaten seit dem Start geändert.', 'Restart the server: credentials changed since the start.'] },
-  b3: { SETTINGS_CHANGED: ['B3 neu starten: Einstellungen seit dem Start geändert.', 'Restart B3: settings changed since the start.'], CREDENTIALS_CHANGED: ['B3 neu starten: Zugangsdaten seit dem Start geändert.', 'Restart B3: credentials changed since the start.'] },
+  b3: { SETTINGS_CHANGED: ['B3 neu starten: Einstellungen seit dem Start geändert.', 'Restart B3: settings changed since the start.'], CREDENTIALS_CHANGED: ['B3 neu starten: Zugangsdaten seit dem Start geändert.', 'Restart B3: credentials changed since the start.'], PLUGINS_CHANGED: B3_PLUGIN_MESSAGES.PLUGINS_CHANGED },
 };
+// A restart code this view does not know is shown as the code, never thrown on.
+const restartText = (kind, code, de) => RESTART_TEXT[kind]?.[code]?.[de ? 0 : 1] ?? String(code);
 const levelLabel = level => `${level} – ${B3_LEVEL_NAMES[level]}`;
 
 export function B3IntegrationPanel({ data, canManage, de, busy, onSave, onSetPassword }) {
@@ -17,7 +20,7 @@ export function B3IntegrationPanel({ data, canManage, de, busy, onSave, onSetPas
   const lang = de ? 'de' : 'en';
   const locked = busy || !canManage;
   const vaultClosed = !data.vault?.initialized || data.vault?.locked;
-  const hints = Object.entries(data.restart || {}).filter(([, code]) => code).map(([kind, code]) => RESTART_TEXT[kind][code][de ? 0 : 1]);
+  const hints = Object.entries(data.restart || {}).filter(([, code]) => code).map(([kind, code]) => restartText(kind, code, de));
   const requirement = (ok, label) => <li>{ok ? '✔' : '✖'} {label}</li>;
   const codes = new Set((data.plan?.blockers || []).map(entry => entry.code));
   return <fieldset>

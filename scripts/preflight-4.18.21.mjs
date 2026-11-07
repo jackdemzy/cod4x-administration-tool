@@ -114,7 +114,7 @@ if (integration.status !== 0) {
   console.error("B3 integration behavior checks FAIL");
   process.exit(integration.status || 1);
 }
-const b3Plugins = spawnSync(process.execPath, ["--test", "test/b3-plugin-catalog.test.mjs", "test/b3-plugin-registry.test.mjs", "test/b3-plugin-template.test.mjs", "test/b3-plugin-plan.test.mjs", "test/instance-b3-plugin-service.test.mjs", "test/b3-plugins-http.test.mjs", "test/instance-b3-plugins.test.mjs"], { encoding: "utf8" });
+const b3Plugins = spawnSync(process.execPath, ["--test", "test/b3-plugin-catalog.test.mjs", "test/b3-plugin-registry.test.mjs", "test/b3-plugin-template.test.mjs", "test/b3-plugin-plan.test.mjs", "test/instance-b3-plugin-service.test.mjs", "test/b3-plugins-http.test.mjs", "test/instance-b3-plugins.test.mjs", "test/b3-plugins-final-review.test.mjs"], { encoding: "utf8" });
 process.stdout.write(b3Plugins.stdout || "");
 process.stderr.write(b3Plugins.stderr || "");
 if (b3Plugins.status !== 0) {

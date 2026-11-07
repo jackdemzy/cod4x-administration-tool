@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { InstanceB3Integration } from './instance-b3-integration.jsx';
 import { InstanceB3Plugins } from './instance-b3-plugins.jsx';
 import { b3IntegrationMessage } from './b3-integration-messages.mjs';
+import { B3_PLUGIN_MESSAGES, b3PluginMessage } from './b3-plugin-messages.mjs';
 
 const STATUS_TEXT = {
   RUNNING: ['läuft', 'running'], STARTING: ['startet', 'starting'], STOPPING: ['stoppt', 'stopping'], STOPPED: ['gestoppt', 'stopped'],
@@ -40,6 +41,18 @@ const DIAGNOSIS_TEXT = {
   RCON_OFFLINE: ['RCON offline – B3 erreicht den Server per RCON nicht.', 'RCON offline – B3 cannot reach the server via RCON.'],
 };
 const mark = ok => ok === true ? '✓' : ok === false ? '✗' : '–';
+
+// Block 16b: a blocked start names every blocker; plugin blockers get their text and plugin name.
+const errorText = (code, lang) => (B3_PLUGIN_MESSAGES[code] ? b3PluginMessage(code, lang) : b3IntegrationMessage(code, lang));
+export function B3StartError({ error, de }) {
+  if (!error) return null;
+  const lang = de ? 'de' : 'en';
+  const blockers = Array.isArray(error.blockers) ? error.blockers : [];
+  return <div role="alert">
+    <p>{errorText(error.code, lang)}</p>
+    {blockers.length > 0 && <ul>{blockers.map((entry, index) => <li key={`${entry.code}:${entry.plugin || ''}:${index}`}>{errorText(entry.code, lang)}{entry.plugin && <> – <strong>{entry.plugin}</strong></>}</li>)}</ul>}
+  </div>;
+}
 
 export function B3RuntimeView({ b3, de }) {
   if (!b3) return null;
@@ -81,35 +94,37 @@ export function B3Dashboard({ dashboard, de }) {
 
 export function InstanceB3Runtime({ instance, request, de }) {
   const [b3, setB3] = useState(null), [dashboard, setDashboard] = useState(null), [panel, setPanel] = useState(null);
-  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(null);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const base = `/api/instances/${encodeURIComponent(instance.id)}/b3`;
+  const failed = (response, data) => Object.assign(new Error(data.code || data.error || `HTTP ${response.status}`), { blockers: Array.isArray(data.blockers) ? data.blockers : null });
+  const fail = failure => { if (mounted.current) setError({ code: failure.message, blockers: failure.blockers || null }); };
   async function get(route) {
     const response = await request(route);
     const data = await response.json();
-    if (!response.ok) throw new Error(data.code || data.error || `HTTP ${response.status}`);
+    if (!response.ok) throw failed(response, data);
     return data;
   }
   async function run(action, fresh = false) {
-    setBusy(true); setError('');
+    setBusy(true); setError(null);
     try {
       if (action) {
         const response = await request(`${base}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.code || data.error || `HTTP ${response.status}`);
+        if (!response.ok) throw failed(response, data);
       }
       const [status, board] = await Promise.all([get(base), get(`${base}/dashboard${fresh ? '?fresh=1' : ''}`)]);
       if (mounted.current) { setB3(status.b3); setDashboard(board.b3); }
-    } catch (failure) { if (mounted.current) setError(failure.message); }
+    } catch (failure) { fail(failure); }
     finally { if (mounted.current) setBusy(false); }
   }
   async function show(kind) {
-    setBusy(true); setError('');
+    setBusy(true); setError(null);
     try {
       const data = await get(`${base}/${kind}`);
       if (mounted.current) setPanel(kind === 'logs' ? { kind, text: `${data.logs.b3Log || ''}${data.logs.output ? `\n--- stdout/stderr ---\n${data.logs.output}` : ''}` } : { kind, text: data.config.exists ? data.config.text : (de ? 'Noch keine Konfiguration erzeugt (entsteht beim ersten Start).' : 'No configuration generated yet (created on first start).') });
-    } catch (failure) { if (mounted.current) setError(failure.message); }
+    } catch (failure) { fail(failure); }
     finally { if (mounted.current) setBusy(false); }
   }
   const running = b3?.runtime?.running;
@@ -122,7 +137,7 @@ export function InstanceB3Runtime({ instance, request, de }) {
     <button disabled={busy || !b3} onClick={() => run('restart')}>{de ? 'Restart' : 'Restart'}</button>
     <button disabled={busy} onClick={() => show('logs')}>Logs</button>
     <button disabled={busy} onClick={() => show('config')}>Config</button>
-    {error && <p role="alert">{error}</p>}
+    <B3StartError error={error} de={de}/>
     <B3Dashboard dashboard={dashboard} de={de}/>
     <B3RuntimeView b3={b3} de={de}/>
     <InstanceB3Integration instance={instance} request={request} de={de}/>

@@ -135,7 +135,10 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
     const response = await fetch(`${url}${route}`, { method: 'PUT', headers: { Authorization: `Bearer ${admin}`, 'Content-Type': 'application/json' }, body: '{"text": "token = SECRET-JSON-123' });
     return { status: response.status, raw: await response.text() };
   };
-  for (const [route, code] of [[`${base}/myplug/config`, 'B3_PLUGIN_CONFIG_INVALID'], [`${base}/custom/myplug/code`, 'B3_PLUGIN_CODE_INVALID']]) {
+  // Final review: a trailing slash keeps the plugin parser limit and the quiet error handler.
+  const bigTrailing = await call(operator, `${base}/myplug/config/`, { text: `[settings]\n# ${'x'.repeat(100000)}\n`, expectedSha256: '0'.repeat(64) }, 'PUT');
+  assert.deepEqual([bigTrailing.status, bigTrailing.json.code], [409, 'B3_PLUGIN_CONFLICT'], 'a 100 KB body to .../config/ reaches the service');
+  for (const [route, code] of [[`${base}/myplug/config`, 'B3_PLUGIN_CONFIG_INVALID'], [`${base}/custom/myplug/code`, 'B3_PLUGIN_CODE_INVALID'], [`${base}/myplug/config/`, 'B3_PLUGIN_CONFIG_INVALID'], [`${base}/custom/myplug/code/`, 'B3_PLUGIN_CODE_INVALID']]) {
     const result = await malformed(route);
     assert.equal(result.status, 400);
     assert.equal(JSON.parse(result.raw).code, code);
