@@ -107,3 +107,41 @@ test('rename, unlink and chmod work and report a missing file as ENOENT', { skip
   await rejects(files.unlink(loopback.path('a')), 'ENOENT');
   await rejects(files.chmod(loopback.path('a'), 0o600), 'ENOENT');
 });
+
+test('replace swaps a file for a new one without a gap: with the OpenSSH extension, and without it', { skip }, async t => {
+  const { files, loopback, sftp } = await fixture(t);
+  const target = loopback.path('cfg'), temporary = loopback.path('cfg.tmp');
+  // without the extension: the old file is kept aside until the new one is in place
+  await fs.writeFile(target, 'old'); await fs.writeFile(temporary, 'new');
+  await files.replace(temporary, target);
+  assert.equal(await fs.readFile(target, 'utf8'), 'new');
+  assert.deepEqual(await fs.readdir(loopback.root), ['cfg'], 'no temporary or aside file is left');
+  // with the extension: one atomic call
+  let used = 0;
+  sftp.ext_openssh_rename = (from, to, cb) => { used++; fs.rename(from, to).then(() => cb(undefined), cb); };
+  await fs.writeFile(temporary, 'newer');
+  await files.replace(temporary, target);
+  assert.equal(await fs.readFile(target, 'utf8'), 'newer');
+  assert.equal(used, 1);
+  // a server that does not know the extension: the call throws, the fallback takes over
+  sftp.ext_openssh_rename = () => { throw new Error('Server does not support this extended request'); };
+  await fs.writeFile(temporary, 'newest');
+  await files.replace(temporary, target);
+  assert.equal(await fs.readFile(target, 'utf8'), 'newest');
+});
+
+test('replace puts the old file back when the new one cannot take its place, and refuses a missing source', { skip }, async t => {
+  const { files, loopback, sftp } = await fixture(t);
+  const target = loopback.path('cfg'), temporary = loopback.path('cfg.tmp');
+  await fs.writeFile(target, 'old'); await fs.writeFile(temporary, 'new');
+  const rename = sftp.rename.bind(sftp);
+  let calls = 0;
+  sftp.rename = (from, to, cb) => (++calls === 2 ? cb(Object.assign(new Error('Failure'), { code: 4 })) : rename(from, to, cb));
+  await rejects(files.replace(temporary, target), 'EIO');
+  assert.equal(await fs.readFile(target, 'utf8'), 'old', 'the old file is back');
+  assert.equal(await fs.readFile(temporary, 'utf8'), 'new', 'the new file is untouched');
+  assert.deepEqual((await fs.readdir(loopback.root)).sort(), ['cfg', 'cfg.tmp']);
+  sftp.rename = rename;
+  await rejects(files.replace(loopback.path('nope'), target), 'ENOENT');
+  assert.equal(await fs.readFile(target, 'utf8'), 'old');
+});
