@@ -279,3 +279,26 @@ test('the state file holds the fixed fields only: no arguments, paths, host or s
   assert.deepEqual(Object.keys(JSON.parse(text).state).sort(), ['createdAt', 'exitReason', 'pid', 'recoveryBlocked', 'runId', 'startedAt', 'status', 'updatedAt']);
   for (const forbidden of ['+set', instance.home, instance.basePath, 'example.org', 'password', 'token']) assert.ok(!text.includes(forbidden), forbidden);
 });
+
+test('changeNetwork: PUBLIC needs the confirmation phrase, is refused while the server may run, and the next start uses it', { skip }, async t => {
+  const f = await createRemoteFixture(t);
+  await f.install('public-01');
+  const confirmation = 'PUBLIC_EXPOSURE';
+  await rejects(f.manager.changeNetwork('public-01', { scope: 'PUBLIC' }), 'INSTANCE_NETWORK_CONFIRMATION_REQUIRED');
+  await rejects(f.manager.changeNetwork('public-01', { scope: 'PUBLIC', confirm: 'yes' }), 'INSTANCE_NETWORK_CONFIRMATION_REQUIRED');
+  await rejects(f.manager.changeNetwork('public-01', { scope: 'WORLD' }), 'INSTANCE_NETWORK_INVALID');
+  await rejects(f.manager.changeNetwork('public-01', { scope: 'PUBLIC', confirm: confirmation, extra: 1 }), 'INSTANCE_NETWORK_INVALID');
+  await rejects(f.manager.changeNetwork('public-01', { scope: 'PUBLIC', confirm: confirmation, publicAddress: '127.0.0.1' }), 'INSTANCE_NETWORK_INVALID');
+  assert.equal(f.instances.get('public-01').network.scope, 'LOOPBACK');
+  const changed = await f.manager.changeNetwork('public-01', { scope: 'PUBLIC', publicAddress: '203.0.113.7', confirm: confirmation });
+  assert.deepEqual(changed, { previous: { scope: 'LOOPBACK', publicAddress: null }, network: { scope: 'PUBLIC', publicAddress: '203.0.113.7' } });
+  const { runtime } = await f.manager.start('public-01');
+  assert.ok((await cmdline(runtime.pid)).includes('0.0.0.0'));
+  await rejects(f.manager.changeNetwork('public-01', { scope: 'LOOPBACK' }), 'REMOTE_INSTANCE_RUNNING');
+  assert.equal(f.instances.get('public-01').network.scope, 'PUBLIC');
+  await f.manager.stop('public-01');
+  const back = await f.manager.changeNetwork('public-01', { scope: 'LOOPBACK' });
+  assert.equal(back.network.scope, 'LOOPBACK');
+  assert.ok(f.audits.some(entry => entry.event === 'remote.instance.network_changed'));
+  assert.ok(!JSON.stringify(f.audits).includes('203.0.113.7'), 'the address is not in the audit');
+});

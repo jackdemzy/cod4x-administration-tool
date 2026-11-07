@@ -33,6 +33,12 @@ import { createRuntimeManager } from "./lib/runtime-manager.mjs";
 import { ServerInstanceStore, resolveRealFuturePath } from "./lib/server-instance-store.mjs";
 import { ServerInstanceManager } from "./lib/server-instance-manager.mjs";
 import { InstanceCredentialService } from "./lib/instance-credential-service.mjs";
+import { RemoteHostStore } from "./lib/remote-host-store.mjs";
+import { RemoteInstanceStore } from "./lib/remote-instance-store.mjs";
+import { RemoteStateStore } from "./lib/remote-runtime-state.mjs";
+import { RemoteHostService, sshSubjectResolver } from "./lib/remote-host-service.mjs";
+import { RemoteInstanceManager } from "./lib/remote-instance-manager.mjs";
+import { registerRemoteLinuxRoutes, REMOTE_LINUX_BINDINGS } from "./lib/remote-linux-routes.mjs";
 import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
 import { InstanceMasterService } from "./lib/instance-master-service.mjs";
 import { B3Environment, B3_DEPENDENCY_MATRIX, B3_SOURCE } from "./lib/b3-dependencies.mjs";
@@ -315,6 +321,7 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
+  ...REMOTE_LINUX_BINDINGS,
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
 ]);
 
@@ -349,14 +356,17 @@ app.use((req, res, next) => {
   // Block 16b: B3 plugin config and custom code accept PUT, a custom plugin DELETE.
   const b3PluginPutPath = /^\/api\/instances\/[^/]+\/b3\/plugins\/(?:custom\/[^/]+\/code|[^/]+\/config)\/?$/.test(req.path);
   const b3PluginDeletePath = /^\/api\/instances\/[^/]+\/b3\/plugins\/custom\/[^/]+\/?$/.test(req.path);
-  res.setHeader("Access-Control-Allow-Methods", `GET,POST,${instanceConfigPath || b3PluginPutPath ? "PUT," : ""}${b3PluginDeletePath ? "DELETE," : ""}OPTIONS`);
+  // Block 18: the config of a remote server accepts PUT, an SSH host DELETE.
+  const remoteConfigPath = /^\/api\/remote-instances\/[^/]+\/config\/?$/.test(req.path);
+  const remoteHostDeletePath = /^\/api\/remote-hosts\/[^/]+\/?$/.test(req.path);
+  res.setHeader("Access-Control-Allow-Methods", `GET,POST,${instanceConfigPath || b3PluginPutPath || remoteConfigPath ? "PUT," : ""}${b3PluginDeletePath || remoteHostDeletePath ? "DELETE," : ""}OPTIONS`);
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 // Credential transport is local-only until an authenticated TLS deployment is
 // explicitly implemented. Never cache or reflect secret request bodies.
-const isCredentialRequest = req => req.path.startsWith("/api/credentials/") || /^\/api\/instances\/[^/]+\/credentials(?:\/|$)/.test(req.path);
+const isCredentialRequest = req => req.path.startsWith("/api/credentials/") || /^\/api\/instances\/[^/]+\/credentials(?:\/|$)/.test(req.path) || /^\/api\/remote-hosts\/[^/]+\/credentials(?:\/|$)/.test(req.path);
 app.use((req, res, next) => {
   if (!isCredentialRequest(req)) return next();
   res.setHeader("Cache-Control", "no-store");
@@ -2372,7 +2382,12 @@ const instanceRoot = dataPath("servers");
 // Install after audit initialization; child exits must not depend on a UI request.
 runtimeDependencies.onRuntimeEvent = entry => audit(entry.expected === false || /failed|blocked|error/.test(entry.event) ? "warn" : "info", entry.event, entry);
 const instanceStore = new ServerInstanceStore({ root: instanceRoot, registryFile: dataPath("config", "server-instances.json") });
-const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => instanceStore.get(id) });
+// Block 18: SSH hosts and the servers on them. The vault knows a host as the subject ssh_<hostId>.
+let remoteInstanceStore = null;
+const remoteHostStore = new RemoteHostStore({ file: dataPath("config", "remote-hosts.json"), inUse: id => remoteInstanceStore.hasInstancesFor(id) });
+remoteInstanceStore = new RemoteInstanceStore({ file: dataPath("config", "remote-instances.json"), hosts: remoteHostStore });
+const resolveSshSubject = sshSubjectResolver({ hosts: remoteHostStore, dataRoot: DATA_ROOT });
+const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : instanceStore.get(id)) });
 let instanceManager = null;
 // RCON audit events carry instance, actor, normalized command and codes only, never the password.
 const rconService = new InstanceRconService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit,
@@ -2427,6 +2442,12 @@ b3Service.integration = {
 };
 try { await instanceManager.load(); }
 catch (error) { console.error(`[instances] registry unavailable: ${error.message}`); }
+// Block 18: remote Linux over SSH. The routes answer with REMOTE_*_STORE_INVALID while a list could not be loaded.
+try { await remoteHostStore.load(); await remoteInstanceStore.load(); }
+catch (error) { console.error(`[remote] registry unavailable: ${error.code || error.message}`); }
+const remoteHostService = new RemoteHostService({ store: remoteHostStore, credentials: credentialService, audit });
+const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInstanceStore, hosts: remoteHostService, audit, state: new RemoteStateStore({ root: dataPath("remote") }), backupRoot: dataPath("remote-backups") });
+registerRemoteLinuxRoutes({ app, requirePermission, audit, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService });
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
   const relative = path.relative(await resolveRealFuturePath(instanceRoot), await resolveRealFuturePath(filesystemHomePath));
   if (relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`))) {
