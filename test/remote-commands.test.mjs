@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {
   probeCommand, parseProbe, makeDirectoriesCommand, startCoreCommand, parsePid, signalCommand,
-  getinfoProbeCommand, diskFreeCommand, parseDiskFree, statCommand, parseStat,
+  getinfoProbeCommand, diskFreeCommand, parseDiskFree, statCommand, parseStat, recoverHomeCommand,
 } from '../lib/remote-commands.mjs';
 import { createLoopbackServer, buildFakeCore, loopbackAvailable } from './support/loopback-transport.mjs';
 import { startFakeCod4xServer } from './support/fake-cod4x-udp.mjs';
@@ -184,4 +184,26 @@ test('statCommand reports link count, device, inode and the type, with or withou
   const missing = await loopback.session.exec(statCommand(loopback.path('nope')));
   assert.notEqual(missing.code, 0);
   assert.match(missing.stderr.toString(), /No such file or directory/, 'messages are in C locale');
+});
+
+test('recoverHomeCommand moves a half-installed home into a private .recovery folder and refuses odd arguments', { skip }, async t => {
+  const loopback = await server(t);
+  const home = loopback.path('inst-1');
+  await fs.mkdir(`${home}/core`, { recursive: true }); await fs.writeFile(`${home}/core/partial`, 'x');
+  const result = await loopback.session.exec(recoverHomeCommand(loopback.root, home, 'abcdef12-0000'));
+  assert.equal(result.code, 0, result.stderr.toString());
+  await assert.rejects(fs.stat(home), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(loopback.path('.recovery', 'inst-1-abcdef12-0000', 'core', 'partial'), 'utf8'), 'x');
+  assert.equal((await fs.stat(loopback.path('.recovery'))).mode & 0o777, 0o700);
+  // an existing target is never replaced
+  await fs.mkdir(home);
+  const again = await loopback.session.exec(recoverHomeCommand(loopback.root, home, 'abcdef12-0000'));
+  assert.notEqual(again.code, 0);
+  assert.ok((await fs.stat(home)).isDirectory(), 'the new directory is untouched');
+});
+
+test('recoverHomeCommand takes only a home directly below the root and a plain token', () => {
+  assert.match(recoverHomeCommand('/srv/cod4x', '/srv/cod4x/inst-1', 'abcdef12-0000'), /^mkdir -p -m 0700 -- '\/srv\/cod4x\/\.recovery' && \[ ! -e /);
+  for (const home of ['/srv/cod4x', '/srv/cod4x/a/b', '/srv/other/inst-1', '/srv/cod4x/Inst', '/srv/cod4x/../x']) assert.ok(['REMOTE_PATH_INVALID', 'REMOTE_ARGUMENT_INVALID'].includes(code(() => recoverHomeCommand('/srv/cod4x', home, 'abcdef12-0000'))), home);
+  for (const token of ['', 'short', 'ABCDEFGH', 'abc def 12', 'a;b;c;d;e;f', "x'y'z'w'v'u", 'a'.repeat(65), 5, undefined]) assert.equal(code(() => recoverHomeCommand('/srv/cod4x', '/srv/cod4x/inst-1', token)), 'REMOTE_ARGUMENT_INVALID', String(token));
 });
