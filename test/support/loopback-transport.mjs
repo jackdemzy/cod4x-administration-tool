@@ -10,9 +10,11 @@ import { promisify } from 'node:util';
 // lib/ssh-transport.mjs RemoteSession.
 const run = promisify(execFile);
 
-const FAKE_CORE_SOURCE = `#include <stdio.h>
+const fakeCoreSource = ignoreTerm => `#include <stdio.h>
+#include <signal.h>
 #include <unistd.h>
 int main(int argc, char **argv) {
+  ${ignoreTerm ? 'signal(SIGTERM, SIG_IGN);' : ''}
   for (int i = 0; i < argc; i++) printf("%s\\n", argv[i]);
   fflush(stdout);
   fprintf(stderr, "fixture stderr\\n");
@@ -22,11 +24,12 @@ int main(int argc, char **argv) {
 `;
 
 // A real native process that prints its arguments, one per line, and then waits.
-export async function buildFakeCore(directory, name = 'cod4x18_dedrun') {
+// With ignoreTerm it ignores SIGTERM, so only SIGKILL stops it.
+export async function buildFakeCore(directory, name = 'cod4x18_dedrun', { ignoreTerm = false } = {}) {
   await fs.mkdir(directory, { recursive: true });
   const source = path.join(directory, `${name}.c`);
   const executable = path.join(directory, name);
-  await fs.writeFile(source, FAKE_CORE_SOURCE);
+  await fs.writeFile(source, fakeCoreSource(ignoreTerm));
   await run('gcc', [source, '-o', executable]);
   await fs.rm(source);
   await fs.chmod(executable, 0o755);
