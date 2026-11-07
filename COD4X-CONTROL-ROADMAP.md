@@ -595,6 +595,8 @@ Pro Server separat:
 
 ## Block 18 – Remote Linux / SSH
 
+> Status 4.18.23: implemented (agentless, ssh2). Gate with in-process SSH server passes; the native check against a real sshd and core is still open. RCON, B3 and the phone gateway for remote servers are not part of this block.
+
 Erst nach stabiler lokaler Windows- und Linux-Runtime.
 
 Remote-Funktionen:

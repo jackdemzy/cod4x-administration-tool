@@ -67,6 +67,8 @@ test('the permission map lists every remote Linux route and the server wires the
 
 test('remote Linux API on the real backend: permissions, host key, vault key, login chain, fixed codes, no secret anywhere', { timeout: 90000 }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-remote-http-'));
+  // the vault refuses a data root that is group or world writable; do not depend on the umask of the shell running the test
+  await fs.mkdir(path.join(root, 'data'), { mode: 0o700 }); await fs.chmod(path.join(root, 'data'), 0o700);
   const port = await freePort();
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^COD4X_/i.test(key)));
   Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_MONITOR: '0' });

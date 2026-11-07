@@ -1,6 +1,6 @@
 # COD4X CONTROL – Features
 
-Version 4.18.22 · development source, not a release
+Version 4.18.23 · development source, not a release
 
 - Desktop app for Windows and Linux
 - Install, configure, run and monitor CoD4x dedicated servers
@@ -415,3 +415,7 @@ Die npm-Abhängigkeiten stehen unter eigenen, mit der AGPL vereinbaren Lizenzen 
 ## 4.18.22 multi-server isolation note
 
 4.18.22 implements roadmap Block 17. Several instances already had their own port, home, config, credentials, plugins, B3 and logs; this release closes the gaps between them. Two instances cannot use the same B3 MySQL database (refused on save and on B3 start). A master token or RCON password that another instance also holds is shown as a warning with the instance names, never with a value. A hand-edited `server.cfg` cannot move the game log out of its own directory. Instances with stored credentials can be launched in parallel (runtime credential scopes in the vault take turns). The native check with three real CoD4x cores (`scripts/verify-4.18.22-multi-server-native.mjs`) has not been run yet.
+
+## 4.18.23 remote Linux note
+
+4.18.23 implements roadmap Block 18. A Windows CONTROL PC can install, update, start, stop, restart, read the logs of, check the health of, configure, back up and restore CoD4x servers on a Linux machine over SSH, with nothing installed on that machine (SFTP plus a fixed list of commands, library `ssh2`). Login is by key only (no password, no agent); the key lives in the encrypted vault. The first contact with a host never logs in: the SHA-256 fingerprint is shown and must be confirmed as exactly that value, and a changed key afterwards is a hard stop. The game core never runs as root. The base game must already exist on the server (it is only read); only the core and the instance directory are uploaded. RCON, the console, B3, master status, monitoring and the phone gateway are not available for remote servers yet (`REMOTE_RCON_UNSUPPORTED`, `REMOTE_B3_UNSUPPORTED`). Gate: `scripts/verify-4.18.23-remote-linux-gate.mjs` (in-process SSH server and a loopback server); the check against a real sshd and a real core is `scripts/verify-4.18.23-remote-linux-native.mjs` and has not been run yet.
