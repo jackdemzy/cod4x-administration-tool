@@ -7,11 +7,12 @@ import ssh2 from 'ssh2';
 import { RemoteHostStore } from '../lib/remote-host-store.mjs';
 import { InstanceCredentialService } from '../lib/instance-credential-service.mjs';
 import { RemoteHostService, sshSubjectResolver } from '../lib/remote-host-service.mjs';
+import { generateTestKeyPair } from './support/ssh-keys.mjs';
 
 const passphrase = 'Disposable remote host passphrase!';
 const PINNED = 'a'.repeat(64);
 const OTHER = 'b'.repeat(64);
-const PEM = ssh2.utils.generateKeyPairSync('ed25519').private;
+const PEM = generateTestKeyPair().private;
 const rejects = (promise, code) => assert.rejects(promise, error => error.code === code, code);
 
 // Real host store and real vault; the SSH layer is replaced by recording fakes.
