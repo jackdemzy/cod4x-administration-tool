@@ -78,9 +78,16 @@ export function createSftpEmulation() {
     fstat(handle, cb) { call(handleOf(handle).stat(), cb, value => [stats(value)]); },
     lstat(file, cb) { call(fs.lstat(file), cb, value => [stats(value)]); },
     stat(file, cb) { call(fs.stat(file), cb, value => [stats(value)]); },
-    async readdir(where, opts, cb) {
+    // like a real server: "." and ".." are listed, and every entry carries lstat-style attributes
+    readdir(where, opts, cb) {
       if (typeof opts === 'function') cb = opts;
-      call(fs.readdir(where), cb, names => [[...['.', '..', ...names].map(filename => ({ filename, longname: filename, attrs: {} }))]]);
+      const list = async () => {
+        const names = await fs.readdir(where);
+        const entries = [];
+        for (const filename of ['.', '..', ...names]) entries.push({ filename, longname: filename, attrs: stats(await fs.lstat(`${where}/${filename}`)) });
+        return entries;
+      };
+      call(list(), cb, entries => [entries]);
     },
     readlink(file, cb) { call(fs.readlink(file), cb, target => [target]); },
     realpath(file, cb) { call(fs.realpath(file), cb, resolved => [resolved]); },
