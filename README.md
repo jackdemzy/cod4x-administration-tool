@@ -1,6 +1,6 @@
 # COD4X CONTROL – Features
 
-Version 4.18.21 · development source, not a release
+Version 4.18.22 · development source, not a release
 
 - Desktop app for Windows and Linux
 - Install, configure, run and monitor CoD4x dedicated servers
@@ -411,3 +411,7 @@ COD4X CONTROL ist freie Software unter der [GNU Affero General Public License, V
 Kurz gefasst: Nutzen, Ändern und Weitergeben ist erlaubt, solange geänderte Versionen unter derselben Lizenz mit Quellcode weitergegeben werden. Wer eine geänderte Version über ein Netzwerk für andere bereitstellt (zum Beispiel einen Fernzugriff per Browser), muss diesen Nutzern den Quellcode anbieten (§ 13). Verbindlich ist allein der Lizenztext in `LICENSE`.
 
 Die npm-Abhängigkeiten stehen unter eigenen, mit der AGPL vereinbaren Lizenzen (MIT, ISC, BSD-3-Clause, BlueOak-1.0.0). CoD4X, eBc-B3, Mods und Spieldaten werden nicht mitgeliefert und behalten ihre eigenen Lizenzen.
+
+## 4.18.22 multi-server isolation note
+
+4.18.22 implements roadmap Block 17. Several instances already had their own port, home, config, credentials, plugins, B3 and logs; this release closes the gaps between them. Two instances cannot use the same B3 MySQL database (refused on save and on B3 start). A master token or RCON password that another instance also holds is shown as a warning with the instance names, never with a value. A hand-edited `server.cfg` cannot move the game log out of its own directory. Instances with stored credentials can be launched in parallel. The native check with three real CoD4x cores (`scripts/verify-4.18.22-multi-server-native.mjs`) has not been run yet.
