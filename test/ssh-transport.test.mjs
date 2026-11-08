@@ -36,6 +36,12 @@ async function startServer(t, { clientPublic, hostKey = generate(), sftp = false
           case 'fail': stream.stderr.write('bad\n'); stream.exit(3); stream.end(); break;
           case 'big': stream.write(Buffer.alloc(1024 * 1024, 0x61)); stream.exit(0); stream.end(); break;
           case 'hang': break; // never finishes
+          case 'count-stdin': { // reports how many stdin bytes arrived, once stdin is closed
+            let bytes = 0;
+            stream.on('data', chunk => { bytes += chunk.length; });
+            stream.on('end', () => { stream.write(`${bytes}\n`); stream.exit(0); stream.end(); });
+            break;
+          }
           default: stream.stderr.write(`unknown command: ${info.command}\n`); stream.exit(127); stream.end();
         }
       });
@@ -143,4 +149,31 @@ test('the module offers no password, agent or keyboard-interactive path', async 
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../lib/ssh-transport.mjs', import.meta.url), 'utf8');
   for (const forbidden of ['password:', 'agent:', 'tryKeyboard', 'agentForward']) assert.ok(!source.includes(forbidden), forbidden);
+});
+
+test('exec passes stdin to the remote command and ends it', async t => {
+  const client = generate();
+  const server = await startServer(t, { clientPublic: client.public });
+  const session = await openSession({ host: hostFor(server, server.hostSha256), privateKey: Buffer.from(client.private) });
+  t.after(() => session.close());
+  const result = await session.exec('count-stdin', { stdin: Buffer.alloc(1234, 7), timeoutMs: 5000 });
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout.toString(), '1234\n');
+});
+
+test('exec without stdin still closes stdin, so a reader of stdin finishes', async t => {
+  const client = generate();
+  const server = await startServer(t, { clientPublic: client.public });
+  const session = await openSession({ host: hostFor(server, server.hostSha256), privateKey: Buffer.from(client.private) });
+  t.after(() => session.close());
+  assert.equal((await session.exec('count-stdin', { timeoutMs: 5000 })).stdout.toString(), '0\n');
+  assert.equal((await session.exec('echo hi')).stdout.toString(), 'hi\n');
+});
+
+test('exec refuses stdin that is not a Buffer', async t => {
+  const client = generate();
+  const server = await startServer(t, { clientPublic: client.public });
+  const session = await openSession({ host: hostFor(server, server.hostSha256), privateKey: Buffer.from(client.private) });
+  t.after(() => session.close());
+  assert.throws(() => session.exec('count-stdin', { stdin: 'secret' }), error => error.code === 'REMOTE_ARGUMENT_INVALID');
 });
