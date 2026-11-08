@@ -41,6 +41,7 @@ import { isRemoteSubject, remoteIdOf, createShadowStore, remoteSubjectResolver, 
 import { RemoteSessionPool } from "./lib/remote-session-pool.mjs";
 import { createRemoteRconClientFactory } from "./lib/remote-rcon-client.mjs";
 import { createRemoteMonitor } from "./lib/remote-monitor.mjs";
+import { createGatewayActions } from "./lib/gateway-actions.mjs";
 import { RemoteInstanceManager } from "./lib/remote-instance-manager.mjs";
 import { registerRemoteLinuxRoutes, REMOTE_LINUX_BINDINGS } from "./lib/remote-linux-routes.mjs";
 import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
@@ -2887,13 +2888,13 @@ const remoteApp = createRemoteGateway({
   // Block 24d: the same services as the admin tool; actor is marked as remote.
   actions: {
     allowed: username => { const user = findAuthUser(username); return Boolean(remoteState.settings.actions && user && !user.disabled && user.remoteAccess === true && user.remoteActions === true && hasPermission(user.role, "server.manage")); },
-    players: async id => { const instance = monitorInstance(id); const online = await rconService.online(id, { full: false }); return { instance: { id, name: instance.name || id }, map: online.map, players: online.players.filter(player => !["CNCT", "ZMBI"].includes(player.ping)).map(({ slot, name, ping, score, bot }) => ({ slot, name, ping, score, bot })) }; },
-    say: async (id, text, actor) => { monitorInstance(id); return rconService.say(id, text, `remote:${actor}`); },
-    kick: async (id, target, actor) => { monitorInstance(id); if (typeof target.name !== "string") throw Object.assign(new Error("RCON_KICK_INVALID"), { code: "RCON_KICK_INVALID" }); return { kick: await rconService.kick(id, { slot: target.slot, name: target.name, reason: target.reason }, `remote:${actor}`) }; },
-    restart: async (id, actor) => { monitorInstance(id); const runtime = await instanceManager.launch(id, true); audit("warn", "instance.restart", { instanceId: id, actor: `remote:${actor}` }); return { restarted: true, status: runtime?.status || null }; },
+    // Block 18b: rmt_<id> goes to the remote RCON service and the remote restart (lib/gateway-actions.mjs).
+    ...createGatewayActions({ resolve: monitorInstance, audit,
+      local: { rcon: rconService, restart: id => instanceManager.launch(id, true) },
+      remote: { rcon: remoteRconService, restart: async id => (await remoteInstanceManager.restart(id)).runtime } }),
     notify: (kind, details) => {
       if (!alertNotifier.rules().enabled || kind === "say") return;
-      let name = details.instanceId; try { name = instanceStore.get(details.instanceId).name || name; } catch { /* gone */ }
+      let name = details.instanceId; try { name = monitorInstance(details.instanceId).name || name; } catch { /* gone */ }
       const title = kind === "restart" ? `${name}: Neustart von ${details.username}` : `${name}: Spieler gekickt von ${details.username}`;
       return alertNotifier.send({ key: `action:${kind}:${details.instanceId}:${Date.now()}`, type: `action-${kind}`, instanceId: details.instanceId, severity: "info", title, body: "Aus der Ferne ausgelöst." });
     },

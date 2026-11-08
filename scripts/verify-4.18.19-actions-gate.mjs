@@ -15,6 +15,8 @@ import { LoginThrottle } from "../lib/login-throttle.mjs";
 // is exercised directly; wiring is checked in source.
 const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const server = read("installer-server.mjs"), gatewaySource = read("lib/remote-gateway.mjs"), app = read("lib/remote-app.jsx");
+// Block 18b: the action bodies live in lib/gateway-actions.mjs (local and remote servers).
+const actionsSource = read("lib/gateway-actions.mjs");
 const throws = (fn, code) => { try { fn(); return false; } catch (error) { return error.code === code; } };
 
 let clock = 0;
@@ -70,8 +72,8 @@ const checks = [
   ["only say, kick and restart are new writes; no free RCON, start, stop, config or vault", REMOTE_WRITE_ROUTES.length === 8 && REMOTE_ROUTES.filter(route => route.startsWith("POST")).join() === REMOTE_WRITE_ROUTES.join() && !REMOTE_ROUTES.some(route => /rcon|\/start|\/stop|config|vault|credential|users/.test(route)) && !/\/rcon\/|\/stop|\/start/.test(app)],
   ["needs server.manage, an MFA session, the gateway switch and the user's switch; both off by default", gatewaySource.includes("remote.mfa && hasPermission(remote.role, 'server.manage')") && server.includes("remoteState.settings.actions && user && !user.disabled && user.remoteAccess === true && user.remoteActions === true && hasPermission(user.role, \"server.manage\")") && server.includes("proxyDomain: null, actions: false") && server.includes("remoteActions: row?.remoteActions === true")],
   ["over the public proxy only with the TOTP login every role has there; audit marks it", gatewaySource.includes("...(policy()?.proxy === true ? { proxy: true } : {})") && gatewaySource.includes("if (!user.totpEnabled && (proxy || mfaRoles.includes(user.role)))")],
-  ["every action is audited with the user and marked as remote in the services", gatewaySource.includes("audit('warn', `remote.action.${kind}`, { ...details, ok: true })") && gatewaySource.includes("audit('warn', `remote.action.${kind}`, { ...details, ok: false, code })") && server.includes("`remote:${actor}`") && server.includes('audit("warn", "instance.restart", { instanceId: id, actor: `remote:${actor}` })')],
-  ["kick goes through the verified slot+name kick; the player list hides IPs and GUIDs", server.includes("rconService.kick(id, { slot: target.slot, name: target.name, reason: target.reason }") && server.includes("map(({ slot, name, ping, score, bot }) => ({ slot, name, ping, score, bot }))")],
+  ["every action is audited with the user and marked as remote in the services", gatewaySource.includes("audit('warn', `remote.action.${kind}`, { ...details, ok: true })") && gatewaySource.includes("audit('warn', `remote.action.${kind}`, { ...details, ok: false, code })") && (server + actionsSource).includes("`remote:${actor}`") && (server.includes('audit("warn", "instance.restart", { instanceId: id, actor: `remote:${actor}` })') || (actionsSource.includes("audit('warn', 'instance.restart', { instanceId: id, actor: `remote:${actor}` })") && server.includes("...createGatewayActions({ resolve: monitorInstance, audit,")))],
+  ["kick goes through the verified slot+name kick; the player list hides IPs and GUIDs", (server.includes("rconService.kick(id, { slot: target.slot, name: target.name, reason: target.reason }") || actionsSource.includes("side.rcon.kick(inner, { slot: request.slot, name: request.name, reason: request.reason }")) && (server + actionsSource).includes("map(({ slot, name, ping, score, bot }) => ({ slot, name, ping, score, bot }))")],
   ["logout ends the step-up", gatewaySource.includes("if (current) actionGuard.revoke(current.sessionId);")],
 ];
 for (const [name, pass] of checks) console.log(`${pass ? "PASS" : "FAIL"} ${name}`);
