@@ -4,7 +4,10 @@ import fs from 'node:fs/promises';
 import {
   probeCommand, parseProbe, makeDirectoriesCommand, startCoreCommand, parsePid, signalCommand,
   getinfoProbeCommand, diskFreeCommand, parseDiskFree, statCommand, parseStat, recoverHomeCommand,
+  rconExchangeCommand, parseRconFrames, getstatusProbeCommand, removeRconFilesCommand,
 } from '../lib/remote-commands.mjs';
+import dgram from 'node:dgram';
+import { buildRconPacket } from '../lib/rcon-protocol.mjs';
 import { createLoopbackServer, buildFakeCore, loopbackAvailable } from './support/loopback-transport.mjs';
 import { startFakeCod4xServer } from './support/fake-cod4x-udp.mjs';
 
@@ -206,4 +209,123 @@ test('recoverHomeCommand takes only a home directly below the root and a plain t
   assert.match(recoverHomeCommand('/srv/cod4x', '/srv/cod4x/inst-1', 'abcdef12-0000'), /^mkdir -p -m 0700 -- '\/srv\/cod4x\/\.recovery' && \[ ! -e /);
   for (const home of ['/srv/cod4x', '/srv/cod4x/a/b', '/srv/other/inst-1', '/srv/cod4x/Inst', '/srv/cod4x/../x']) assert.ok(['REMOTE_PATH_INVALID', 'REMOTE_ARGUMENT_INVALID'].includes(code(() => recoverHomeCommand('/srv/cod4x', home, 'abcdef12-0000'))), home);
   for (const token of ['', 'short', 'ABCDEFGH', 'abc def 12', 'a;b;c;d;e;f', "x'y'z'w'v'u", 'a'.repeat(65), 5, undefined]) assert.equal(code(() => recoverHomeCommand('/srv/cod4x', '/srv/cod4x/inst-1', token)), 'REMOTE_ARGUMENT_INVALID', String(token));
+});
+
+// ---- Block 18b: RCON over ssh ------------------------------------------------
+const PASSWORD = 'Sup3rSecretPw';
+// A UDP responder that answers every datagram with the given list of datagrams.
+async function responder(t, replies) {
+  const socket = dgram.createSocket('udp4');
+  const received = [];
+  socket.on('message', (message, remote) => { received.push(Buffer.from(message)); for (const reply of replies) socket.send(reply, remote.port, remote.address); });
+  await new Promise(resolve => socket.bind(0, '127.0.0.1', resolve));
+  t.after(() => socket.close());
+  return { port: socket.address().port, received };
+}
+
+test('parseRconFrames reads length-prefixed frames and refuses a broken stream', () => {
+  const frame = data => Buffer.concat([Buffer.from([0, 0, 0, data.length]), data]);
+  assert.deepEqual(parseRconFrames(Buffer.concat([frame(Buffer.from('ab')), frame(Buffer.from('c'))])).map(String), ['ab', 'c']);
+  assert.deepEqual(parseRconFrames(Buffer.alloc(0)), []);
+  assert.equal(code(() => parseRconFrames(Buffer.from([0, 0, 0, 5, 1]))), 'REMOTE_RCON_REPLY_INVALID');
+  assert.equal(code(() => parseRconFrames(Buffer.from([0, 0]))), 'REMOTE_RCON_REPLY_INVALID');
+});
+
+test('rconExchangeCommand and getstatusProbeCommand refuse a bad port; removeRconFilesCommand a bad home', () => {
+  for (const bad of [0, 70000, '28960', 1.5]) {
+    assert.equal(code(() => rconExchangeCommand(bad)), 'REMOTE_ARGUMENT_INVALID');
+    assert.equal(code(() => getstatusProbeCommand(bad)), 'REMOTE_ARGUMENT_INVALID');
+  }
+  assert.equal(code(() => removeRconFilesCommand('relative/home')), 'REMOTE_PATH_INVALID');
+  assert.equal(code(() => removeRconFilesCommand('/srv/../etc')), 'REMOTE_PATH_INVALID');
+});
+
+test('the rcon command line holds no secret and has no bash branch', () => {
+  const command = rconExchangeCommand(28960);
+  assert.ok(!command.includes(PASSWORD));
+  assert.doesNotMatch(command, /\/dev\/udp|bash/);
+  assert.match(command, /python3/);
+});
+
+test('rconExchangeCommand sends the stdin packet and returns every reply datagram', { skip }, async t => {
+  const loopback = await server(t);
+  const replies = ['print\nfirst ', 'print\nsecond ', 'print\nthird'].map(text => Buffer.concat([Buffer.from([255, 255, 255, 255]), Buffer.from(text)]));
+  const udp = await responder(t, replies);
+  const packet = buildRconPacket(Buffer.from(PASSWORD), 'status');
+  const result = await loopback.session.exec(rconExchangeCommand(udp.port), { stdin: packet, timeoutMs: 8000 });
+  assert.equal(result.code, 0, result.stderr.toString());
+  assert.deepEqual(parseRconFrames(result.stdout).map(frame => frame.toString('latin1')), replies.map(reply => reply.toString('latin1')));
+  assert.deepEqual(udp.received, [packet], 'exactly the stdin packet, as one datagram');
+  assert.ok(loopback.session.calls.every(command => !command.includes(PASSWORD)));
+});
+
+test('silence ends the collection after about 150 ms, not after the full 1.5 s', { skip }, async t => {
+  const loopback = await server(t);
+  const udp = await responder(t, [Buffer.from('\xff\xff\xff\xffprint\nok', 'latin1')]);
+  const started = Date.now();
+  const result = await loopback.session.exec(rconExchangeCommand(udp.port), { stdin: buildRconPacket(Buffer.from(PASSWORD), 'status'), timeoutMs: 8000 });
+  assert.equal(result.code, 0);
+  assert.ok(Date.now() - started < 1200, `took ${Date.now() - started} ms`);
+});
+
+test('no reply gives exit 4, a missing python3 exit 3, both with empty output', { skip }, async t => {
+  const loopback = await server(t);
+  const silent = await startFakeCod4xServer({ silent: true });
+  t.after(() => silent.close());
+  const none = await loopback.session.exec(rconExchangeCommand(silent.port), { stdin: buildRconPacket(Buffer.from(PASSWORD), 'status'), timeoutMs: 8000 });
+  assert.deepEqual([none.code, none.stdout.length], [4, 0]);
+  const tool = await loopback.session.exec(`PATH=/nonexistent; export PATH; ${rconExchangeCommand(silent.port)}`, { stdin: Buffer.from('x'), timeoutMs: 8000 });
+  assert.deepEqual([tool.code, tool.stdout.length], [3, 0]);
+});
+
+test('an empty or oversized stdin packet is refused with exit 5 and nothing is sent', { skip }, async t => {
+  const loopback = await server(t);
+  const udp = await responder(t, [Buffer.from('x')]);
+  for (const stdin of [null, Buffer.alloc(1401, 0x41)]) {
+    const result = await loopback.session.exec(rconExchangeCommand(udp.port), { stdin, timeoutMs: 8000 });
+    assert.equal(result.code, 5);
+  }
+  assert.equal(udp.received.length, 0);
+});
+
+test('replies are capped at 65536 bytes', { skip }, async t => {
+  const loopback = await server(t);
+  const big = Buffer.alloc(30000, 0x61);
+  const udp = await responder(t, [big, big, big, big]);
+  const result = await loopback.session.exec(rconExchangeCommand(udp.port), { stdin: buildRconPacket(Buffer.from(PASSWORD), 'status'), timeoutMs: 8000 });
+  assert.equal(result.code, 0);
+  const frames = parseRconFrames(result.stdout);
+  assert.equal(frames.length, 2);
+  assert.ok(frames.reduce((sum, frame) => sum + frame.length, 0) <= 65536);
+});
+
+test('the real exchange against the fake CoD4x core runs a command with the password from stdin', { skip }, async t => {
+  const loopback = await server(t);
+  const fake = await startFakeCod4xServer({ password: PASSWORD, hostname: 'Remote Gate' });
+  t.after(() => fake.close());
+  const result = await loopback.session.exec(rconExchangeCommand(fake.port), { stdin: buildRconPacket(Buffer.from(PASSWORD), 'serverinfo'), timeoutMs: 8000 });
+  assert.match(parseRconFrames(result.stdout).map(frame => frame.toString('latin1')).join(''), /Remote Gate/);
+});
+
+test('getstatusProbeCommand returns the status reply', { skip }, async t => {
+  const loopback = await server(t);
+  const fake = await startFakeCod4xServer({ hostname: 'Status Gate', statusPlayers: [{ score: 3, ping: 40, name: 'Alice' }] });
+  t.after(() => fake.close());
+  const answer = await loopback.session.exec(getstatusProbeCommand(fake.port), { timeoutMs: 8000 });
+  assert.match(answer.stdout.toString('latin1'), /statusResponse[\s\S]*Status Gate[\s\S]*Alice/);
+});
+
+test('removeRconFilesCommand deletes rcon-*.cfg in main and nothing else, with a hostile home path inert', { skip }, async t => {
+  const loopback = await server(t);
+  const home = loopback.path(`h o'me $(touch MARKER)`);
+  await fs.mkdir(`${home}/main/sub`, { recursive: true });
+  for (const name of ['main/rcon-1.cfg', 'main/rcon-abc.cfg', 'main/server.cfg', 'main/sub/rcon-2.cfg', 'rcon-3.cfg']) await fs.writeFile(`${home}/${name}`, 'x');
+  const result = await loopback.session.exec(removeRconFilesCommand(home));
+  assert.equal(result.code, 0, result.stderr.toString());
+  assert.deepEqual((await fs.readdir(`${home}/main`)).sort(), ['server.cfg', 'sub']);
+  assert.deepEqual(await fs.readdir(`${home}/main/sub`), ['rcon-2.cfg']);
+  assert.deepEqual((await fs.readdir(home)).sort(), ['main', 'rcon-3.cfg']);
+  await assert.rejects(fs.stat(loopback.path('MARKER')), { code: 'ENOENT' });
+  const missing = await loopback.session.exec(removeRconFilesCommand(loopback.path('nohome')));
+  assert.equal(missing.code, 0, 'a home without main has nothing to sweep');
 });

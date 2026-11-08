@@ -117,11 +117,11 @@ export async function createLoopbackServer() {
   const session = {
     hostKeySha256: 'loopback',
     calls,
-    exec(command, { timeoutMs = 30_000, maxBytes = 256 * 1024 } = {}) {
+    exec(command, { timeoutMs = 30_000, maxBytes = 256 * 1024, stdin = null } = {}) {
       if (typeof command !== 'string' || !command || command.includes('\u0000')) throw Object.assign(new Error('REMOTE_ARGUMENT_INVALID'), { code: 'REMOTE_ARGUMENT_INVALID' });
       calls.push(command);
       return new Promise((resolve, reject) => {
-        const child = spawn('sh', ['-c', command], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: root, LANG: 'C' } });
+        const child = spawn('sh', ['-c', command], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: root, LANG: 'C' } });
         const stdout = [], stderr = [];
         let kept = 0, truncated = false, finished = false;
         const finish = (settle, value) => { if (finished) return; finished = true; clearTimeout(timer); settle(value); };
@@ -133,6 +133,9 @@ export async function createLoopbackServer() {
           kept += part.length; target.push(Buffer.from(part));
           if (part.length < chunk.length) truncated = true;
         };
+        // like the SSH transport: stdin gets the given bytes (or nothing) and is closed
+        child.stdin.on('error', () => {});
+        if (stdin) child.stdin.end(stdin); else child.stdin.end();
         child.stdout.on('data', collect(stdout));
         child.stderr.on('data', collect(stderr));
         child.on('error', () => finish(reject, Object.assign(new Error('REMOTE_CONNECT_FAILED'), { code: 'REMOTE_CONNECT_FAILED' })));
