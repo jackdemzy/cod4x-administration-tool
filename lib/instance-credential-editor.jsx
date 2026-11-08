@@ -7,7 +7,8 @@ const KINDS = ['rcon', 'master', 'join', 'b3db'];
 const ERROR_CODES = new Set(['VAULT_LOCKED', 'VAULT_CONFLICT', 'VAULT_EXISTS', 'VAULT_OPERATION_BUSY', 'VAULT_UNLOCK_FAILED',
   'VAULT_PASSPHRASE_INVALID', 'CREDENTIAL_INVALID', 'INSTANCE_RUNTIME_BUSY', 'INSTANCE_OPERATION_BUSY']);
 
-export function InstanceCredentialEditor({ instance, request, de }) {
+// Block 18b: kinds and basePath for remote servers (rcon and b3db under /api/remote-instances/<id>).
+export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS, basePath = null, remote = false }) {
   const [credentials, setCredentials] = useState(null), [busy, setBusy] = useState(false);
   const [error, setError] = useState(''), [message, setMessage] = useState('');
   const mounted = useRef(true), operation = useRef(false), passphrase = useRef(null);
@@ -39,7 +40,7 @@ export function InstanceCredentialEditor({ instance, request, de }) {
     if (!response.ok) throw Object.assign(new Error('Credential operation failed'), { code: ERROR_CODES.has(data.code) ? data.code : 'CREDENTIAL_OPERATION_FAILED' });
     return data;
   }
-  const route = `/api/instances/${encodeURIComponent(instance.id)}/credentials`;
+  const route = `${basePath || `/api/instances/${encodeURIComponent(instance.id)}`}/credentials`;
   async function action(kind, credentialKind) {
     if (operation.current) return;
     operation.current = true; setBusy(true); setError(''); setMessage('');
@@ -84,7 +85,7 @@ export function InstanceCredentialEditor({ instance, request, de }) {
   function submit(event, kind, credentialKind) { event.preventDefault(); void action(kind, credentialKind); }
   return <details style={{ marginTop: 12 }}>
     <summary>{de ? 'Zugangsdaten – verschlüsselter Tresor' : 'Credentials – encrypted vault'}</summary>
-    <p>{de ? 'RCON-Passwort und Master-Token werden beim nächsten Start kurzlebig an den Dedicated Core übergeben (Tresor muss entsperrt sein). Der Master-Token ist optional und blockiert den Start nie. Das Join-Passwort ist noch nicht an die Runtime angebunden. „Gespeichert“ bedeutet nicht verbunden oder registriert.' : 'The RCON password and master token are passed briefly to the Dedicated Core on the next start (vault must be unlocked). The master token is optional and never blocks the start. The join password is not wired to the runtime yet. “Stored” does not mean connected or registered.'}</p>
+    {remote ? <p>{de ? 'Das RCON-Passwort geht beim nächsten Start als private Datei auf den Server (nur für den Server-Benutzer lesbar, Tresor muss entsperrt sein) und wird gelöscht, sobald der Core sie gelesen hat. Nur bei gestopptem Server ändern. Das B3-Datenbank-Passwort nutzt die B3-Verwaltung für die Datenbank auf dem Server.' : 'At the next start the RCON password goes to the server as a private file (readable only by the server user, the vault must be unlocked) and is deleted once the core has read it. Change it only with the server stopped. The B3 database password is used by B3 administration for the database on the server.'}</p> : <p>{de ? 'RCON-Passwort und Master-Token werden beim nächsten Start kurzlebig an den Dedicated Core übergeben (Tresor muss entsperrt sein). Der Master-Token ist optional und blockiert den Start nie. Das Join-Passwort ist noch nicht an die Runtime angebunden. „Gespeichert“ bedeutet nicht verbunden oder registriert.' : 'The RCON password and master token are passed briefly to the Dedicated Core on the next start (vault must be unlocked). The master token is optional and never blocks the start. The join password is not wired to the runtime yet. “Stored” does not mean connected or registered.'}</p>}
     <button disabled={busy} onClick={() => action('load')}>{de ? 'Status laden / aktualisieren' : 'Load / refresh status'}</button>
     {error && <p role="alert">{error}</p>}
     {message && <p role="status">{message}</p>}
@@ -95,8 +96,9 @@ export function InstanceCredentialEditor({ instance, request, de }) {
     </form>
     <p>{de ? 'Das Entsperrpasswort wird nicht gespeichert. Nach einem Backend-Neustart erneut entsperren. Ohne dieses Passwort ist keine Entschlüsselung möglich.' : 'The unlock passphrase is not saved. Unlock again after a backend restart. Without this passphrase the vault cannot be decrypted.'}</p>
     <button disabled={busy || !unlocked} onClick={() => action('lock')}>{de ? 'Tresor sperren' : 'Lock vault'}</button>
-    {active && <p>{de ? 'RCON-Passwort, Master-Token und Join-Passwort nur bei vollständig gestopptem Server ändern. Das B3-Datenbank-Passwort kann bei laufendem Server geändert werden.' : 'Change the RCON password, master token and join password only with the server fully stopped. The B3 database password can be changed while the server runs.'}</p>}
-    {KINDS.map(kind => { const warning = sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de); return <form key={kind} onSubmit={event => submit(event, 'save', kind)} style={{ marginTop: 10 }}>
+    {active && remote && <p>{de ? 'Das RCON-Passwort nur bei gestopptem Server ändern. Das B3-Datenbank-Passwort kann bei laufendem Server geändert werden.' : 'Change the RCON password only with the server stopped. The B3 database password can be changed while the server runs.'}</p>}
+    {active && !remote && <p>{de ? 'RCON-Passwort, Master-Token und Join-Passwort nur bei vollständig gestopptem Server ändern. Das B3-Datenbank-Passwort kann bei laufendem Server geändert werden.' : 'Change the RCON password, master token and join password only with the server fully stopped. The B3 database password can be changed while the server runs.'}</p>}
+    {kinds.map(kind => { const warning = sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de); return <form key={kind} onSubmit={event => submit(event, 'save', kind)} style={{ marginTop: 10 }}>
       <label>{labels[kind]} <input ref={input => { secrets.current[kind] = input; }} type="password" autoComplete="new-password" minLength={kind === 'master' ? 32 : 8} maxLength={kind === 'master' ? 32 : kind === 'join' ? 64 : 128} required disabled={busy || !unlocked || (active && kind !== 'b3db')} /></label>
       <span> {credentials?.[kind]?.configured === true ? (de ? 'Gespeichert' : 'Stored') : credentials?.[kind]?.configured === false ? (de ? 'Nicht eingerichtet' : 'Not configured') : (de ? 'Unbekannt' : 'Unknown')}</span>
       <button type="submit" disabled={busy || !unlocked || (active && kind !== 'b3db')}>{de ? 'Verschlüsselt speichern' : 'Save encrypted'}</button>

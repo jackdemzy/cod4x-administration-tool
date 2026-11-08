@@ -96,4 +96,12 @@ test('Block 18b: a running remote server gets the console and the player list ov
   const stopped = render('RemoteInstanceTools', { de: false, entry: entry('STOPPED'), request: noFetch });
   assert.doesNotMatch(stopped, /Server console/);
   assert.match(stopped, /Start the server to use RCON/);
+  // credentials and B3 through its database do not need a running server
+  for (const html of [running, stopped]) {
+    assert.match(html, /B3 (Datenbank|database)/);
+    assert.match(html, /B3 (A|a)dministration/);
+    assert.doesNotMatch(html, /Master-Token|Master token|Join/);
+    assert.ok(!/type="password"[^>]*name="password"/.test(html));
+  }
+  assert.match(stopped, /RCON password goes to the server as a private file/);
 });
