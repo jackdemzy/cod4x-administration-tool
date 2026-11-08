@@ -24,7 +24,7 @@ registerRemoteLinuxRoutes({ app: fakeApp, requirePermission: permission => ({ pe
 const bound = new Map(REMOTE_LINUX_BINDINGS.flatMap(entry => entry.routes.map(route => [route, entry.permission])));
 const plain = registered.filter(entry => typeof entry.route === "string");
 const exec = remoteFiles.flatMap(file => [...code(file).matchAll(/\bsession\.exec\(\s*(\w+\()?/g)].map(match => [file, match[1] ? match[1].slice(0, -1) : "<not a builder>"]));
-const BUILDERS = ["probeCommand", "makeDirectoriesCommand", "startCoreCommand", "signalCommand", "getinfoProbeCommand", "diskFreeCommand", "statCommand", "recoverHomeCommand", "removeRconFilesCommand", "rconExchangeCommand", "getstatusProbeCommand"];
+const BUILDERS = ["probeCommand", "makeDirectoriesCommand", "startCoreCommand", "signalCommand", "getinfoProbeCommand", "diskFreeCommand", "statCommand", "recoverHomeCommand", "removeRconFilesCommand", "rconExchangeCommand", "getstatusProbeCommand", "consoleTailCommand"];
 const transport = code("lib/ssh-transport.mjs");
 const server = read("installer-server.mjs");
 
