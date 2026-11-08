@@ -77,22 +77,64 @@ test('B3 database: two saves of the same target at the same moment let exactly o
   assert.equal(outcomes.find(outcome => outcome.status === 'rejected').reason.code, 'B3_DATABASE_TARGET_SHARED');
 });
 
-test('B3 database: a sibling whose b3 directory is a symlink is ignored, not followed', async t => {
+test('B3 database: a sibling whose b3 directory is a symlink is not followed; its target is unknown, so saving fails closed', async t => {
   const { service, file } = await databaseFixture(t);
   const outside = path.join(path.dirname(path.dirname(file('server-a'))), 'outside-b3');
   await fs.mkdir(outside, { recursive: true });
-  await fs.writeFile(path.join(outside, 'database.json'), JSON.stringify({ version: 1, settings: SETTINGS, mysqlEnabled: true }));
+  await fs.writeFile(path.join(outside, 'database.json'), JSON.stringify({ version: 1, settings: { ...SETTINGS, database: 'elsewhere' }, mysqlEnabled: true }));
   await fs.symlink(outside, path.dirname(file('server-a')), 'dir');
+  await assert.rejects(service.save('server-b', SETTINGS), error => error.code === 'B3_DATABASE_SIBLING_UNREADABLE' && error.otherInstanceId === 'server-a');
+  assert.equal((await service.read('server-b')).settings, null, 'nothing was stored');
+});
+
+test('B3 database: a corrupt database.json of a sibling fails closed (issue #30), for save and for the B3 start check', async t => {
+  const { service, file, enable } = await databaseFixture(t);
+  await service.save('server-a', SETTINGS);
+  await service.save('server-b', { ...SETTINGS, database: 'b3_two' });
+  await enable('server-b');
+  await fs.writeFile(file('server-a'), '{ not json');
+  await assert.rejects(service.save('server-b', { ...SETTINGS, database: 'b3_three' }), error => error.code === 'B3_DATABASE_SIBLING_UNREADABLE' && error.otherInstanceId === 'server-a' && !/host|password|username/i.test(JSON.stringify(error)));
+  await assert.rejects(service.sharedTarget('server-b'), { code: 'B3_DATABASE_SIBLING_UNREADABLE' });
+  // Invalid settings inside valid JSON are unknown as well.
+  await fs.writeFile(file('server-a'), JSON.stringify({ version: 1, settings: { host: 'bad host!', port: 3306, database: 'b3', username: 'b3' } }));
+  await assert.rejects(service.sharedTarget('server-b'), { code: 'B3_DATABASE_SIBLING_UNREADABLE' });
+  // Removing the broken settings gives the target back.
+  await fs.rm(file('server-a'));
+  assert.equal(await service.sharedTarget('server-b'), null);
+});
+
+test('B3 database: a sibling without b3 directory or database.json claims nothing', async t => {
+  const { service } = await databaseFixture(t, ['server-a', 'server-b', 'server-c']);
   await service.save('server-b', SETTINGS);
   assert.equal((await service.read('server-b')).settings.database, 'b3');
 });
 
-test('B3 database: a corrupt database.json of a sibling does not block this instance', async t => {
-  const { service, file } = await databaseFixture(t);
-  await service.save('server-a', SETTINGS);
+test('B3 database: a known match wins over an unreadable sibling', async t => {
+  const { service, file } = await databaseFixture(t, ['server-a', 'server-b', 'server-c']);
+  await service.save('server-c', SETTINGS);
+  await service.save('server-a', { ...SETTINGS, database: 'b3_a' });
   await fs.writeFile(file('server-a'), '{ not json');
-  await service.save('server-b', SETTINGS);
-  assert.equal(await service.sharedTarget('server-b'), null);
+  await assert.rejects(service.save('server-b', SETTINGS), error => error.code === 'B3_DATABASE_TARGET_SHARED' && error.otherInstanceId === 'server-c');
+});
+
+test('B3 database: the target cannot change while B3 runs on MySQL (issue #29); unchanged re-save and SQLite stay allowed', async t => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-multi-db-run-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const instance = { id: 'server-a', homePath: path.join(root, 'server-a') };
+  await fs.mkdir(instance.homePath, { recursive: true });
+  let running = false;
+  const service = new InstanceB3DatabaseService({ store: { get: () => instance, list: () => [instance] }, credentials: { instanceStatus: async () => ({}) }, environment: {}, b3IsRunning: async () => running });
+  const file = path.join(instance.homePath, 'b3', 'database.json');
+  running = true;
+  await service.save('server-a', SETTINGS); // first settings while B3 runs on SQLite: allowed
+  await service.save('server-a', { ...SETTINGS, database: 'b3_other' }); // not on MySQL yet: allowed
+  const document = JSON.parse(await fs.readFile(file, 'utf8'));
+  await fs.writeFile(file, JSON.stringify({ ...document, mysqlEnabled: true }));
+  await assert.rejects(service.save('server-a', SETTINGS), { code: 'B3_RUNNING' });
+  assert.equal((await service.read('server-a')).settings.database, 'b3_other', 'the running target stays saved');
+  await service.save('server-a', { ...SETTINGS, database: 'b3_other', username: 'rebound' }); // same target (user only): allowed
+  running = false;
+  await service.save('server-a', SETTINGS);
 });
 
 test('B3 start: blocked while another instance runs B3 on the same MySQL database, nothing written', async t => {
