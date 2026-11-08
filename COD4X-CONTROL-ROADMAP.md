@@ -595,7 +595,9 @@ Pro Server separat:
 
 ## Block 18 – Remote Linux / SSH
 
-> Status 4.18.23: implemented (agentless, ssh2). Gate with in-process SSH server passes; the native check against a real sshd and core is still open. RCON, B3 and the phone gateway for remote servers are not part of this block.
+> Status 4.18.23: implemented (agentless, ssh2). Gate with in-process SSH server passes; the native check against a real sshd and core is still open.
+>
+> Status 4.18.24 (Block 18b): RCON over SSH, B3 through its database (cod4-monitor model), remote servers in monitoring and phone actions. Native RCON steps and B3 against a real MySQL are still open.
 
 Erst nach stabiler lokaler Windows- und Linux-Runtime.
 

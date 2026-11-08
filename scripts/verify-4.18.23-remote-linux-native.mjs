@@ -10,6 +10,8 @@ import { RemoteInstanceManager } from "../lib/remote-instance-manager.mjs";
 import { createRemoteLinuxAdapter } from "../lib/remote-linux-runtime.mjs";
 import { createRemoteFiles } from "../lib/remote-files.mjs";
 import { makeDirectoriesCommand } from "../lib/remote-commands.mjs";
+import { RemoteSessionPool } from "../lib/remote-session-pool.mjs";
+import { RemoteRconClient } from "../lib/remote-rcon-client.mjs";
 
 // Native Block 18 check: a real sshd, a real CoD4x Linux core, a base game that already exists on the server.
 // It runs the whole chain through the same classes the application uses (host store, host-key pinning, SSH
@@ -42,7 +44,8 @@ const id = `gate${crypto.randomBytes(3).toString("hex")}`;
 const root = path.posix.join(env.REMOTE_TEST_ROOT, `run-${id}`);
 const port = 29000 + Math.floor(Math.random() * 900);
 const coreSha256 = crypto.createHash("sha256").update(await fs.readFile(corePath)).digest("hex");
-let manager, hostService;
+let manager, hostService, pool;
+const rconPassword = `Gate${crypto.randomBytes(9).toString("hex")}`;
 
 try {
   const hostStore = new RemoteHostStore({ file: path.join(local, "hosts.json") });
@@ -51,7 +54,10 @@ try {
   await instances.load();
   const credentials = { async withRuntimeCredentials(subject, action) { return action({ privateKey: Buffer.from(keyBytes), passphrase: env.REMOTE_TEST_KEY_PASSPHRASE ? Buffer.from(env.REMOTE_TEST_KEY_PASSPHRASE) : undefined }); } };
   hostService = new RemoteHostService({ store: hostStore, credentials });
-  manager = new RemoteInstanceManager({ instances, hosts: hostService, state: new RemoteStateStore({ root: path.join(local, "state") }), backupRoot: path.join(local, "backups") });
+  // Block 18b (4.18.24): a random RCON password for this run; it reaches the core only through the private exec file.
+  const provisioned = [];
+  manager = new RemoteInstanceManager({ instances, hosts: hostService, state: new RemoteStateStore({ root: path.join(local, "state") }), backupRoot: path.join(local, "backups"),
+    credentials: { async withRuntimeCredentials(subject, action) { return action({ rcon: Buffer.from(rconPassword) }); } }, onProvisioned: (instanceId, runId, info) => provisioned.push(info) });
   const lab = { id: "native", label: "native gate", host: env.REMOTE_TEST_HOST, port: Number(env.REMOTE_TEST_PORT || 22), username: env.REMOTE_TEST_USER };
   await hostService.createHost(lab);
 
@@ -94,6 +100,23 @@ try {
   let logs = null;
   const logged = await until(async () => { logs = await manager.logs(id); return (logs.stdout + logs.console).length > 0; }, 30000);
   check("Logs: output of this run", logged, `${(logs?.stdout || "").length} bytes stdout, ${(logs?.console || "").length} bytes console`);
+  // Block 18b: RCON over SSH with the password from the private file; the file is gone, the password is no argument
+  check("RCON password provisioned for this run", provisioned.at(-1)?.rcon === true, JSON.stringify(provisioned.at(-1) || null));
+  pool = new RemoteSessionPool({ connect: hostId => hostService.connect(hostId) });
+  const rcon = new RemoteRconClient({ pool, hostId: "native", port });
+  const serverinfo = await rcon.execute(Buffer.from(rconPassword), "serverinfo").then(result => result.text, error => `ERROR ${error.code}`);
+  check("RCON over SSH: serverinfo answers with this server's hostname", serverinfo.includes(`Gate ${id}`), serverinfo.slice(0, 80));
+  const wrong = await rcon.execute(Buffer.from("WrongPassword1"), "serverinfo").then(() => null, error => error.code);
+  check("RCON over SSH: a wrong password is refused", wrong === "RCON_AUTH_FAILED", String(wrong));
+  await pool.use("native", async ({ session, uid, gid }) => {
+    const adapter = await createRemoteLinuxAdapter(session, { uid, gid });
+    try {
+      const left = (await adapter.filesystem.readdir(`${root}/${id}/main`)).filter(name => /^rcon-.*\.cfg$/.test(name));
+      check("the private password file is gone after the start", left.length === 0, left.join(","));
+      const info = await adapter.inspectProcess((await manager.status(id)).runtime.pid);
+      check("the password is not in the core's command line on the server", Array.isArray(info.argv) && !info.argv.some(arg => arg.includes(rconPassword)) && info.argv.some(arg => /^rcon-.*\.cfg$/.test(arg)));
+    } finally { adapter.sftp.end?.(); }
+  });
   await manager.stop(id);
   check("Stop: the process is gone", (await manager.status(id)).runtime.status === "STOPPED");
   await manager.restart(id);
@@ -117,6 +140,7 @@ try {
   check("native remote Linux run completed", false, `${error.code || ""} ${error.message}`.trim());
 } finally {
   try { await manager?.stop(id); } catch { /* not running */ }
+  pool?.closeAll();
   await fs.rm(local, { recursive: true, force: true });
 }
 if (checks.some(([, ok]) => !ok)) { console.log(`Leftover on the server for inspection: ${root}`); process.exit(1); }

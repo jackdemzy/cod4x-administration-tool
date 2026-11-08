@@ -1,6 +1,6 @@
 # COD4X CONTROL – Features
 
-Version 4.18.23 · development source, not a release
+Version 4.18.24 · development source, not a release
 
 - Desktop app for Windows and Linux
 - Install, configure, run and monitor CoD4x dedicated servers
@@ -419,3 +419,7 @@ Die npm-Abhängigkeiten stehen unter eigenen, mit der AGPL vereinbaren Lizenzen 
 ## 4.18.23 remote Linux note
 
 4.18.23 implements roadmap Block 18. A Windows CONTROL PC can install, update, start, stop, restart, read the logs of, check the health of, configure, back up and restore CoD4x servers on a Linux machine over SSH, with nothing installed on that machine (SFTP plus a fixed list of commands, library `ssh2`). Login is by key only (no password, no agent); the key lives in the encrypted vault. The first contact with a host never logs in: the SHA-256 fingerprint is shown and must be confirmed as exactly that value, and a changed key afterwards is a hard stop. The game core never runs as root. The base game must already exist on the server (it is only read); only the core and the instance directory are uploaded. RCON, the console, B3, master status, monitoring and the phone gateway are not available for remote servers yet (`REMOTE_RCON_UNSUPPORTED`, `REMOTE_B3_UNSUPPORTED`). Gate: `scripts/verify-4.18.23-remote-linux-gate.mjs` (in-process SSH server and a loopback server); the check against a real sshd and a real core is `scripts/verify-4.18.23-remote-linux-native.mjs` and has not been run yet.
+
+## 4.18.24 remote RCON and B3 note
+
+4.18.24 implements Block 18b and closes the gaps Block 18 left for remote Linux servers. RCON (console, online players, kick) runs over SSH: a fixed python3 command on the server sends the packet to 127.0.0.1 there; the packet with the password travels over stdin and never appears in a command line. The RCON password reaches the remote core through a private file (0600) loaded with `+exec` and deleted once the core has read it. B3 is not started by CONTROL on remote servers; as in cod4-monitor (FloMtz2312, AGPL-3.0), CONTROL manages B3's own MySQL/MariaDB database over the network (players, admins, groups, penalties, ban, unban). The database helper has no TLS: use a VPN or Tailscale. Remote servers appear in monitoring (ids `rmt_<id>`) and the phone gateway offers the same actions as for local servers. Gate: `scripts/verify-4.18.24-remote-rcon-gate.mjs`; the native RCON steps are part of `scripts/verify-4.18.23-remote-linux-native.mjs` and have not been run yet.
