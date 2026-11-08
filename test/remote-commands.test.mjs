@@ -100,6 +100,8 @@ test('startCoreCommand runs a detached core, prints its own pid, passes every ar
   const pid = parsePid(result.stdout);
   t.after(() => { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } });
   assert.ok(alive(pid), 'the printed pid is a live process');
+  // the wrapper prints its own pid and then execs the core in place: same pid, exe becomes the core a moment later
+  await until(async () => (await fs.readlink(`/proc/${pid}/exe`).catch(() => null)) === core);
   assert.equal(await fs.readlink(`/proc/${pid}/exe`), core, 'the pid is the core itself, not a wrapper');
   assert.deepEqual((await fs.readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').slice(0, -1), [core, ...args]);
   assert.ok(await until(async () => (await fs.readFile(stdoutFile, 'utf8')).includes('\n')), 'output reaches the stdout file');
