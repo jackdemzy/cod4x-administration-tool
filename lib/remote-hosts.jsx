@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { InstanceRconConsole } from './instance-rcon-console.jsx';
 import { InstanceOnlinePlayers } from './instance-online-players.jsx';
+import { InstanceCredentialEditor } from './instance-credential-editor.jsx';
+import { InstanceB3Database } from './instance-b3-database.jsx';
+import { InstanceB3Admin } from './instance-b3-admin.jsx';
 
 // Panel for SSH hosts and the servers on them (Block 18). Rules of this file:
 //  - there is no password login anywhere; the only secret fields are the private key (multi-line, uncontrolled) and,
@@ -95,15 +98,21 @@ export function RemoteInstanceRow({ de, entry, busy, onAction }) {
   </li>;
 }
 
-// Block 18b: RCON console and online players of a running remote server, through /api/remote-instances/<id>.
+// Block 18b: everything of one remote server that goes through /api/remote-instances/<id>: the RCON and B3
+// database passwords, the console and online players (running server only), B3 through its database.
 export function RemoteInstanceTools({ de, entry, request }) {
   const { instance, runtime } = entry;
-  if (runtime?.status !== 'RUNNING' || !runtime.pid) return <p>{text(de, 'Server starten, um RCON zu nutzen.', 'Start the server to use RCON.')}</p>;
   const basePath = `/api/remote-instances/${encodeURIComponent(instance.id)}`;
-  const view = { ...instance, runtime };
+  const view = { ...instance, runtime: runtime || { status: 'UNKNOWN' } };
+  const running = runtime?.status === 'RUNNING' && Boolean(runtime.pid);
   return <div>
-    <InstanceRconConsole instance={view} request={request} de={de} basePath={basePath} remote />
-    <InstanceOnlinePlayers instance={view} request={request} de={de} basePath={basePath} />
+    <InstanceCredentialEditor instance={view} request={request} de={de} kinds={['rcon', 'b3db']} basePath={basePath} remote />
+    {running ? <>
+      <InstanceRconConsole instance={view} request={request} de={de} basePath={basePath} remote />
+      <InstanceOnlinePlayers instance={view} request={request} de={de} basePath={basePath} />
+    </> : <p>{text(de, 'Server starten, um RCON zu nutzen.', 'Start the server to use RCON.')}</p>}
+    <InstanceB3Database instance={view} request={request} de={de} basePath={basePath} remote />
+    <InstanceB3Admin instance={view} request={request} de={de} basePath={basePath} remote />
   </div>;
 }
 

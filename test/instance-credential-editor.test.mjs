@@ -42,3 +42,13 @@ test('S7: the stop-the-server banner names only the server credentials', {
   assert.match(html, /RCON-Passwort, Master-Token und Join-Passwort/);
   assert.match(html, /B3-Datenbank-Passwort kann bei laufendem Server geändert werden/);
 });
+
+test('Block 18b: the editor shows only the given kinds and explains the remote RCON password', {
+  skip: nativeCompilerAvailable ? false : 'Shared Windows dependencies do not contain native Linux esbuild; UI renderer verified on Windows separately',
+}, async () => {
+  const render = await renderer();
+  const html = render({ instance: { id: 'srv-1', runtime: { status: 'STOPPED' } }, de: true, remote: true, kinds: ['rcon', 'b3db'], basePath: '/api/remote-instances/srv-1', request: () => { throw new Error('SSR must not fetch'); } });
+  assert.match(html, /RCON/); assert.match(html, /B3-Datenbank-Passwort/);
+  assert.doesNotMatch(html, /Master-Token/); assert.doesNotMatch(html, /Join-Passwort/);
+  assert.match(html, /private Datei/);
+});

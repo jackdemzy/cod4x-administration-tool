@@ -125,3 +125,9 @@ test('R5: kicks from B3 rows ask first; ban-and-kick passes the ban reason when 
   const online = await view(base({ players: { total: 1, offset: 0, limit: 50, rows: [{ ...player, online: { slot: 3 } }] }, kickFor: { ...player, online: { slot: 3 } } }));
   assert.match(online, /Tester jetzt vom Server kicken\?/);
 });
+
+test('Block 18b: the admin view takes a base path and explains that changes apply on the server at the next connection', { skip }, async () => {
+  const html = await (await renderer())('InstanceB3Admin', { de: true, remote: true, basePath: '/api/remote-instances/srv-1', instance: { id: 'srv-1' }, request: noFetch, initial: base() });
+  assert.ok(html.includes('Tester'));
+  assert.match(html, /B3 läuft auf dem Server/);
+});

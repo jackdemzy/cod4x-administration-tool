@@ -87,3 +87,18 @@ test('C5: missing columns are shown for an OUTDATED schema', { skip }, async () 
   const html = render('InstanceB3Database', { de: true, instance: { id: 'x' }, request: noFetch, initial: state({ connection: 'OK', schema: 'OUTDATED', code: 'SCHEMA_OUTDATED', missingTables: [], missingColumns: { clients: ['login', 'password'] }, ready: false }) });
   assert.match(html, /Fehlende Spalten: clients \(login, password\)/);
 });
+
+test('Block 18b: the remote form has no migration and no SQLite fallback and warns that the password crosses the network in clear text', { skip }, async () => {
+  const render = await renderer();
+  for (const de of [true, false]) {
+    const html = render('InstanceB3Database', { de, remote: true, basePath: '/api/remote-instances/srv-1', instance: { id: 'srv-1' }, request: noFetch, initial: state({ connection: 'OK', schema: 'PARTIAL', code: null, ready: false }) });
+    assert.doesNotMatch(html, de ? /Migration starten/ : /Start migration/);
+    assert.doesNotMatch(html, /SQLite/);
+    assert.doesNotMatch(html, /eBc-Promod/);
+    assert.match(html, de ? /unverschlüsselt/ : /in clear text/);
+    assert.match(html, de ? /B3 läuft auf dem Server/ : /B3 runs on the server/);
+  }
+  const local = render('InstanceB3Database', { de: true, instance: { id: 'x' }, request: noFetch, initial: state({ connection: 'OK', schema: 'PARTIAL', code: null, ready: false }) });
+  assert.match(local, /Migration starten/);
+  assert.doesNotMatch(local, /unverschlüsselt/);
+});

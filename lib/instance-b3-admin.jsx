@@ -8,7 +8,7 @@ const when = seconds => (seconds ? new Date(seconds * 1000).toISOString().replac
 const TABS = [['players', 'Players'], ['admins', 'Admins'], ['penalties', 'Penalties'], ['commands', 'Commands']];
 const UNITS = { minutes: 1, hours: 60, days: 1440 };
 
-export function InstanceB3Admin({ instance, request, de, initial = null }) {
+export function InstanceB3Admin({ instance, request, de, initial = null, basePath = null, remote = false }) {
   const [state, setState] = useState(initial || { ready: null, tab: 'players' });
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
   const [search, setSearch] = useState(''), [filter, setFilter] = useState({ type: 'any', status: 'active' });
@@ -16,7 +16,7 @@ export function InstanceB3Admin({ instance, request, de, initial = null }) {
   const view = useRef({ search: '', filter: { type: 'any', status: 'active' }, offset: 0 });
   const [ban, setBan] = useState({ kind: 'TempBan', amount: 1, unit: 'days', reason: '', kick: true });
   const mounted = useRef(true);
-  const base = `/api/instances/${encodeURIComponent(instance.id)}`;
+  const base = basePath || `/api/instances/${encodeURIComponent(instance.id)}`;
   const patch = values => { if (mounted.current) setState(current => ({ ...current, ...values })); };
   async function call(route, body) {
     const response = await request(route, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
@@ -66,6 +66,7 @@ export function InstanceB3Admin({ instance, request, de, initial = null }) {
     <tbody>{rows.map(playerRow)}</tbody></table>;
   return <details style={{ marginTop: 12 }}>
     <summary>{de ? 'B3 Administration' : 'B3 administration'}</summary>
+    {remote && <p role="note">{de ? 'B3 läuft auf dem Server. Bans wirken beim nächsten Connect, Gruppen beim nächsten Connect des Spielers; B3 kann die Gruppe verbundener Spieler zurückschreiben. Ein Kick geht sofort über RCON.' : 'B3 runs on the server. Bans apply at the next connection, groups at the player\'s next connection; B3 may write back the group of connected players. A kick goes out at once over RCON.'}</p>}
     {error && <p role="alert">{say(error, de)}</p>}
     {message && <p role="status">{message}</p>}
     {state.ready === false && <p>{de ? 'Die B3-Administration braucht eine MySQL-Datenbank im Zustand „B3 Ready“ (Datenbank-Wizard oben).' : 'B3 administration needs a MySQL database in state “B3 Ready” (database wizard above).'}</p>}

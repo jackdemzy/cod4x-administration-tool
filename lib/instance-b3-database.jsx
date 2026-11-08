@@ -7,12 +7,13 @@ import { B3_DATABASE_MESSAGES, databaseFormKey } from './b3-database-messages.mj
 const MESSAGES = B3_DATABASE_MESSAGES;
 const say = (code, de) => MESSAGES[code]?.[de ? 0 : 1] || code;
 
-export function InstanceB3Database({ instance, request, de, initial = null }) {
+// Block 18b: remote = B3 runs on a remote server; CONTROL only manages its database there (no migration, no SQLite).
+export function InstanceB3Database({ instance, request, de, initial = null, basePath = null, remote = false }) {
   const [state, setState] = useState(initial), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [ebc, setEbc] = useState(false), [phrase, setPhrase] = useState('');
   const mounted = useRef(true);
   const form = useRef({});
-  const base = `/api/instances/${encodeURIComponent(instance.id)}`;
+  const base = basePath || `/api/instances/${encodeURIComponent(instance.id)}`;
   async function call(route, body) {
     const response = await request(route, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
     const data = await response.json();
@@ -20,8 +21,8 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
     return data;
   }
   async function load() {
-    const [database, b3] = await Promise.all([call(`${base}/b3/database`), call(`${base}/b3`)]);
-    if (mounted.current) setState({ database: database.database, b3Running: b3.b3?.runtime?.running === true });
+    const [database, b3] = await Promise.all([call(`${base}/b3/database`), remote ? null : call(`${base}/b3`)]);
+    if (mounted.current) setState({ database: database.database, b3Running: b3?.b3?.runtime?.running === true });
   }
   async function run(action) {
     setBusy(true); setError('');
@@ -39,6 +40,7 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
   const field = (key, label, value) => <label style={{ display: 'block' }}>{label} <input ref={input => { form.current[key] = input; }} defaultValue={value ?? ''} type={key === 'port' ? 'number' : 'text'} disabled={busy} /></label>;
   return <details style={{ marginTop: 12 }}>
     <summary>{de ? 'B3 Datenbank (MySQL/MariaDB)' : 'B3 database (MySQL/MariaDB)'}</summary>
+    {remote && <p role="note">{de ? 'B3 läuft auf dem Server und wird dort eingerichtet; CONTROL verwaltet nur seine Datenbank. Die Datenbank muss von diesem PC aus erreichbar sein. Achtung: Das Passwort geht unverschlüsselt über das Netz, wenn keine VPN- oder Tailscale-Verbindung genutzt wird.' : 'B3 runs on the server and is set up there; CONTROL only manages its database. The database must be reachable from this PC. Warning: the password crosses the network in clear text unless a VPN or Tailscale connection is used.'}</p>}
     <p>{de ? 'Ablauf: Verbindung testen → Schema prüfen → Backup → Migration → B3 Ready. Vor jeder Änderung an einer nicht leeren Datenbank wird ein geprüftes Backup erstellt.' : 'Flow: test connection → check schema → backup → migration → B3 Ready. A verified backup is taken before any change to a non-empty database.'}</p>
     {error && <p role="alert">{say(error, de)}</p>}
     <form key={databaseFormKey(database?.settings)} onSubmit={event => { event.preventDefault(); void save(); }}>
@@ -55,6 +57,7 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
       : `${de ? 'Verbunden. Schema' : 'Connected. Schema'}: ${schema}${check.code ? ` – ${say(check.code, de)}` : ''}`}</p>
     {check?.missingTables?.length > 0 && <p>{de ? 'Fehlende Tabellen: ' : 'Missing tables: '}{check.missingTables.join(', ')}</p>}
     {Object.keys(check?.missingColumns || {}).length > 0 && <p>{de ? 'Fehlende Spalten: ' : 'Missing columns: '}{Object.entries(check.missingColumns).map(([table, columns]) => `${table} (${columns.join(', ')})`).join('; ')}</p>}
+    {!remote && <>
     <fieldset disabled={busy} style={{ marginTop: 8 }}>
       <label><input type="checkbox" checked={ebc} onChange={event => setEbc(event.target.checked)} /> {de ? 'eBc-Promod-Statistikschema einspielen (optional)' : 'Install eBc promod statistics schema (optional)'}</label>
       <p>{de ? 'Warnung: löscht player_core und prestige_log und legt sie neu an. Zum Bestätigen exakt eingeben: ' : 'Warning: drops player_core and prestige_log and recreates them. To confirm, type exactly: '}<code>{EBC_CONFIRMATION}</code></p>
@@ -62,9 +65,10 @@ export function InstanceB3Database({ instance, request, de, initial = null }) {
     </fieldset>
     {state?.b3Running && <p>{de ? 'B3 läuft – Migration erst nach dem Stoppen von B3.' : 'B3 is running – stop B3 before migrating.'}</p>}
     <button disabled={busy || !migratable || state?.b3Running || (ebc && phrase !== EBC_CONFIRMATION)} onClick={() => migrate()}>{de ? 'Migration starten' : 'Start migration'}</button>
-    {database?.mysqlEnabled && !database?.ready && <p role="alert">{de ? 'B3 nutzt MySQL, die Datenbank ist aber nicht bereit: B3 startet erst nach erfolgreichem Test wieder.' : 'B3 uses MySQL but the database is not ready: B3 starts again only after a successful test.'}</p>}
-    {database?.settings && <button disabled={busy || state?.b3Running} onClick={() => run(() => call(`${base}/b3/database/remove`, {}))}>{de ? 'DB-Einstellungen entfernen (B3 nutzt wieder SQLite)' : 'Remove database settings (B3 uses SQLite again)'}</button>}
-    {database?.ready && <p role="status"><strong>B3 Ready</strong> – {de ? 'B3 nutzt MySQL ab dem nächsten Start.' : 'B3 uses MySQL from its next start.'}</p>}
+    </>}
+    {!remote && database?.mysqlEnabled && !database?.ready && <p role="alert">{de ? 'B3 nutzt MySQL, die Datenbank ist aber nicht bereit: B3 startet erst nach erfolgreichem Test wieder.' : 'B3 uses MySQL but the database is not ready: B3 starts again only after a successful test.'}</p>}
+    {database?.settings && <button disabled={busy || state?.b3Running} onClick={() => run(() => call(`${base}/b3/database/remove`, {}))}>{remote ? (de ? 'DB-Einstellungen entfernen' : 'Remove database settings') : de ? 'DB-Einstellungen entfernen (B3 nutzt wieder SQLite)' : 'Remove database settings (B3 uses SQLite again)'}</button>}
+    {database?.ready && <p role="status"><strong>B3 Ready</strong> – {remote ? (de ? 'die B3-Verwaltung kann diese Datenbank nutzen.' : 'B3 administration can use this database.') : de ? 'B3 nutzt MySQL ab dem nächsten Start.' : 'B3 uses MySQL from its next start.'}</p>}
     {check?.backup && <p>{de ? 'Backup: ' : 'Backup: '}<code>{check.backup.path}</code> (SHA-256 <code>{check.backup.sha256}</code>)</p>}
   </details>;
 }

@@ -2462,7 +2462,17 @@ const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInsta
 const remoteRuntimeFor = id => ({ state: {}, async reconcileRuntimeState() { this.state = (await remoteInstanceManager.status(id)).runtime; } });
 remoteRconService = new InstanceRconService({ resolveInstance: id => remoteShadowStore.get(id), runtimeFor: remoteRuntimeFor, credentialService: remoteCredentials, audit: (level, event, details) => audit(level, event, { ...details, remote: true }),
   clientFactory: createRemoteRconClientFactory({ pool: remoteSessionPool, instances: remoteInstanceStore }) });
-registerRemoteLinuxRoutes({ app, requirePermission, audit, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService, rcon: remoteRconService, hasPermission });
+// Block 18b: B3 on a remote server is run by its operator; CONTROL manages B3's database over the network
+// (local database helper, settings in the shadow home, password under rmt_<id>). The B3 config is on the
+// server, so the admin command list is not available (no local b3Path for the admin service).
+const remoteB3DatabaseService = new InstanceB3DatabaseService({ store: remoteShadowStore, credentials: remoteCredentials, environment: b3EnvironmentForRuntime, b3IsRunning: async () => false,
+  onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, { ...entry, remote: true }) });
+const remoteB3AdminService = new InstanceB3AdminService({ store: remoteShadowStore,
+  rcon: { findOnline: id => remoteRconService.findOnline(id), kick: (id, target, actor) => remoteRconService.kick(id, target, actor) },
+  database: { read: id => remoteB3DatabaseService.read(id), query: (...args) => remoteB3DatabaseService.query(...args), withStartGuard: (id, action) => remoteB3DatabaseService.withStartGuard(id, action) },
+  environment: { read: async () => ({ ...(await b3EnvironmentForRuntime.read() || {}), b3Path: null }) }, b3IsRunning: async () => false, onEvent: entry => audit("info", entry.event, { ...entry, remote: true }) });
+registerRemoteLinuxRoutes({ app, requirePermission, audit, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService, rcon: remoteRconService, hasPermission,
+  remoteCredentials, b3: { database: remoteB3DatabaseService, admin: remoteB3AdminService } });
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
   const relative = path.relative(await resolveRealFuturePath(instanceRoot), await resolveRealFuturePath(filesystemHomePath));
   if (relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`))) {
