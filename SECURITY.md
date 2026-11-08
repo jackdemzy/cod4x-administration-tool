@@ -31,7 +31,7 @@ In scope:
 - the remote gateway and the phone app (`/remote/`), including login, second factor, sessions, push and the remote actions,
 - the credential vault, RCON handling and the B3 integration,
 - the Electron desktop app,
-- remote Linux management over SSH (`lib/ssh-transport.mjs`, `lib/remote-*.mjs`): host-key pinning, the vault-held SSH key, the fixed command list and remote path validation.
+- remote Linux management over SSH (`lib/ssh-transport.mjs`, `lib/remote-*.mjs`): host-key pinning, the vault-held SSH key, the fixed command list and remote path validation; since 4.18.24 also remote RCON (packet over stdin, private `+exec` password file), the `rmt_<id>` vault subjects and the remote B3 database access.
 
 Out of scope:
 

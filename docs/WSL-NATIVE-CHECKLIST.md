@@ -1,4 +1,4 @@
-# WSL-Checkliste: native Tests (Stand 4.18.23)
+# WSL-Checkliste: native Tests (Stand 4.18.24)
 
 Diese Checkliste enthält alles, was die Cloud-Umgebung **nicht** prüfen kann, weil dafür ein echter CoD4x-Core, ein echter `sshd` oder dein Windows-/Handy-Setup nötig ist. Jeder Punkt hat einen genauen Befehl, die erwartete PASS-Zeile und die Frage, was ein Fehlschlag bedeutet.
 
@@ -34,7 +34,7 @@ export COD4X_BASEGAME="$HOME/cod4-base"
 
 | ☐ | Befehl | Erwartung | Ergebnis |
 |---|---|---|---|
-| ☐ | `node scripts/preflight-4.18.23.mjs` | Exit 0, letzte Zeile beginnt mit `4.18.23 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
+| ☐ | `node scripts/preflight-4.18.24.mjs` | Exit 0, letzte Zeile beginnt mit `4.18.24 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
 | ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz: 679 Tests / 672 PASS / 7 SKIP. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
 
 Notiere `# tests`, `# pass`, `# fail`, `# skipped` und trage sie in `DEVELOPMENT_STATUS.md` („Last run“) ein.
@@ -116,6 +116,9 @@ node scripts/verify-4.18.23-remote-linux-native.mjs
 | ☐ | `Logs: output of this run` | |
 | ☐ | `Stop: the process is gone` und `Restart: running again with a new run` | |
 | ☐ | `Config: the change is written` und `Restore: the original config is back, byte for byte` | |
+| ☐ | Seit 4.18.24 (RCON über SSH, auf dem Server muss `python3` installiert sein: `sudo apt install -y python3`): `RCON password provisioned for this run` | |
+| ☐ | `RCON over SSH: serverinfo answers with this server's hostname` und `RCON over SSH: a wrong password is refused` | |
+| ☐ | `the private password file is gone after the start` und `the password is not in the core's command line on the server` | |
 | ☐ | `a changed host key stops before login` | |
 | ☐ | **Letzte Zeile: `Remote Linux Install -> Start -> Stop -> Logs PASS`** | |
 
@@ -130,9 +133,23 @@ Danach liegt das Testverzeichnis unter `$REMOTE_TEST_ROOT/run-<id>` (wird nicht 
 | `Health ... getinfo` bleibt `NO_ANSWER` | Core antwortet nicht auf `getinfo` (Port, Bindung `127.0.0.1`, Core noch beim Laden). |
 | `REMOTE_BASEGAME_INVALID` bei der echten Installation | Basisdateien unvollständig oder für den Testbenutzer nicht lesbar (`/mnt/c` mit seltsamen Rechten: Dateien nach `~/cod4-base` kopieren). |
 | `REMOTE_AUTH_FAILED` | Schlüssel nicht in `authorized_keys`, Rechte von `~/.ssh` zu offen, falsche Passphrase. |
+| `RCON password provisioned` FAIL (`rcon: false`) | Der echte Core hat nicht `execing rcon-<runId>.cfg` ausgegeben (andere Meldung oder kein Lesen der Datei). Dann braucht der Abgleich eine andere Zeile – Ausgabe zurückschicken. |
+| `REMOTE_RCON_TOOL_MISSING` | Auf dem Server fehlt `python3`. |
+| `RCON over SSH … hostname` FAIL mit `RCON_AUTH_FAILED` | Der Core hat das Passwort aus der Datei nicht übernommen (`+exec` liest aus `fs_homepath/main`). |
 | `REMOTE_HOST_KEY_*` unerwartet | `sshd` hat einen anderen Host-Key präsentiert als beim Probe (zweiter sshd?). |
 
 ---
+
+## 3b. B3-Verwaltung eines Remote-Servers über seine Datenbank (4.18.24)
+
+Voraussetzung: B3 läuft auf dem Server mit MySQL/MariaDB; die Datenbank ist **von diesem PC aus** erreichbar (eigener DB-Benutzer mit `SELECT, INSERT, UPDATE` auf die B3-Datenbank). Achtung: das Passwort geht ohne VPN/Tailscale unverschlüsselt übers Netz. Lokal muss die B3-Umgebung (Python + eBc-B3) eingerichtet sein, weil der Datenbank-Helper dort läuft.
+
+| ☐ | Schritt | Erwartung | Ergebnis |
+|---|---|---|---|
+| ☐ | App → Remote Linux → Server → „Zugangsdaten“: B3-Datenbank-Passwort speichern | „Gespeichert“ | |
+| ☐ | „B3 Datenbank“: Host/Port/DB/Benutzer speichern, „Verbindung testen“ | `Verbunden. Schema: COMPLETE`, **B3 Ready** | |
+| ☐ | „B3 Administration“: Spieler, Admins, Strafen werden angezeigt | Daten aus der Server-Datenbank | |
+| ☐ | Einen Test-Spieler bannen (mit Kick), dann entbannen | Ban in B3 sichtbar, Kick über RCON, Entbannen wirkt | |
 
 ## 4. Manuelle Punkte (kein Skript möglich)
 
