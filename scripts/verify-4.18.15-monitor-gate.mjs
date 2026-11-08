@@ -52,7 +52,7 @@ const checks = [
   ["a server that stops answering is down after 45 s, cause unresponsive", hang.join() === "down:unresponsive"],
   ["a crash is reported at once, a planned stop once", crash.join() === "down:crash" && stop.join() === "down:stopped"],
   ["the cause is read from the end of the console log", diagnoseConsole("x\nERROR: Hunk_Alloc failed\n").reason === "ERROR: Hunk_Alloc failed"],
-  ["the collector never uses RCON commands or credentials", !/execute\(|withRuntimeCredentials|withPassword|rcon_password|credential/i.test(collectorSource) && server.includes("probe: port => new RconClient({ port, timeoutMs: 1500 }).queryStatus()")],
+  ["the collector never uses RCON commands or credentials", !/execute\(|withRuntimeCredentials|withPassword|rcon_password|credential/i.test(collectorSource) && (server.includes("probe: port => new RconClient({ port, timeoutMs: 1500 }).queryStatus()") || (server.includes(": new RconClient({ port, timeoutMs: 1500 }).queryStatus())") && !/execute\(|withRuntimeCredentials|withPassword|rcon_password|credential/i.test(read("lib/remote-monitor.mjs"))))],
   ["monitor role holds monitor.read only", server.includes('monitor: Object.freeze(["monitor.read"])')],
   ["monitoring routes need monitor.read and do not audit every poll", server.includes('const monitorRead = requirePermission("monitor.read", { quietAllowed: true });')
     && ["/api/monitor/overview", "/api/monitor/instances/:id/history", "/api/monitor/instances/:id/events"].every(route => server.includes(`app.get("${route}", monitorRead,`))
