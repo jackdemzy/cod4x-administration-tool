@@ -26,14 +26,17 @@ export function buildConsoleExport({ instance, rcon, lines }) {
   return header.concat(lines.map(line => `${line.at || '-'}\t${line.source}\t${line.text}`)).join('\n') + '\n';
 }
 
-export function InstanceRconConsole({ instance, request, de }) {
+// Block 18b: remote servers use basePath /api/remote-instances/<id>; the shapes are the same.
+export const consoleRoute = ({ instance, basePath = null }) => `${basePath || `/api/instances/${encodeURIComponent(instance.id)}`}/rcon`;
+
+export function InstanceRconConsole({ instance, request, de, basePath = null, remote = false }) {
   const lang = de ? 'de' : 'en';
   const [rcon, setRcon] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [command, setCommand] = useState(''), [filter, setFilter] = useState(''), [source, setSource] = useState('all');
   const [autoScroll, setAutoScroll] = useState(true), [cleared, setCleared] = useState(null);
   const commandHistory = useRef([]), historyIndex = useRef(-1), output = useRef(null), mounted = useRef(true), autoConnectedRun = useRef(null);
   const running = instance.runtime?.status === 'RUNNING' && Boolean(instance.runtime?.pid);
-  const route = `/api/instances/${encodeURIComponent(instance.id)}/rcon`;
+  const route = consoleRoute({ instance, basePath });
   async function call(path, body) {
     const response = await request(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const data = await response.json();
@@ -104,7 +107,7 @@ export function InstanceRconConsole({ instance, request, de }) {
   const status = rcon?.status || 'DISCONNECTED';
   return <details style={{ marginTop: 12 }}>
     <summary>{de ? 'Server-Konsole · RCON' : 'Server console · RCON'} · {STATUS_LABELS[lang][status] || status}</summary>
-    <p>{de ? 'RCON nur über 127.0.0.1:' : 'RCON via 127.0.0.1:'}{instance.port}. {PROVISIONING[lang][rcon?.provisioning || 'UNKNOWN']}. {de ? 'Erlaubt sind nur kontrollierte Befehle; der Server läuft unabhängig von dieser Konsole weiter.' : 'Only controlled commands are allowed; the server keeps running independently of this console.'}</p>
+    <p>{remote ? (de ? 'RCON über SSH auf dem Server, dort an 127.0.0.1:' : 'RCON over SSH on the server, there to 127.0.0.1:') : (de ? 'RCON nur über 127.0.0.1:' : 'RCON via 127.0.0.1:')}{instance.port}. {PROVISIONING[lang][rcon?.provisioning || 'UNKNOWN']}. {de ? 'Erlaubt sind nur kontrollierte Befehle; der Server läuft unabhängig von dieser Konsole weiter.' : 'Only controlled commands are allowed; the server keeps running independently of this console.'}</p>
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
       <span role="status">{STATUS_LABELS[lang][status] || status}{rcon?.latencyMs != null ? ` · ${rcon.latencyMs} ms` : ''}{rcon?.failures ? ` · ${de ? 'Fehlversuche' : 'failures'} ${rcon.failures}` : ''}{rcon?.server?.mapname ? ` · ${rcon.server.mapname}` : ''}</span>
       <button type="button" disabled={busy || !running} onClick={connect}>{status === 'CONNECTED' ? (de ? 'Verbindung prüfen' : 'Check connection') : 'Reconnect'}</button>

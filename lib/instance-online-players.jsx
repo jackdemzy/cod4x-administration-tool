@@ -6,12 +6,14 @@ import { reasonsAfterLoad } from './online-players-state.mjs';
 // Works without B3. Ids and addresses arrive masked unless the user has config.manage.
 const say = (code, de) => B3_ADMIN_MESSAGES[code]?.[de ? 0 : 1] || code;
 
-export function InstanceOnlinePlayers({ instance, request, de, initial = null }) {
+export const playersBase = ({ instance, basePath = null }) => basePath || `/api/instances/${encodeURIComponent(instance.id)}`;
+
+export function InstanceOnlinePlayers({ instance, request, de, initial = null, basePath = null }) {
   const [state, setState] = useState(initial || { permissions: null, online: null });
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [message, setMessage] = useState('');
   const [reasons, setReasons] = useState({});
   const mounted = useRef(true);
-  const base = `/api/instances/${encodeURIComponent(instance.id)}`;
+  const base = playersBase({ instance, basePath });
   async function call(route, body) {
     const response = await request(route, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
     const data = await response.json();

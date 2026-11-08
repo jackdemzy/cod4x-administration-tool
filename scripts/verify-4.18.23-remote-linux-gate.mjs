@@ -19,11 +19,12 @@ const throws = fn => { try { fn(); return null; } catch (error) { return error.c
 const registered = [];
 const fakeApp = {};
 for (const method of ["get", "post", "put", "delete", "all"]) fakeApp[method] = (route, ...handlers) => { registered.push({ method, route, guards: handlers.slice(0, -1) }); };
-registerRemoteLinuxRoutes({ app: fakeApp, requirePermission: permission => ({ permission }), audit() {}, hostService: {}, hostStore: {}, manager: {}, credentials: {} });
+// Block 18b: with an RCON service the remote RCON routes are registered too
+registerRemoteLinuxRoutes({ app: fakeApp, requirePermission: permission => ({ permission }), audit() {}, hostService: {}, hostStore: {}, manager: {}, credentials: {}, rcon: {} });
 const bound = new Map(REMOTE_LINUX_BINDINGS.flatMap(entry => entry.routes.map(route => [route, entry.permission])));
 const plain = registered.filter(entry => typeof entry.route === "string");
 const exec = remoteFiles.flatMap(file => [...code(file).matchAll(/\bsession\.exec\(\s*(\w+\()?/g)].map(match => [file, match[1] ? match[1].slice(0, -1) : "<not a builder>"]));
-const BUILDERS = ["probeCommand", "makeDirectoriesCommand", "startCoreCommand", "signalCommand", "getinfoProbeCommand", "diskFreeCommand", "statCommand", "recoverHomeCommand"];
+const BUILDERS = ["probeCommand", "makeDirectoriesCommand", "startCoreCommand", "signalCommand", "getinfoProbeCommand", "diskFreeCommand", "statCommand", "recoverHomeCommand", "removeRconFilesCommand", "rconExchangeCommand", "getstatusProbeCommand"];
 const transport = code("lib/ssh-transport.mjs");
 const server = read("installer-server.mjs");
 
@@ -36,7 +37,7 @@ const checks = [
   ["no remote route is registered without requirePermission", registered.length >= 25 && registered.every(entry => entry.guards.length === 1 && typeof entry.guards[0].permission === "string")],
   ["every remote route is in the permission map with the same permission", plain.every(entry => bound.get(`${entry.method.toUpperCase()} ${entry.route}`) === entry.guards[0].permission) && [...bound.keys()].every(key => plain.some(entry => `${entry.method.toUpperCase()} ${entry.route}` === key))],
   ["the permission map is part of the server's table", server.includes("...REMOTE_LINUX_BINDINGS") && server.includes("registerRemoteLinuxRoutes(")],
-  ["RCON and B3 for a remote id are blocked with a named code", registered.filter(entry => entry.method === "all").length === 2 && read("lib/remote-linux-routes.mjs").includes("REMOTE_RCON_UNSUPPORTED") && read("lib/remote-linux-routes.mjs").includes("REMOTE_B3_UNSUPPORTED")],
+  ["B3 runtime for a remote id is blocked with a named code; RCON has its own guarded routes (Block 18b)", registered.filter(entry => entry.method === "all").length === 1 && read("lib/remote-linux-routes.mjs").includes("REMOTE_B3_UNSUPPORTED") && registered.some(entry => entry.route === "/api/remote-instances/:id/rcon/command")],
   ["the phone gateway does not know any remote Linux route", !/remote-hosts|remote-instances/.test(read("lib/remote-gateway.mjs"))],
   ["root login is refused when a host is saved and again at connect", read("lib/remote-safety.mjs").includes("root") && read("lib/remote-host-service.mjs").includes("REMOTE_ROOT_BLOCKED")],
   ["the SSH key lives in the vault only (subject ssh_<hostId>, runtime scope)", read("lib/remote-host-service.mjs").includes("withRuntimeCredentials") && read("lib/instance-credential-service.mjs").includes("ssh_")],

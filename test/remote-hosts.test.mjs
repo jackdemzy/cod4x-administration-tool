@@ -18,14 +18,15 @@ async function renderer() {
 const skip = process.platform === 'win32' || existsSync(new URL('../node_modules/@esbuild/linux-x64/bin/esbuild', import.meta.url)) ? false : 'native esbuild missing';
 const noFetch = () => { throw new Error('SSR must not fetch'); };
 
-test('panel renders without any login password field, never fetches while rendering and shows the notice in both languages', { skip }, async () => {
+test('panel renders without any login password field, never fetches while rendering and shows the B3 notice in both languages', { skip }, async () => {
   const render = await renderer();
   const de = render('RemoteHostsPanel', { de: true, request: noFetch });
   const en = render('RemoteHostsPanel', { de: false, request: noFetch });
   assert.doesNotMatch(de, /type="password"/);
   assert.doesNotMatch(de, /name="password"/i);
-  assert.match(de, /RCON und B3 sind für Remote-Server noch nicht verfügbar/);
-  assert.match(en, /RCON and B3 are not available for remote servers yet/);
+  assert.doesNotMatch(de, /RCON und B3 sind für Remote-Server noch nicht verfügbar/);
+  assert.match(de, /B3 startet CONTROL für Remote-Server nicht/);
+  assert.match(en, /CONTROL does not start B3 for remote servers/);
   assert.match(de, /SSH-Schlüssel/);
 });
 
@@ -83,4 +84,16 @@ test('instance row offers all operations and disables them while busy', { skip }
   const running = render('RemoteInstanceRow', { de: true, busy: true, entry: { instance: { id: 'srv-1', name: 'Srv', hostId: 'lab-1', port: 28960 }, runtime: { status: 'RUNNING', pid: 42 } }, onAction() {} });
   assert.match(running, /RUNNING/);
   assert.ok((running.match(/disabled=""/g) || []).length >= 8);
+});
+
+test('Block 18b: a running remote server gets the console and the player list over its remote routes; a stopped one does not', { skip }, async () => {
+  const render = await renderer();
+  const entry = status => ({ instance: { id: 'srv-1', name: 'Srv', hostId: 'lab-1', port: 28961 }, runtime: status === 'RUNNING' ? { status, pid: 42, runId: 'r1' } : { status } });
+  const running = render('RemoteInstanceTools', { de: true, entry: entry('RUNNING'), request: noFetch });
+  assert.match(running, /Server-Konsole · RCON/);
+  assert.match(running, /RCON über SSH auf dem Server, dort an 127\.0\.0\.1:28961/);
+  assert.match(running, /Online-Spieler|Spieler/);
+  const stopped = render('RemoteInstanceTools', { de: false, entry: entry('STOPPED'), request: noFetch });
+  assert.doesNotMatch(stopped, /Server console/);
+  assert.match(stopped, /Start the server to use RCON/);
 });
