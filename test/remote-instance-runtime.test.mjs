@@ -302,3 +302,91 @@ test('changeNetwork: PUBLIC needs the confirmation phrase, is refused while the 
   assert.ok(f.audits.some(entry => entry.event === 'remote.instance.network_changed'));
   assert.ok(!JSON.stringify(f.audits).includes('203.0.113.7'), 'the address is not in the audit');
 });
+
+// ---- Block 18b: the RCON password reaches the core through a private file, never an argument ----
+const RCON_PASSWORD = 'Remote-Rcon-Pw1';
+const vaultWith = (value, provisioned = []) => ({
+  credentials: { async withRuntimeCredentials(id, action) { if (value instanceof Error) throw value; return action({ rcon: value === null ? null : Buffer.from(value) }); } },
+  onProvisioned: (id, runId, info) => provisioned.push({ id, runId, ...info }),
+});
+const rconFiles = async home => (await fs.readdir(`${home}/main`)).filter(name => /^rcon-.*\.cfg$/.test(name));
+const output = async (f, id) => (await f.manager.logs(id)).stdout;
+
+test('start with a stored password: the core execs a private file, the file is gone after RUNNING, the password is no argument', { skip }, async t => {
+  const provisioned = [];
+  const f = await createRemoteFixture(t, { managerOptions: vaultWith(RCON_PASSWORD, provisioned) });
+  const instance = await f.install('public-01');
+  const { runtime } = await f.manager.start('public-01');
+  assert.equal(runtime.status, 'RUNNING');
+  const args = await cmdline(runtime.pid);
+  assert.ok(args.includes(`rcon-${runtime.runId}.cfg`) && args.indexOf(`rcon-${runtime.runId}.cfg`) < args.indexOf('server.cfg'), 'exec of the file before server.cfg');
+  assert.ok(!args.some(arg => arg.includes(RCON_PASSWORD)), 'the password is no argument of the core');
+  assert.ok(f.loopback.session.calls.every(command => !command.includes(RCON_PASSWORD)), 'and in no remote command');
+  const text = await output(f, 'public-01');
+  assert.match(text, new RegExp(`execing rcon-${runtime.runId}\\.cfg`));
+  assert.match(text, /rcon password provisioned/);
+  assert.deepEqual(await rconFiles(instance.home), [], 'the file is removed once the core has read it');
+  assert.deepEqual(provisioned, [{ id: 'public-01', runId: runtime.runId, rcon: true }]);
+  await f.manager.stop('public-01');
+});
+
+test('without a stored password or with a locked vault the core starts without the file and rcon is reported false', { skip }, async t => {
+  for (const value of [null, Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' })]) {
+    const provisioned = [];
+    const f = await createRemoteFixture(t, { managerOptions: vaultWith(value, provisioned) });
+    const instance = await f.install('public-01');
+    const { runtime } = await f.manager.start('public-01');
+    assert.equal(runtime.status, 'RUNNING');
+    assert.ok(!(await cmdline(runtime.pid)).some(arg => /^rcon-/.test(arg)));
+    assert.deepEqual(await rconFiles(instance.home), []);
+    assert.deepEqual(provisioned, [{ id: 'public-01', runId: runtime.runId, rcon: false }]);
+    await f.manager.stop('public-01');
+  }
+});
+
+test('a lost connection after the file was written leaves it private; recover and stop sweep it', { skip }, async t => {
+  const f = await createRemoteFixture(t, { managerOptions: vaultWith(RCON_PASSWORD) });
+  const instance = await f.install('public-01');
+  const real = f.control.session;
+  f.control.session = Object.create(real);
+  f.control.session.exec = async (command, options) => {
+    if (command.startsWith('[ -d ')) throw Object.assign(new Error('REMOTE_CONNECT_FAILED'), { code: 'REMOTE_CONNECT_FAILED' });
+    const result = await real.exec(command, options);
+    if (command.startsWith('setsid ')) throw Object.assign(new Error('REMOTE_CONNECT_FAILED'), { code: 'REMOTE_CONNECT_FAILED' });
+    return result;
+  };
+  await rejects(f.manager.start('public-01'), 'REMOTE_RECOVERY_BLOCKED');
+  const left = await rconFiles(instance.home);
+  assert.equal(left.length, 1, 'the sweep could not run');
+  const stat = await fs.stat(`${instance.home}/main/${left[0]}`);
+  assert.equal(stat.mode & 0o777, 0o600, 'the file is private while it exists');
+  f.control.session = real;
+  const recovered = await f.manager.recover('public-01');
+  assert.equal(recovered.runtime.status, 'RUNNING');
+  assert.deepEqual(await rconFiles(instance.home), [], 'recover sweeps the file');
+  await fs.writeFile(`${instance.home}/main/rcon-stale.cfg`, 'set rcon_password "x"\n', { mode: 0o600 });
+  await f.manager.stop('public-01');
+  assert.deepEqual(await rconFiles(instance.home), [], 'stop sweeps a stale file');
+});
+
+test('a status that finds the core gone sweeps a leftover file', { skip }, async t => {
+  const f = await createRemoteFixture(t, { managerOptions: vaultWith(RCON_PASSWORD) });
+  const instance = await f.install('public-01');
+  const { runtime } = await f.manager.start('public-01');
+  await fs.writeFile(`${instance.home}/main/rcon-stale.cfg`, 'set rcon_password "x"\n', { mode: 0o600 });
+  process.kill(runtime.pid, 'SIGKILL');
+  assert.ok(await gone(runtime.pid));
+  assert.notEqual((await f.manager.status('public-01')).runtime.status, 'RUNNING');
+  assert.deepEqual(await rconFiles(instance.home), []);
+});
+
+test('a password the core command line cannot carry safely is not written', { skip }, async t => {
+  const provisioned = [];
+  const f = await createRemoteFixture(t, { managerOptions: vaultWith('bad"quote;pw', provisioned) });
+  const instance = await f.install('public-01');
+  const { runtime } = await f.manager.start('public-01');
+  assert.deepEqual(await rconFiles(instance.home), []);
+  assert.deepEqual(provisioned.map(entry => entry.rcon), [false]);
+  await f.manager.stop('public-01');
+  assert.ok(await gone(runtime.pid));
+});
