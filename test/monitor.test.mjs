@@ -129,3 +129,24 @@ test('host sample derives CPU share from deltas and reads free disk space', asyn
   assert.deepEqual(sample.disks, [{ path: '/srv', freeBytes: 40960, totalBytes: 163840 }]);
   assert.equal(sample.cpuPercent, 66.7);
 });
+
+test('Block 18b: probe and readConsole receive the instance, the host sample only local homes', async t => {
+  const time = clock(Date.UTC(2026, 10, 8, 12));
+  const store = new MonitorStore({ directory: await tempDir(t), now: time.now });
+  await store.load();
+  const probes = [], consoles = [], sampled = [];
+  const state = { status: 'RUNNING', pid: 1, runId: 'r' };
+  const collector = new MonitorCollector({
+    listInstances: async () => [{ id: 'alpha', name: 'Local', port: 28960, homePath: '/srv/alpha' }, { id: 'rmt_alpha', name: 'Remote', port: 28960, remote: true }],
+    runtimeFor: async () => ({ state, reconcileRuntimeState: async () => {} }),
+    probe: async (port, instance) => { probes.push([port, instance.id]); return instance.remote ? { reachable: true, latencyMs: 9, players: [{ name: 'R', score: 0, ping: 1 }] } : { reachable: true, latencyMs: 2, players: [] }; },
+    readConsole: async (homePath, instance) => { consoles.push(instance.id); return { text: '' }; },
+    host: { sample: async homes => { sampled.push(homes); return {}; } },
+    store, now: time.now,
+  });
+  await collector.tick();
+  assert.deepEqual(probes.sort(), [[28960, 'alpha'], [28960, 'rmt_alpha']]);
+  assert.deepEqual(sampled, [['/srv/alpha']]);
+  assert.deepEqual([collector.live('alpha').players.length, collector.live('rmt_alpha').players.length], [0, 1], 'a local and a remote server with the same name stay apart');
+  assert.deepEqual([store.history('alpha', '24h') !== null, store.history('rmt_alpha', '24h') !== null], [true, true]);
+});

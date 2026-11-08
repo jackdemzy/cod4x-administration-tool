@@ -37,9 +37,10 @@ import { RemoteHostStore } from "./lib/remote-host-store.mjs";
 import { RemoteInstanceStore } from "./lib/remote-instance-store.mjs";
 import { RemoteStateStore } from "./lib/remote-runtime-state.mjs";
 import { RemoteHostService, sshSubjectResolver } from "./lib/remote-host-service.mjs";
-import { isRemoteSubject, createShadowStore, remoteSubjectResolver, prefixedCredentials } from "./lib/remote-subjects.mjs";
+import { isRemoteSubject, remoteIdOf, createShadowStore, remoteSubjectResolver, prefixedCredentials } from "./lib/remote-subjects.mjs";
 import { RemoteSessionPool } from "./lib/remote-session-pool.mjs";
 import { createRemoteRconClientFactory } from "./lib/remote-rcon-client.mjs";
+import { createRemoteMonitor } from "./lib/remote-monitor.mjs";
 import { RemoteInstanceManager } from "./lib/remote-instance-manager.mjs";
 import { registerRemoteLinuxRoutes, REMOTE_LINUX_BINDINGS } from "./lib/remote-linux-routes.mjs";
 import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
@@ -2755,12 +2756,19 @@ const alertNotifier = new AlertNotifier({
 try { await alertNotifier.load(); } catch (error) { console.error(`[alerts] settings unavailable: ${error.code || error.message}`); }
 const monitorAlerts = new MonitorAlerts({ rules: () => alertNotifier.rules(), send: alert => alertNotifier.send(alert) });
 try { await monitorStore.load(); } catch (error) { console.error(`[monitor] history unavailable: ${error.code || error.message}`); }
+// Block 18b: remote servers take part as rmt_<id> (saved state, getstatus and console tail over the pooled SSH session).
+const remoteMonitor = createRemoteMonitor({ pool: remoteSessionPool, instances: remoteInstanceStore, manager: remoteInstanceManager });
 const monitorCollector = new MonitorCollector({
-  listInstances: async () => { try { return instanceStore.list(); } catch { return []; } },
-  runtimeFor: id => instanceManager.runtime(id),
-  probe: port => new RconClient({ port, timeoutMs: 1500 }).queryStatus(),
-  readConsole: homePath => readInstanceConsoleLog(homePath),
-  b3Running: id => b3Service.isRunning(id),
+  listInstances: async () => {
+    let local = [], remote = [];
+    try { local = instanceStore.list(); } catch { local = []; }
+    try { remote = await remoteMonitor.listInstances(); } catch { remote = []; }
+    return [...local, ...remote];
+  },
+  runtimeFor: id => (isRemoteSubject(id) ? remoteMonitor.runtimeFor(id) : instanceManager.runtime(id)),
+  probe: (port, instance) => (instance?.remote ? remoteMonitor.probe(port, instance) : new RconClient({ port, timeoutMs: 1500 }).queryStatus()),
+  readConsole: (homePath, instance) => (instance?.remote ? remoteMonitor.readConsole(homePath, instance) : readInstanceConsoleLog(homePath)),
+  b3Running: id => (isRemoteSubject(id) ? null : b3Service.isRunning(id)),
   store: monitorStore,
   host: new MonitorHost(),
   onEvent: event => {
@@ -2779,7 +2787,13 @@ function monitorRoute(action) {
     }
   };
 }
-const monitorInstance = id => { try { return instanceStore.get(id); } catch { throw Object.assign(new Error("INSTANCE_NOT_FOUND"), { code: "INSTANCE_NOT_FOUND" }); } };
+// A monitored server: a local instance, or a remote one as rmt_<id> (Block 18b).
+const monitorInstance = id => {
+  try {
+    if (isRemoteSubject(id)) { const remote = remoteInstanceStore.get(remoteIdOf(id)); return { id, remoteId: remote.id, name: remote.name || remote.id, port: remote.port, remote: true }; }
+    return instanceStore.get(id);
+  } catch { throw Object.assign(new Error("INSTANCE_NOT_FOUND"), { code: "INSTANCE_NOT_FOUND" }); }
+};
 const monitorRead = requirePermission("monitor.read", { quietAllowed: true });
 app.get("/api/monitor/overview", monitorRead, monitorRoute(async () => ({ monitor: monitorCollector.overview() })));
 app.get("/api/monitor/instances/:id/history", monitorRead, monitorRoute(async req => { monitorInstance(req.params.id); return { history: await monitorStore.history(req.params.id, String(req.query.range || "24h")) }; }));
