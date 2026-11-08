@@ -12,7 +12,7 @@ import { createLoopbackServer, buildFakeCore } from './loopback-transport.mjs';
 // with a compiled fake core, the real host/instance/state stores and the real manager.
 export const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
-export async function createRemoteFixture(t, { ignoreTerm = false, timing = {}, backups = true } = {}) {
+export async function createRemoteFixture(t, { ignoreTerm = false, timing = {}, backups = true, managerOptions = {} } = {}) {
   const loopback = await createLoopbackServer();
   const local = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-remote-fixture-'));
   t.after(async () => { await loopback.cleanup(); await fs.rm(local, { recursive: true, force: true }); });
@@ -44,7 +44,7 @@ export async function createRemoteFixture(t, { ignoreTerm = false, timing = {}, 
   };
   const manager = new RemoteInstanceManager({
     instances, hosts, state, uploadChunkBytes: 64 * 1024, backupRoot: backups ? path.join(local, 'backups') : null,
-    pollMs: 20, startConfirmMs: 3000, stopGraceMs: 400, killWaitMs: 2000, ...timing,
+    pollMs: 20, startConfirmMs: 3000, stopGraceMs: 400, killWaitMs: 2000, ...timing, ...managerOptions,
     audit: (level, event, details) => audits.push({ level, event, ...details }),
   });
   let nextPort = 28960;

@@ -12,10 +12,24 @@ const run = promisify(execFile);
 
 const fakeCoreSource = ignoreTerm => `#include <stdio.h>
 #include <signal.h>
+#include <string.h>
 #include <unistd.h>
 int main(int argc, char **argv) {
   ${ignoreTerm ? 'signal(SIGTERM, SIG_IGN);' : ''}
+  const char *home = "";
   for (int i = 0; i < argc; i++) printf("%s\\n", argv[i]);
+  for (int i = 0; i + 2 < argc; i++) if (!strcmp(argv[i], "+set") && !strcmp(argv[i + 1], "fs_homepath")) home = argv[i + 2];
+  /* like the real core: +exec <file> reads <fs_homepath>/main/<file> and prints "execing <file>";
+     a file that sets rcon_password is reported without its value */
+  for (int i = 0; i + 1 < argc; i++) if (!strcmp(argv[i], "+exec")) {
+    char path[4096], line[512];
+    snprintf(path, sizeof path, "%s/main/%s", home, argv[i + 1]);
+    FILE *file = fopen(path, "r");
+    if (!file) { printf("couldn't exec %s\\n", argv[i + 1]); continue; }
+    printf("execing %s\\n", argv[i + 1]);
+    while (fgets(line, sizeof line, file)) if (!strncmp(line, "set rcon_password \\"", 19)) printf("rcon password provisioned\\n");
+    fclose(file);
+  }
   fflush(stdout);
   fprintf(stderr, "fixture stderr\\n");
   for (;;) usleep(100000);
