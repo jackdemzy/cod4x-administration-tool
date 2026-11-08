@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 const source = fileURLToPath(new URL('../', import.meta.url));
 async function load() {
   const bundle = await build({
-    stdin: { contents: `import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import * as consoleModule from './lib/instance-rcon-console.jsx'; export const render = props => renderToStaticMarkup(React.createElement(consoleModule.InstanceRconConsole, props)); export const buildConsoleExport = consoleModule.buildConsoleExport;`, resolveDir: source, loader: 'jsx' },
+    stdin: { contents: `import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import * as consoleModule from './lib/instance-rcon-console.jsx'; export const render = props => renderToStaticMarkup(React.createElement(consoleModule.InstanceRconConsole, props)); export const buildConsoleExport = consoleModule.buildConsoleExport; export const consoleRoute = consoleModule.consoleRoute;`, resolveDir: source, loader: 'jsx' },
     bundle: true, platform: 'node', format: 'esm', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' },
     banner: { js: `import {createRequire as testCreateRequire} from 'node:module'; const require = testCreateRequire(${JSON.stringify(new URL('../package.json', import.meta.url).href)});` },
   });
@@ -44,4 +44,14 @@ test('log export carries server, runtime and RCON lines with status header', { s
   assert.match(text, /^# COD4X CONTROL console export\n# instance=public-01 port=28960/);
   assert.match(text, /# rcon=CONNECTED provisioning=PROVISIONED/);
   assert.match(text, /-\tserver\tServer: mp_backlot\n2026-10-18T12:00:00\.000Z\trcon\t> status\n$/);
+});
+
+test('Block 18b: the console takes a base path and says that a remote server is reached over ssh', { skip }, async () => {
+  const { render, consoleRoute } = await load();
+  assert.equal(consoleRoute({ instance: { id: 'public 01' } }), '/api/instances/public%2001/rcon');
+  assert.equal(consoleRoute({ instance: { id: 'srv-1' }, basePath: '/api/remote-instances/srv-1' }), '/api/remote-instances/srv-1/rcon');
+  const instance = { id: 'srv-1', port: 28961, runtime: { status: 'RUNNING', pid: 10, runId: 'run' } };
+  const html = render({ instance, de: true, remote: true, basePath: '/api/remote-instances/srv-1', request: () => { throw new Error('SSR must not fetch'); } });
+  assert.match(html, /RCON über SSH auf dem Server, dort an 127\.0\.0\.1:28961/);
+  assert.ok(!/type="password"/.test(html));
 });

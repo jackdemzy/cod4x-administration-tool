@@ -38,6 +38,8 @@ import { RemoteInstanceStore } from "./lib/remote-instance-store.mjs";
 import { RemoteStateStore } from "./lib/remote-runtime-state.mjs";
 import { RemoteHostService, sshSubjectResolver } from "./lib/remote-host-service.mjs";
 import { isRemoteSubject, createShadowStore, remoteSubjectResolver, prefixedCredentials } from "./lib/remote-subjects.mjs";
+import { RemoteSessionPool } from "./lib/remote-session-pool.mjs";
+import { createRemoteRconClientFactory } from "./lib/remote-rcon-client.mjs";
 import { RemoteInstanceManager } from "./lib/remote-instance-manager.mjs";
 import { registerRemoteLinuxRoutes, REMOTE_LINUX_BINDINGS } from "./lib/remote-linux-routes.mjs";
 import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
@@ -2451,8 +2453,16 @@ catch (error) { console.error(`[instances] registry unavailable: ${error.message
 try { await remoteHostStore.load(); await remoteInstanceStore.load(); }
 catch (error) { console.error(`[remote] registry unavailable: ${error.code || error.message}`); }
 const remoteHostService = new RemoteHostService({ store: remoteHostStore, credentials: credentialService, audit });
-const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInstanceStore, hosts: remoteHostService, audit, state: new RemoteStateStore({ root: dataPath("remote") }), backupRoot: dataPath("remote-backups") });
-registerRemoteLinuxRoutes({ app, requirePermission, audit, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService });
+// Block 18b: one SSH session per host for RCON and monitoring; RCON for remote servers is the same
+// service as locally, with a client that runs the exchange on the server and the rmt_ vault entries.
+const remoteSessionPool = new RemoteSessionPool({ connect: hostId => remoteHostService.connect(hostId) });
+let remoteRconService = null;
+const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInstanceStore, hosts: remoteHostService, audit, state: new RemoteStateStore({ root: dataPath("remote") }), backupRoot: dataPath("remote-backups"),
+  credentials: remoteCredentials, onProvisioned: (id, runId, { rcon }) => remoteRconService?.recordProvisioning(id, runId, rcon ? "PROVISIONED" : "NOT_CONFIGURED") });
+const remoteRuntimeFor = id => ({ state: {}, async reconcileRuntimeState() { this.state = (await remoteInstanceManager.status(id)).runtime; } });
+remoteRconService = new InstanceRconService({ resolveInstance: id => remoteShadowStore.get(id), runtimeFor: remoteRuntimeFor, credentialService: remoteCredentials, audit: (level, event, details) => audit(level, event, { ...details, remote: true }),
+  clientFactory: createRemoteRconClientFactory({ pool: remoteSessionPool, instances: remoteInstanceStore }) });
+registerRemoteLinuxRoutes({ app, requirePermission, audit, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService, rcon: remoteRconService, hasPermission });
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
   const relative = path.relative(await resolveRealFuturePath(instanceRoot), await resolveRealFuturePath(filesystemHomePath));
   if (relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`))) {

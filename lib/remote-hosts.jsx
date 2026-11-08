@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { InstanceRconConsole } from './instance-rcon-console.jsx';
+import { InstanceOnlinePlayers } from './instance-online-players.jsx';
 
 // Panel for SSH hosts and the servers on them (Block 18). Rules of this file:
 //  - there is no password login anywhere; the only secret fields are the private key (multi-line, uncontrolled) and,
@@ -93,6 +95,18 @@ export function RemoteInstanceRow({ de, entry, busy, onAction }) {
   </li>;
 }
 
+// Block 18b: RCON console and online players of a running remote server, through /api/remote-instances/<id>.
+export function RemoteInstanceTools({ de, entry, request }) {
+  const { instance, runtime } = entry;
+  if (runtime?.status !== 'RUNNING' || !runtime.pid) return <p>{text(de, 'Server starten, um RCON zu nutzen.', 'Start the server to use RCON.')}</p>;
+  const basePath = `/api/remote-instances/${encodeURIComponent(instance.id)}`;
+  const view = { ...instance, runtime };
+  return <div>
+    <InstanceRconConsole instance={view} request={request} de={de} basePath={basePath} remote />
+    <InstanceOnlinePlayers instance={view} request={request} de={de} basePath={basePath} />
+  </div>;
+}
+
 const EMPTY_HOST = { id: '', label: '', host: '', port: '22', username: '' };
 const EMPTY_INSTALL = { id: '', name: '', hostId: '', port: '28960', remoteRoot: '', basePath: '', corePath: '', coreVersion: '21.5', expectedCoreSha256: '' };
 
@@ -181,7 +195,7 @@ export function RemoteHostsPanel({ de, request }) {
 
   return <section>
     <h3>Remote Linux</h3>
-    <p role="note">{text(de, 'RCON und B3 sind für Remote-Server noch nicht verfügbar.', 'RCON and B3 are not available for remote servers yet.')}</p>
+    <p role="note">{text(de, 'B3 startet CONTROL für Remote-Server nicht: B3 läuft auf dem Server, CONTROL verwaltet nur seine Datenbank. RCON läuft über SSH (auf dem Server wird python3 gebraucht).', 'CONTROL does not start B3 for remote servers: B3 runs on the server, CONTROL only manages its database. RCON runs over SSH (python3 is needed on the server).')}</p>
     <p>{text(de, 'Die Verbindung läuft über SSH mit Schlüssel. Es gibt keinen Passwort-Login und keinen Agenten. Der SSH-Schlüssel liegt nur im verschlüsselten Tresor.', 'The connection uses SSH with a key. There is no password login and no agent. The key lives only in the encrypted vault.')}</p>
     <button type="button" disabled={busy} onClick={refresh}>{text(de, 'Laden / aktualisieren', 'Load / refresh')}</button>
     {error && <RemoteError de={de} {...error} />}
@@ -205,7 +219,7 @@ export function RemoteHostsPanel({ de, request }) {
     </li>)}</ul>
 
     <h4>{text(de, 'Server auf Hosts', 'Servers on hosts')}</h4>
-    <ul>{instances.map(entry => <RemoteInstanceRow key={entry.instance.id} de={de} entry={entry} busy={busy} onAction={instanceAction} />)}</ul>
+    <ul>{instances.map(entry => <li key={entry.instance.id} style={{ listStyle: 'none' }}><ul><RemoteInstanceRow de={de} entry={entry} busy={busy} onAction={instanceAction} /></ul><RemoteInstanceTools de={de} entry={entry} request={request} /></li>)}</ul>
     {output?.kind === 'logs' && <div><h5>Logs {output.instance.id}</h5><pre>{output.data.stdout}</pre><pre>{output.data.stderr}</pre><pre>{output.data.console}</pre></div>}
     {output?.kind === 'health' && <div><h5>Health {output.instance.id}</h5><pre>{JSON.stringify(output.data, null, 2)}</pre></div>}
     {output?.kind === 'backups' && <div><h5>Backups {output.instance.id}</h5><ul>{output.data.map(backup => <li key={backup.backupId}><code>{backup.backupId}</code> {backup.invalid ? text(de, '(ungültig)', '(invalid)') : backup.createdAt} <button type="button" disabled={busy || backup.invalid} onClick={() => restore(output.instance, backup.backupId)}>{text(de, 'Wiederherstellen', 'Restore')}</button></li>)}</ul></div>}

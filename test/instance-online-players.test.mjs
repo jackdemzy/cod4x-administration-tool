@@ -42,3 +42,16 @@ test('Block 16: the online list says when b3hide limits the status', { skip }, a
   assert.match(html, /b3hide aktiv: Status eingeschränkt/);
   assert.ok(!(await view({ permissions: { manage: false }, online })).includes('b3hide aktiv'));
 });
+
+test('Block 18b: the player list takes a base path for remote servers', { skip }, async () => {
+  const bundle = await build({
+    stdin: { contents: `export { playersBase } from './lib/instance-online-players.jsx';`, resolveDir: source, loader: 'jsx' },
+    bundle: true, platform: 'node', format: 'esm', write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' },
+    banner: { js: `import {createRequire as testCreateRequire} from 'node:module'; const require = testCreateRequire(${JSON.stringify(new URL('../package.json', import.meta.url).href)});` },
+  });
+  const { playersBase } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
+  assert.equal(playersBase({ instance: { id: 'a b' } }), '/api/instances/a%20b');
+  assert.equal(playersBase({ instance: { id: 'srv-1' }, basePath: '/api/remote-instances/srv-1' }), '/api/remote-instances/srv-1');
+  const html = await (await renderer())('InstanceOnlinePlayers', { de: true, instance: { id: 'srv-1' }, basePath: '/api/remote-instances/srv-1', request: noFetch, initial: { permissions: { manage: true }, online } });
+  assert.ok(html.includes('Wolf'));
+});

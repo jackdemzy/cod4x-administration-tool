@@ -58,7 +58,7 @@ test('the permission map lists every remote Linux route and the server wires the
   const source = await fs.readFile(fileURLToPath(new URL('../installer-server.mjs', import.meta.url)), 'utf8');
   assert.match(source, /\.\.\.REMOTE_LINUX_BINDINGS/);
   assert.match(source, /registerRemoteLinuxRoutes\(\{ app, requirePermission, audit,/);
-  assert.match(source, /id\.startsWith\("ssh_"\) \? resolveSshSubject\(id\)/);
+  assert.match(source, /id\.startsWith\("ssh_"\) \? resolveSshSubject\(id\) : isRemoteSubject\(id\) \? resolveRemoteSubject\(id\)/);
   const { REMOTE_LINUX_BINDINGS } = await import('../lib/remote-linux-routes.mjs');
   const listed = REMOTE_LINUX_BINDINGS.flatMap(binding => binding.routes);
   const routes = await fs.readFile(fileURLToPath(new URL('../lib/remote-linux-routes.mjs', import.meta.url)), 'utf8');
@@ -190,7 +190,10 @@ test('remote Linux API on the real backend: permissions, host key, vault key, lo
   assert.equal((await call(viewer, '/api/remote-instances/one/config')).status, 403);
   assert.equal((await call(viewer, '/api/remote-instances/one/config', { text: 'x', expectedSha256: 'a'.repeat(64) }, 'PUT')).status, 403);
   assert.equal((await call(viewer, '/api/remote-instances/one/backups', {})).status, 403);
-  assert.deepEqual([(await call(operator, '/api/remote-instances/one/rcon/status')).status, (await call(operator, '/api/remote-instances/one/rcon/command', {})).json.code], [400, 'REMOTE_RCON_UNSUPPORTED']);
+  // Block 18b: RCON for remote servers is wired; an unknown remote id stops before the RCON service, a viewer before the route
+  assert.deepEqual([(await call(operator, '/api/remote-instances/one/rcon')).status, (await call(operator, '/api/remote-instances/one/rcon/command', { command: 'status' })).json.code], [404, 'REMOTE_INSTANCE_NOT_FOUND']);
+  assert.equal((await call(viewer, '/api/remote-instances/one/rcon/command', { command: 'status' })).status, 403);
+  assert.equal((await call(viewer, '/api/remote-instances/one/rcon/online')).json.code, 'REMOTE_INSTANCE_NOT_FOUND');
   assert.equal((await call(operator, '/api/remote-instances/one/b3/dashboard')).json.code, 'REMOTE_B3_UNSUPPORTED');
   assert.equal((await call(operator, '/api/remote-instances/one/logs?limit=0')).json.code, 'REMOTE_ARGUMENT_INVALID');
   assert.equal((await call(operator, '/api/remote-instances/one/logs?limit=abc')).json.code, 'REMOTE_ARGUMENT_INVALID');
@@ -212,7 +215,7 @@ test('remote Linux API on the real backend: permissions, host key, vault key, lo
   assert.ok(JSON.stringify(map.json).includes('POST /api/remote-instances/:id/start'));
 
   // nothing secret in the audit
-  const audit = JSON.stringify((await call(admin, '/api/audit')).json);
+  const audit = JSON.stringify((await call(admin, '/api/audit?limit=1000')).json); // the default window is the last 100 events
   assert.ok(audit.includes('remote.host.created') && audit.includes('remote.host.key_trusted'));
   assert.ok(!audit.includes('BEGIN') && !audit.includes(clientKey.private.slice(60, 120)) && !audit.includes(vaultPassphrase));
   assert.ok(!diagnostics.includes('BEGIN OPENSSH'), 'the key is not in the backend output');
