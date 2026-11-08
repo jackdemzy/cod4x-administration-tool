@@ -390,3 +390,35 @@ test('a password the core command line cannot carry safely is not written', { sk
   await f.manager.stop('public-01');
   assert.ok(await gone(runtime.pid));
 });
+
+test('review: a vault lock while the password file is uploaded starts without RCON and leaves no file', { skip }, async t => {
+  const provisioned = [];
+  const credentials = {
+    async withRuntimeCredentials(id, action) {
+      const controller = new AbortController();
+      const result = await action({ rcon: Buffer.from(RCON_PASSWORD) }, controller.signal).finally(() => controller.abort()); // the lock arrives during the upload
+      if (controller.signal.aborted) throw Object.assign(new Error('VAULT_LOCKED'), { code: 'VAULT_LOCKED' });
+      return result;
+    },
+  };
+  const f = await createRemoteFixture(t, { managerOptions: { credentials, onProvisioned: (id, runId, info) => provisioned.push(info) } });
+  const instance = await f.install('public-01');
+  const { runtime } = await f.manager.start('public-01');
+  assert.equal(runtime.status, 'RUNNING');
+  assert.ok(!(await cmdline(runtime.pid)).some(arg => /^rcon-/.test(arg)), 'the core gets no exec of a password file');
+  assert.deepEqual(await rconFiles(instance.home), [], 'the uploaded file is swept');
+  assert.deepEqual(provisioned.map(entry => entry.rcon), [false]);
+  await f.manager.stop('public-01');
+});
+
+test('review: statusAll that finds a core gone sweeps a leftover password file', { skip }, async t => {
+  const f = await createRemoteFixture(t, { managerOptions: vaultWith(RCON_PASSWORD) });
+  const instance = await f.install('public-01');
+  const { runtime } = await f.manager.start('public-01');
+  await fs.writeFile(`${instance.home}/main/rcon-stale.cfg`, 'set rcon_password "x"\n', { mode: 0o600 });
+  process.kill(runtime.pid, 'SIGKILL');
+  assert.ok(await gone(runtime.pid));
+  const entries = await f.manager.statusAll();
+  assert.notEqual(entries.find(entry => entry.instance.id === 'public-01').runtime.status, 'RUNNING');
+  assert.deepEqual(await rconFiles(instance.home), []);
+});
