@@ -37,6 +37,7 @@ import { RemoteHostStore } from "./lib/remote-host-store.mjs";
 import { RemoteInstanceStore } from "./lib/remote-instance-store.mjs";
 import { RemoteStateStore } from "./lib/remote-runtime-state.mjs";
 import { RemoteHostService, sshSubjectResolver } from "./lib/remote-host-service.mjs";
+import { isRemoteSubject, createShadowStore, remoteSubjectResolver, prefixedCredentials } from "./lib/remote-subjects.mjs";
 import { RemoteInstanceManager } from "./lib/remote-instance-manager.mjs";
 import { registerRemoteLinuxRoutes, REMOTE_LINUX_BINDINGS } from "./lib/remote-linux-routes.mjs";
 import { InstanceRconService } from "./lib/instance-rcon-service.mjs";
@@ -2387,7 +2388,11 @@ let remoteInstanceStore = null;
 const remoteHostStore = new RemoteHostStore({ file: dataPath("config", "remote-hosts.json"), inUse: id => remoteInstanceStore.hasInstancesFor(id) });
 remoteInstanceStore = new RemoteInstanceStore({ file: dataPath("config", "remote-instances.json"), hosts: remoteHostStore });
 const resolveSshSubject = sshSubjectResolver({ hosts: remoteHostStore, dataRoot: DATA_ROOT });
-const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : instanceStore.get(id)) });
+// Block 18b: the local side of each remote instance (rmt_<id> in the vault, own data directory).
+const remoteShadowStore = createShadowStore({ instances: remoteInstanceStore, dataRoot: DATA_ROOT });
+const resolveRemoteSubject = remoteSubjectResolver(remoteShadowStore);
+const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : isRemoteSubject(id) ? resolveRemoteSubject(id) : instanceStore.get(id)) });
+const remoteCredentials = prefixedCredentials(credentialService);
 let instanceManager = null;
 // RCON audit events carry instance, actor, normalized command and codes only, never the password.
 const rconService = new InstanceRconService({ resolveInstance: id => instanceStore.get(id), runtimeFor: id => instanceManager.runtime(id), credentialService, audit,
