@@ -27,6 +27,22 @@ const MESSAGES = {
   REMOTE_RCON_UNSUPPORTED: ['RCON ist für Remote-Server nicht verfügbar.', 'RCON is not available for remote servers.'],
   REMOTE_B3_UNSUPPORTED: ['B3 ist für Remote-Server nicht verfügbar.', 'B3 is not available for remote servers.'],
   REMOTE_OPERATION_BUSY: ['Für diesen Server läuft bereits ein Vorgang.', 'An operation is already running for this server.'],
+  REMOTE_INSTANCE_RUNNING: ['Der Server läuft. Bitte zuerst stoppen.', 'The server is running. Stop it first.'],
+  REMOTE_RECOVERY_BLOCKED: ['Der Zustand auf dem Server ist unklar. Es wurde nichts gestoppt oder entfernt.', 'The state on the server is unclear. Nothing was stopped or removed.'],
+  INSTANCE_PROCESS_IDENTITY_BLOCKED: ['Auf dem Server gehört ein Prozess oder Container mit diesem Namen nicht zu dieser Instanz. Er wurde nicht angefasst.', 'A process or container with this name on the server does not belong to this instance. It was not touched.'],
+  // Block 19: Docker
+  REMOTE_DOCKER_UNAVAILABLE: ['Docker ist auf diesem Host für den SSH-Benutzer nicht erreichbar.', 'Docker cannot be reached by the SSH user on this host.'],
+  REMOTE_DOCKER_NOT_CONFIRMED: ['Docker ist für diesen Host noch nicht bestätigt.', 'Docker has not been confirmed for this host yet.'],
+  REMOTE_DOCKER_CONFIRMATION_REQUIRED: ['Für die docker-Gruppe muss das Bestätigungswort genau eingegeben werden.', 'For the docker group the confirmation word must be typed exactly.'],
+  REMOTE_DOCKER_MODE_CHANGED: ['Der Host erreicht Docker jetzt anders als bestätigt (rootless oder docker-Gruppe). Bitte neu bestätigen.', 'The host now reaches Docker in another way than confirmed (rootless or docker group). Confirm it again.'],
+  REMOTE_DOCKER_IMAGE_MISSING: ['Das Laufzeit-Image fehlt auf dem Host oder ist veraltet. Bitte das Image bauen.', 'The runtime image is missing on the host or outdated. Build the image.'],
+  REMOTE_DOCKER_BUILD_FAILED: ['Das Image konnte nicht gebaut werden. Der Host braucht dafür Zugriff auf Docker Hub und die Debian-Paketquellen.', 'The image could not be built. The host needs access to Docker Hub and the Debian package mirrors for it.'],
+  REMOTE_DOCKER_START_FAILED: ['Docker hat den Container nicht gestartet.', 'Docker did not start the container.'],
+  REMOTE_DOCKER_CONTAINER_EXISTS: ['Ein laufender Container dieser Instanz ist CONTROL nicht bekannt. Er wurde nicht angefasst.', 'A running container of this instance is unknown to CONTROL. It was not touched.'],
+  REMOTE_DOCKER_REMOVE_FAILED: ['Der gestoppte Container konnte nicht entfernt werden.', 'The stopped container could not be removed.'],
+  REMOTE_DOCKER_INSPECT_FAILED: ['Docker hat keine verwertbare Antwort gegeben. Es wurde nichts verändert.', 'Docker gave no usable answer. Nothing was changed.'],
+  REMOTE_DOCKER_PATH_UNSUPPORTED: ['Ein Pfad mit Komma oder Anführungszeichen kann nicht in einen Container eingebunden werden.', 'A path with a comma or a double quote cannot be mounted into a container.'],
+  REMOTE_DEPLOYMENT_CHANGE_FAILED: ['Die Betriebsart konnte nicht umgestellt werden. Die Instanz ist unverändert.', 'The deployment could not be changed. The instance is unchanged.'],
 };
 
 export function RemoteError({ de, code, presentedSha256, pinnedSha256 }) {
@@ -82,11 +98,37 @@ export function HostCredentialForm({ de, host, status, busy, onSave, onRemove })
   </form>;
 }
 
+// Block 19: how one host reaches Docker. `status` is the answer of GET /api/remote-hosts/<id>/docker.
+// The docker group is root on the host: that is confirmed per host by typing the word, never by a tick.
+export const DOCKER_CONFIRM_WORD = 'DOCKER_ROOT_EQUIVALENT';
+const IMAGE_STATE = { PRESENT: ['Image bereit', 'Image ready'], MISSING: ['Image fehlt', 'Image missing'], OUTDATED: ['Image veraltet', 'Image outdated'] };
+export function DockerHostLine({ de, status, busy, onConfirm, onBuild }) {
+  const [word, setWord] = useState('');
+  if (!status) return null;
+  if (status.mode === 'NO_DOCKER') return <p>{text(de, 'Docker ist auf diesem Host für den SSH-Benutzer nicht verfügbar.', 'Docker is not available to the SSH user on this host.')}</p>;
+  const rootful = status.mode === 'ROOTFUL';
+  const image = IMAGE_STATE[status.image];
+  return <div style={{ marginTop: 8 }}>
+    <span>Docker {status.version} — {rootful ? text(de, 'über die docker-Gruppe', 'through the docker group') : 'rootless'} — {status.confirmed ? text(de, 'bestätigt', 'confirmed') : text(de, 'nicht bestätigt', 'not confirmed')}{image ? <> — {text(de, image[0], image[1])}</> : null}</span>
+    {rootful
+      ? <p role={status.confirmed ? 'note' : 'alert'}>{text(de, 'Achtung: Die Mitgliedschaft in der docker-Gruppe ist auf diesem Host root-gleich. Wer diesen SSH-Schlüssel hat, kann über Docker alles auf dem Host lesen und ändern. Rootless Docker vermeidet das.', 'Warning: membership in the docker group is equivalent to root on this host. Whoever holds this SSH key can read and change everything on the host through Docker. Rootless Docker avoids this.')}</p>
+      : <p role="note">{text(de, 'Hinweis: Mit rootless Docker sieht der Server je nach Netzwerk-Treiber nicht die echte Absender-Adresse der Spieler. IP-Bans und die Anzeige der Spieler-Adressen sind dann unzuverlässig.', 'Note: with rootless Docker the server may not see the real source address of players, depending on the network driver. IP bans and the shown player addresses are unreliable then.')}</p>}
+    {!status.confirmed && <div>
+      {rootful && <label>{text(de, 'Zum Bestätigen eintippen: ', 'Type to confirm: ')}<code>{DOCKER_CONFIRM_WORD}</code> <input type="text" value={word} onChange={event => setWord(event.target.value)} autoComplete="off" spellCheck={false} disabled={busy} /></label>}
+      <button type="button" disabled={busy || (rootful && word !== DOCKER_CONFIRM_WORD)} onClick={() => { const typed = rootful ? word : null; setWord(''); onConfirm(typed); }}>{text(de, 'Docker für diesen Host bestätigen', 'Confirm Docker for this host')}</button>
+    </div>}
+    <button type="button" disabled={busy || !status.confirmed} onClick={() => onBuild()}>{text(de, 'Image bauen', 'Build image')}</button>
+  </div>;
+}
+
 const ACTIONS = [['start', 'Start', 'Start'], ['stop', 'Stop', 'Stop'], ['restart', 'Neustart', 'Restart']];
+const SWITCHABLE = ['STOPPED', 'FAILED']; // the server refuses anything else; without a saved state nothing ran yet
 export function RemoteInstanceRow({ de, entry, busy, onAction }) {
   const { instance, runtime } = entry;
+  const docker = instance.deployment === 'docker';
+  const stopped = !entry.error && (!runtime?.status || SWITCHABLE.includes(runtime.status)) && !runtime?.recoveryBlocked;
   return <li style={{ margin: '8px 0' }}>
-    <strong>{instance.name}</strong> <code>{instance.id}</code> @ <code>{instance.hostId}</code>:{instance.port} — <span>{entry.error || runtime?.status || 'UNKNOWN'}</span>{runtime?.pid ? <span> (PID {runtime.pid})</span> : null}{runtime?.recoveryBlocked ? <span> ⚠ {text(de, 'Wiederherstellung nötig', 'recovery needed')}</span> : null}
+    <strong>{instance.name}</strong> <code>{instance.id}</code> @ <code>{instance.hostId}</code>:{instance.port} — <span>{entry.error || runtime?.status || 'UNKNOWN'}</span>{runtime?.pid ? <span> (PID {runtime.pid})</span> : null}{runtime?.containerId ? <span> (Container {String(runtime.containerId).slice(0, 12)})</span> : null} <span>[{docker ? 'Docker' : text(de, 'nativ', 'native')}]</span>{runtime?.recoveryBlocked ? <span> ⚠ {text(de, 'Wiederherstellung nötig', 'recovery needed')}</span> : null}
     <div>
       {ACTIONS.map(([id, german, english]) => <button key={id} type="button" disabled={busy} onClick={() => onAction(id, instance)}>{text(de, german, english)}</button>)}
       <button type="button" disabled={busy} onClick={() => onAction('logs', instance)}>Logs</button>
@@ -94,7 +136,9 @@ export function RemoteInstanceRow({ de, entry, busy, onAction }) {
       <button type="button" disabled={busy} onClick={() => onAction('config', instance)}>Config</button>
       <button type="button" disabled={busy} onClick={() => onAction('backup', instance)}>Backup</button>
       <button type="button" disabled={busy} onClick={() => onAction('backups', instance)}>{text(de, 'Backups', 'Restore list')}</button>
+      <button type="button" disabled={busy || !stopped} onClick={() => onAction(docker ? 'deployment-native' : 'deployment-docker', instance)}>{docker ? text(de, 'Auf nativ umstellen', 'Switch to native') : text(de, 'Auf Docker umstellen', 'Switch to Docker')}</button>
     </div>
+    {docker && <p role="note">{text(de, 'Container: Von Docker veröffentlichte Ports umgehen ufw. Ist der Server öffentlich, schützt ufw diesen Port nicht; nutze die Firewall des Anbieters oder Regeln in der Kette DOCKER-USER. Der Container lauscht nur über IPv4.', 'Container: ports published by Docker bypass ufw. If the server is public, ufw does not protect this port; use the firewall of the provider or rules in the DOCKER-USER chain. The container listens on IPv4 only.')}</p>}
   </li>;
 }
 
@@ -104,7 +148,7 @@ export function RemoteInstanceTools({ de, entry, request }) {
   const { instance, runtime } = entry;
   const basePath = `/api/remote-instances/${encodeURIComponent(instance.id)}`;
   const view = { ...instance, runtime: runtime || { status: 'UNKNOWN' } };
-  const running = runtime?.status === 'RUNNING' && Boolean(runtime.pid);
+  const running = runtime?.status === 'RUNNING' && Boolean(runtime.pid || runtime.containerId);
   return <div>
     <InstanceCredentialEditor instance={view} request={request} de={de} kinds={['rcon', 'b3db']} basePath={basePath} remote />
     {running ? <>
@@ -117,13 +161,13 @@ export function RemoteInstanceTools({ de, entry, request }) {
 }
 
 const EMPTY_HOST = { id: '', label: '', host: '', port: '22', username: '' };
-const EMPTY_INSTALL = { id: '', name: '', hostId: '', port: '28960', remoteRoot: '', basePath: '', corePath: '', coreVersion: '21.5', expectedCoreSha256: '' };
+const EMPTY_INSTALL = { id: '', name: '', hostId: '', port: '28960', remoteRoot: '', basePath: '', corePath: '', coreVersion: '21.5', expectedCoreSha256: '', deployment: 'native' };
 
 export function RemoteHostsPanel({ de, request }) {
   const [hosts, setHosts] = useState([]), [instances, setInstances] = useState([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(null), [message, setMessage] = useState('');
   const [dialog, setDialog] = useState(null), [confirmed, setConfirmed] = useState(false);
-  const [credentials, setCredentials] = useState({}), [output, setOutput] = useState(null);
+  const [credentials, setCredentials] = useState({}), [output, setOutput] = useState(null), [docker, setDocker] = useState({});
   const [hostForm, setHostForm] = useState(EMPTY_HOST), [installForm, setInstallForm] = useState(EMPTY_INSTALL);
   const [configEdit, setConfigEdit] = useState(null);
   const mounted = useRef(true), working = useRef(false);
@@ -176,6 +220,19 @@ export function RemoteHostsPanel({ de, request }) {
     await call(`/api/remote-hosts/${encodeURIComponent(host.id)}/credentials/ssh/remove`, 'POST', { expectedSha256: credentials[host.id].sha256 });
     const data = await call(`/api/remote-hosts/${encodeURIComponent(host.id)}/credentials`); setCredentials(old => ({ ...old, [host.id]: data.credentials }));
   });
+  const dockerRoute = host => `/api/remote-hosts/${encodeURIComponent(host.id)}/docker`;
+  const showDocker = async host => { const data = await call(dockerRoute(host)); setDocker(old => ({ ...old, [host.id]: data.docker })); };
+  const loadDocker = host => run(() => showDocker(host));
+  const confirmDocker = (host, confirm) => run(async () => {
+    await call(`${dockerRoute(host)}/confirm`, 'POST', { confirm });
+    setMessage(text(de, 'Docker für diesen Host bestätigt.', 'Docker confirmed for this host.'));
+    setHosts((await call('/api/remote-hosts')).hosts || []); await showDocker(host);
+  });
+  const buildImage = host => run(async () => {
+    setMessage(text(de, 'Image wird gebaut. Das kann einige Minuten dauern.', 'Building the image. This can take a few minutes.'));
+    await call(`${dockerRoute(host)}/image`, 'POST', {});
+    setMessage(text(de, 'Image gebaut.', 'Image built.')); await showDocker(host);
+  });
   const install = event => { event.preventDefault(); run(async () => {
     await call('/api/remote-instances', 'POST', { ...installForm, port: Number(installForm.port) });
     setInstallForm(EMPTY_INSTALL); setMessage(text(de, 'Server installiert.', 'Server installed.'));
@@ -184,7 +241,11 @@ export function RemoteHostsPanel({ de, request }) {
   const instanceAction = (action, instance) => run(async () => {
     const base = `/api/remote-instances/${encodeURIComponent(instance.id)}`;
     setOutput(null); setConfigEdit(null);
-    if (['start', 'stop', 'restart'].includes(action)) {
+    if (action === 'deployment-docker' || action === 'deployment-native') {
+      await call(`${base}/deployment`, 'POST', { deployment: action.slice('deployment-'.length) });
+      setMessage(text(de, 'Betriebsart umgestellt. Der Server ist gestoppt und startet beim nächsten Start in der neuen Betriebsart.', 'Deployment changed. The server is stopped and uses the new deployment at the next start.'));
+      setInstances((await call('/api/remote-instances')).instances || []);
+    } else if (['start', 'stop', 'restart'].includes(action)) {
       await call(`${base}/${action}`, 'POST', {});
       setInstances((await call('/api/remote-instances')).instances || []);
     } else if (action === 'logs') setOutput({ kind: 'logs', instance, data: (await call(`${base}/logs`)).logs });
@@ -222,9 +283,11 @@ export function RemoteHostsPanel({ de, request }) {
       <div>
         {!host.hostKeySha256 && <button type="button" disabled={busy} onClick={() => probe(host)}>{text(de, 'Host-Schlüssel prüfen', 'Verify host key')}</button>}
         <button type="button" disabled={busy} onClick={() => loadCredentials(host)}>{text(de, 'SSH-Schlüssel-Status', 'SSH key status')}</button>
+        <button type="button" disabled={busy} onClick={() => loadDocker(host)}>{text(de, 'Docker-Status', 'Docker status')}</button>
         <button type="button" disabled={busy} onClick={() => removeHost(host)}>{text(de, 'Host entfernen', 'Remove host')}</button>
       </div>
       {credentials[host.id] && <HostCredentialForm de={de} host={host} status={credentials[host.id]} busy={busy} onSave={body => saveKey(host, body)} onRemove={() => removeKey(host)} />}
+      <DockerHostLine de={de} status={docker[host.id]} busy={busy} onConfirm={word => confirmDocker(host, word)} onBuild={() => buildImage(host)} />
     </li>)}</ul>
 
     <h4>{text(de, 'Server auf Hosts', 'Servers on hosts')}</h4>
@@ -241,6 +304,11 @@ export function RemoteHostsPanel({ de, request }) {
     <form onSubmit={install}>
       {[['id', 'ID', 'ID'], ['name', 'Name', 'Name'], ['hostId', 'Host-ID', 'Host ID'], ['port', 'Server-Port', 'Server port'], ['remoteRoot', 'Zielverzeichnis (Server)', 'Target directory (server)'], ['basePath', 'BaseGame-Pfad (Server)', 'Base game path (server)'], ['corePath', 'Core-Datei (dieser PC)', 'Core file (this PC)'], ['coreVersion', 'Core-Version', 'Core version'], ['expectedCoreSha256', 'Core SHA-256', 'Core SHA-256']].map(([field, german, english]) =>
         <label key={field} style={{ display: 'block' }}>{text(de, german, english)} <input type="text" value={installForm[field]} onChange={event => setInstallForm({ ...installForm, [field]: event.target.value })} required disabled={busy} autoComplete="off" /></label>)}
+      <label style={{ display: 'block' }}>{text(de, 'Betriebsart', 'Deployment')} <select value={installForm.deployment} onChange={event => setInstallForm({ ...installForm, deployment: event.target.value })} disabled={busy}>
+        <option value="native">{text(de, 'Nativ (Prozess auf dem Host)', 'Native (process on the host)')}</option>
+        <option value="docker">{text(de, 'Docker (Container auf dem Host)', 'Docker (container on the host)')}</option>
+      </select></label>
+      <p>{text(de, 'Docker braucht einen Host, auf dem Docker bestätigt und das Image gebaut wurde (Schaltfläche „Docker-Status“ beim Host).', 'Docker needs a host where Docker was confirmed and the image was built (button “Docker status” at the host).')}</p>
       <button type="submit" disabled={busy}>{text(de, 'Installieren', 'Install')}</button>
     </form>
   </section>;

@@ -35,7 +35,7 @@ export function InstanceRconConsole({ instance, request, de, basePath = null, re
   const [command, setCommand] = useState(''), [filter, setFilter] = useState(''), [source, setSource] = useState('all');
   const [autoScroll, setAutoScroll] = useState(true), [cleared, setCleared] = useState(null);
   const commandHistory = useRef([]), historyIndex = useRef(-1), output = useRef(null), mounted = useRef(true), autoConnectedRun = useRef(null);
-  const running = instance.runtime?.status === 'RUNNING' && Boolean(instance.runtime?.pid);
+  const running = instance.runtime?.status === 'RUNNING' && Boolean(instance.runtime?.pid || instance.runtime?.containerId); // a remote container has an ID, no pid
   const route = consoleRoute({ instance, basePath });
   async function call(path, body) {
     const response = await request(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });

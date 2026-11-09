@@ -93,6 +93,8 @@ test('Block 18b: a running remote server gets the console and the player list ov
   assert.match(running, /Server-Konsole · RCON/);
   assert.match(running, /RCON über SSH auf dem Server, dort an 127\.0\.0\.1:28961/);
   assert.match(running, /Online-Spieler|Spieler/);
+  const container = render('RemoteInstanceTools', { de: true, entry: { instance: { id: 'srv-1', name: 'Srv', hostId: 'lab-1', port: 28961, deployment: 'docker' }, runtime: { status: 'RUNNING', containerId: 'abcdef012345', runId: 'r1' } }, request: noFetch });
+  assert.match(container, /Server-Konsole · RCON/, 'Block 19: a running container has no pid and still gets the console');
   const stopped = render('RemoteInstanceTools', { de: false, entry: entry('STOPPED'), request: noFetch });
   assert.doesNotMatch(stopped, /Server console/);
   assert.match(stopped, /Start the server to use RCON/);
@@ -104,4 +106,66 @@ test('Block 18b: a running remote server gets the console and the player list ov
     assert.ok(!/type="password"[^>]*name="password"/.test(html));
   }
   assert.match(stopped, /RCON password goes to the server as a private file/);
+});
+
+// ---- Block 19: Docker ------------------------------------------------------------------------------------------
+test('Block 19: a docker-group host shows the root warning and the confirm button stays disabled until the word is typed', { skip }, async () => {
+  const render = await renderer();
+  const props = { busy: false, host: { id: 'lab-1', docker: null }, onConfirm() {}, onBuild() {} };
+  const rootful = { mode: 'ROOTFUL', version: '29.1.0', confirmed: false, image: 'MISSING', note: 'ROOTFUL_ROOT_EQUIVALENT' };
+  const en = render('DockerHostLine', { ...props, de: false, status: rootful });
+  assert.match(en, /role="alert"/);
+  assert.match(en, /equivalent to root on this host/);
+  assert.match(en, /DOCKER_ROOT_EQUIVALENT/);
+  assert.match(en, /29\.1\.0/);
+  assert.match(en, /<button[^>]*disabled=""[^>]*>Confirm Docker for this host/);
+  assert.match(en, /<button[^>]*disabled=""[^>]*>Build image/, 'no build before the confirmation');
+  const de = render('DockerHostLine', { ...props, de: true, status: rootful });
+  assert.match(de, /root-gleich/);
+  assert.doesNotMatch(de, /type="password"/);
+});
+
+test('Block 19: a rootless host gets the note about player addresses, a confirmed host the build button, no Docker no controls', { skip }, async () => {
+  const render = await renderer();
+  const props = { de: false, busy: false, host: { id: 'lab-1', docker: null }, onConfirm() {}, onBuild() {} };
+  const rootless = render('DockerHostLine', { ...props, status: { mode: 'ROOTLESS', version: '29.1.0', confirmed: false, image: 'MISSING', note: 'ROOTLESS_SOURCE_ADDRESS' } });
+  assert.match(rootless, /source address of players/);
+  assert.doesNotMatch(rootless, /role="alert"/);
+  assert.doesNotMatch(rootless, /<button[^>]*disabled=""[^>]*>Confirm Docker for this host/, 'rootless needs no word');
+  const confirmed = render('DockerHostLine', { ...props, status: { mode: 'ROOTFUL', version: '29.1.0', confirmed: true, image: 'OUTDATED', note: 'ROOTFUL_ROOT_EQUIVALENT' } });
+  assert.match(confirmed, /Image outdated/);
+  assert.doesNotMatch(confirmed, /<button[^>]*disabled=""[^>]*>Build image/);
+  assert.doesNotMatch(confirmed, />Confirm Docker for this host</);
+  const present = render('DockerHostLine', { ...props, status: { mode: 'ROOTLESS', version: '29.1.0', confirmed: true, image: 'PRESENT', note: 'ROOTLESS_SOURCE_ADDRESS' } });
+  assert.match(present, /Image ready/);
+  const none = render('DockerHostLine', { ...props, status: { mode: 'NO_DOCKER', version: null, confirmed: false, image: null, note: null } });
+  assert.match(none, /Docker is not available/);
+  assert.doesNotMatch(none, /<button/);
+});
+
+test('Block 19: the instance row names the deployment, shows the short container ID and offers the switch only while stopped', { skip }, async () => {
+  const render = await renderer();
+  const row = (instance, runtime, de = false) => render('RemoteInstanceRow', { de, busy: false, entry: { instance: { id: 'srv-1', name: 'Srv', hostId: 'lab-1', port: 28960, ...instance }, runtime }, onAction() {} });
+  const running = row({ deployment: 'docker' }, { status: 'RUNNING', containerId: 'abcdef012345' });
+  assert.match(running, /Docker/);
+  assert.match(running, /Container abcdef012345/);
+  assert.doesNotMatch(running, /PID/);
+  assert.match(running, /<button[^>]*disabled=""[^>]*>Switch to native/);
+  assert.match(running, /ufw/, 'published ports bypass ufw: said where the instance is a container');
+  const stopped = row({ deployment: 'docker' }, { status: 'STOPPED' });
+  assert.doesNotMatch(stopped, /<button[^>]*disabled=""[^>]*>Switch to native/);
+  const native = row({ deployment: 'native' }, { status: 'STOPPED' }, true);
+  assert.match(native, />Auf Docker umstellen</);
+  assert.doesNotMatch(native, /ufw/);
+  const old = row({}, { status: 'RUNNING', pid: 42 });
+  assert.match(old, /PID 42/);
+  assert.match(old, /Switch to Docker/, 'an instance saved before Block 19 is native');
+});
+
+test('Block 19: the install form offers the deployment and the panel still has no login password field', { skip }, async () => {
+  const render = await renderer();
+  const html = render('RemoteHostsPanel', { de: false, request: noFetch });
+  assert.match(html, /<select[^>]*>.*<option value="native"[^>]*>.*<option value="docker"/s);
+  assert.match(html, /Docker needs a host where Docker was confirmed and the image was built/);
+  assert.doesNotMatch(html, /type="password"/);
 });

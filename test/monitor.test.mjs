@@ -150,3 +150,18 @@ test('Block 18b: probe and readConsole receive the instance, the host sample onl
   assert.deepEqual([collector.live('alpha').players.length, collector.live('rmt_alpha').players.length], [0, 1], 'a local and a remote server with the same name stay apart');
   assert.deepEqual([store.history('alpha', '24h') !== null, store.history('rmt_alpha', '24h') !== null], [true, true]);
 });
+
+test('Block 19: a running container (container ID, no pid) is probed like a running process', async t => {
+  const time = clock(Date.UTC(2026, 10, 9, 12));
+  const store = new MonitorStore({ directory: await tempDir(t), now: time.now });
+  await store.load();
+  const probes = [];
+  const collector = new MonitorCollector({
+    listInstances: async () => [{ id: 'rmt_box', name: 'Box', port: 28960, remote: true }],
+    runtimeFor: async () => ({ state: { status: 'RUNNING', pid: null, containerId: 'c'.repeat(64), runId: 'r' }, reconcileRuntimeState: async () => {} }),
+    probe: async (port, instance) => { probes.push(instance.id); return { reachable: true, latencyMs: 3, players: [] }; },
+    readConsole: async () => ({ text: '' }), host: { sample: async () => ({}) }, store, now: time.now,
+  });
+  await collector.tick();
+  assert.deepEqual(probes, ['rmt_box']);
+});
