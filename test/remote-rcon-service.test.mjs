@@ -68,3 +68,8 @@ test('a stopped remote server answers RCON_SERVER_NOT_RUNNING without any ssh co
   await assert.rejects(service.execute('srv-1', 'status', 'ops'), { code: 'RCON_SERVER_NOT_RUNNING' });
   assert.equal(loopback.session.calls.length, 0);
 });
+
+test('Block 19: a running container (container ID, no pid) is a running server for RCON', { skip }, async t => {
+  const { service } = await setup(t, { runtime: { status: 'RUNNING', pid: null, containerId: 'c'.repeat(64), runId: 'run-1' } });
+  assert.equal((await service.connect('srv-1', 'ops')).status, 'CONNECTED');
+});
