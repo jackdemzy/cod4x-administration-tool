@@ -1,6 +1,6 @@
 # Linux Docker deployment (Roadmap Block 19, 4.18.25)
 
-Status: **draft, waiting for Rafiki's review.** Decisions 1 to 3 were made by Rafiki on 2026-11-09; everything under "Design" is the proposal that follows from them. The implementation plan will be `docs/superpowers/plans/2026-11-09-docker-deployment.md` and is written only after this spec is approved.
+Status: **draft, waiting for Rafiki's review.** Decisions 1 to 4 were made by Rafiki on 2026-11-09; everything under "Design" is the proposal that follows from them. The implementation plan will be `docs/superpowers/plans/2026-11-09-docker-deployment.md` and is written only after this spec is approved.
 
 ## Roadmap text (Block 19, copied)
 
@@ -24,13 +24,15 @@ A CoD4x server on a Linux host can run inside a Docker container instead of as a
 2. **Image:** CONTROL builds it on the host from a fixed Dockerfile whose base image is pinned by digest. The image holds only the 32-bit runtime libraries. The core is uploaded and SHA-256-checked as in Block 18 and mounted read-only; game files never enter an image.
 3. **Docker access of the SSH user:** rootless Docker and membership in the `docker` group are both accepted. CONTROL detects which one a host has. The `docker` group is root-equivalent on that host and needs an explicit confirmation per host; rootless shows a note that player IP addresses may not be preserved.
 
+4. **Switching:** a stopped instance can be switched between `native` and `docker`. Docker Compose and local Docker on the CONTROL PC stay out of this block.
+
 ## Design
 
 ### Shape: one more deployment of a remote instance
 
 A remote instance (Block 18) gets a field `deployment` with the values `native` and `docker`. Records without the field are `native`, so existing instance lists load unchanged. The directory layout on the host is the same for both values (`main`, `zone`, `mods`, `plugins`, `usermaps`, `players`, `logs`, `core` below the instance home, BaseGame at its own read-only path). Install, core upload and hash check, config read and write, backup and restore, the network confirmation and the host-key policy are reused as they are. Only the part that starts, identifies, stops and inspects the server differs.
 
-That part moves behind a small runtime interface with two implementations: the existing process runtime (`setsid`, PID, `/proc` identity) and a new container runtime. `RemoteInstanceManager` picks one by `deployment`. The deployment is chosen at install and is not changed afterwards in this block.
+That part moves behind a small runtime interface with two implementations: the existing process runtime (`setsid`, PID, `/proc` identity) and a new container runtime. `RemoteInstanceManager` picks one by `deployment`. The deployment is chosen at install and can be switched later (see "Switching the deployment").
 
 ### Data stays on the host: bind mounts, no named volumes
 
@@ -78,6 +80,16 @@ One container per instance, named `cod4x-<instanceId>`, with the labels `cod4x.c
 - **Logs:** `main/qconsole.log` from the home as today; the core's stdout and stderr through `docker logs --tail` with the same byte bound and text cleaning as other logs.
 - **No auto-restart:** `--restart no`. CONTROL owns the lifecycle as for native instances. After a host reboot the server is started from CONTROL.
 
+### Switching the deployment
+
+`setDeployment(id, deployment)` changes the field of an existing instance. The directory layout is the same for both values, so no file is moved or rewritten.
+
+- Allowed only when the instance is `STOPPED` (or `FAILED` with no live process or container) and recovery is not blocked; otherwise `REMOTE_INSTANCE_ACTIVE`. The check and the write run under the same per-instance lock as start and stop, so a start cannot slip in between.
+- Before the write CONTROL verifies on the host that nothing of the old deployment is left: no process that passes the identity check, and no container named `cod4x-<id>`. A stopped container of this instance (matching labels) is removed; a container with foreign labels stops the switch (`INSTANCE_PROCESS_IDENTITY_BLOCKED`).
+- Switching to `docker` needs the same preconditions as a Docker install: host probe, the `ROOTFUL` confirmation where it applies, and host paths without `,` or `"`. The image is not built by the switch; a missing image is reported at the next start.
+- The stored runtime state is reset to idle with the switch, so a PID is never read as a container ID or the other way round.
+- The switch is written to the audit log with the old and the new value.
+
 ### Command injection
 
 `lib/docker-commands.mjs` is the only module that builds a `docker` command line, under the same rules as `lib/remote-commands.mjs`: fixed words, values through `shellQuote`, IDs and names matched against fixed patterns (container ID `^[a-f0-9]{64}$`, name derived from the validated instance ID), ports as checked integers, `--format` templates as constants. No operator text reaches a `docker` flag.
@@ -88,7 +100,7 @@ Monitoring, RCON console and the phone actions go through the loopback-published
 
 ### Not covered by Block 19
 
-Local Docker on the CONTROL PC, Docker Compose, named volumes, switching an existing instance between `native` and `docker`, auto-restart after a host reboot, B3 in a container, Podman, operator-chosen resource limits (fixed defaults only), image cleanup (old tags stay until removed by hand).
+Local Docker on the CONTROL PC, Docker Compose, named volumes, auto-restart after a host reboot, B3 in a container, Podman, operator-chosen resource limits (fixed defaults only), image cleanup (old tags stay until removed by hand).
 
 ## Global constraints
 
@@ -106,6 +118,7 @@ Local Docker on the CONTROL PC, Docker Compose, named volumes, switching an exis
 5. A loopback instance is not reachable from another machine; a public one only after confirmation.
 6. The host changes from rootless to rootful (or back) after confirmation: the start stops.
 7. The image tag exists but was built from another Dockerfile: the start stops.
+8. A switch of the deployment while the server runs, starts or stops is refused, and a switch never leaves a process and a container of the same instance side by side.
 
 ## Open risks (each gets a test or the native gate)
 
@@ -118,6 +131,6 @@ Local Docker on the CONTROL PC, Docker Compose, named volumes, switching an exis
 
 **Container Restart ohne Datenverlust PASS**, in three layers:
 
-1. Fake-transport gate, runs everywhere: install, build, start, restart, stop, logs against a scripted Docker.
+1. Fake-transport gate, runs everywhere: install, build, start, restart, stop, logs and the switch in both directions against a scripted Docker.
 2. Real-Docker gate, runs wherever a Docker daemon is reachable (it is in the cloud test environment): a stand-in executable in place of the core writes into the home, the container is restarted and removed, the data is compared byte for byte, and the read-only mounts and the dropped capabilities are probed from inside.
 3. Native gate, run by Rafiki: real `sshd`, real core and BaseGame, a player joins before and after a restart. Added to `docs/WSL-NATIVE-CHECKLIST.md`.
