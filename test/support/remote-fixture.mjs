@@ -12,14 +12,14 @@ import { createLoopbackServer, buildFakeCore } from './loopback-transport.mjs';
 // with a compiled fake core, the real host/instance/state stores and the real manager.
 export const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
-export async function createRemoteFixture(t, { ignoreTerm = false, timing = {}, backups = true, managerOptions = {} } = {}) {
+export async function createRemoteFixture(t, { ignoreTerm = false, timing = {}, backups = true, managerOptions = {}, buildCore = buildFakeCore } = {}) {
   const loopback = await createLoopbackServer();
   const local = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-remote-fixture-'));
   t.after(async () => { await loopback.cleanup(); await fs.rm(local, { recursive: true, force: true }); });
   await fs.mkdir(loopback.path('game', 'main'), { recursive: true }); await fs.mkdir(loopback.path('game', 'zone'), { recursive: true });
   await fs.writeFile(loopback.path('game', 'main', 'pak0.iwd'), 'iwd'); await fs.writeFile(loopback.path('game', 'zone', 'common.ff'), 'ff');
   await fs.mkdir(loopback.path('servers'));
-  const corePath = await buildFakeCore(path.join(local, 'core'), 'cod4x18_dedrun', { ignoreTerm });
+  const corePath = await buildCore(path.join(local, 'core'), 'cod4x18_dedrun', { ignoreTerm });
   const coreSha256 = sha256(await fs.readFile(corePath));
 
   const hostStore = new RemoteHostStore({ file: path.join(local, 'hosts.json'), inUse: id => instances.hasInstancesFor(id) });
