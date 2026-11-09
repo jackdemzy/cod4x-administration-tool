@@ -2,6 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createRemoteFixture } from './remote-fixture.mjs';
+import { imageBuildCommand, parseDockerProbe, dockerProbeCommand } from '../../lib/docker-commands.mjs';
+import { DOCKERFILE, DOCKERFILE_SHA256, IMAGE_TAG } from '../../lib/docker-image.mjs';
 
 // Block 19 test doubles.
 //  - installFakeDocker: a scripted `docker` for the loopback "server". It implements exactly the
@@ -222,4 +225,24 @@ export async function buildContainerCore(directory, name = 'cod4x18_dedrun', { i
 export async function realDockerAvailable() {
   if (process.platform !== 'linux' || process.getuid() === 0) return false;
   try { await run('docker', ['info', '--format', '{{.ServerVersion}}'], { timeout: 10_000 }); return true; } catch { return false; }
+}
+
+// The remote fixture with Docker on the "server": the scripted docker by default, the real daemon with
+// real: true. ready: the host is confirmed and the runtime image is built. install() installs as docker.
+export async function createDockerFixture(t, { mode = 'ROOTFUL', ready = true, real = false, ...options } = {}) {
+  const f = await createRemoteFixture(t, { buildCore: buildContainerCore, ...options });
+  const fake = real ? null : await installFakeDocker(f.loopback, { mode });
+  if (fake) f.control.session = fake.session;
+  const session = f.control.session;
+  const hostMode = real ? parseDockerProbe(await session.exec(dockerProbeCommand())).mode : mode;
+  const used = new Set();
+  if (real) t.after(async () => { for (const id of used) await run('docker', ['rm', '--force', `cod4x-${id}`]).catch(() => {}); });
+  const buildImage = async () => {
+    const result = await session.exec(imageBuildCommand({ tag: IMAGE_TAG, dockerfileSha256: DOCKERFILE_SHA256 }), { timeoutMs: 600_000, stdin: Buffer.from(DOCKERFILE) });
+    if (result.code !== 0) throw new Error(`image build failed: ${result.stderr}`);
+  };
+  const confirm = (hostId = 'lab-1') => f.hostStore.setDocker(hostId, { mode: hostMode, confirmedAt: new Date().toISOString() });
+  if (ready) { await confirm(); await buildImage(); }
+  const install = (id, overrides = {}) => { used.add(id); return f.install(id, { deployment: 'docker', ...overrides }); };
+  return { ...f, fake, mode: hostMode, install, installNative: f.install, buildImage, confirm, track: id => used.add(id) };
 }

@@ -30,6 +30,7 @@ test('runContainerCommand is one fixed line', () => {
     "--mount 'type=bind,source=/srv/cod4,target=/cod4/base,readonly'",
     "--mount 'type=bind,source=/srv/servers/public-01/core,target=/cod4/core,readonly'",
     "--mount 'type=bind,source=/srv/servers/public-01,target=/cod4/home'",
+    "--mount 'type=bind,source=/srv/servers/public-01/core,target=/cod4/home/core,readonly'",
     '--publish 127.0.0.1:28960:28960/udp --publish 127.0.0.1:28960:28960/tcp',
     `${IMAGE} /cod4/core/cod4x18_dedrun '+set' 'dedicated' '2'`,
   ].join(' '));
