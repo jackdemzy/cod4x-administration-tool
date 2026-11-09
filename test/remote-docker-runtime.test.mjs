@@ -90,8 +90,10 @@ test('a core that ignores SIGTERM is killed by docker stop after the grace perio
 
 test('start is refused before any state is written: host not confirmed, image missing or outdated, mode changed, core changed', { skip }, async t => {
   const f = await createDockerFixture(t, { ready: false });
+  await f.confirm();
   const instance = await f.install('public-01');
   const refused = async code => { await rejects(f.manager.start('public-01'), code); assert.equal(await f.state.read('public-01'), null); assert.deepEqual(await runCalls(f), []); };
+  await f.hostStore.setDocker('lab-1', null); // the confirmation is withdrawn after the install
   await refused('REMOTE_DOCKER_NOT_CONFIRMED');
   await f.confirm();
   await refused('REMOTE_DOCKER_IMAGE_MISSING');
