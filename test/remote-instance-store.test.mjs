@@ -137,3 +137,41 @@ test('a host with instances cannot be removed from the host store, and can once 
   await hosts.remove('lab-1');
   assert.equal(hosts.list().length, 0);
 });
+
+// ---- Block 19: deployment ------------------------------------------------------------------------------
+test('deployment defaults to native, accepts docker, and an instance list without the field loads as native', async t => {
+  const { instances, file, reopen } = await fixture(t);
+  assert.equal((await instances.create(input())).deployment, 'native');
+  assert.equal((await instances.create(input({ id: 'public-02', port: 28961, deployment: 'docker' }))).deployment, 'docker');
+  await rejects(instances.create(input({ id: 'public-03', port: 28962, deployment: 'podman' })), 'REMOTE_INSTANCE_INVALID');
+  await rejects(instances.create(input({ id: 'public-03', port: 28962, deployment: null })), 'REMOTE_INSTANCE_INVALID');
+  // a file written by 4.18.24 has no deployment key
+  const raw = JSON.parse(await fs.readFile(file, 'utf8'));
+  for (const instance of raw.instances) delete instance.deployment;
+  await fs.writeFile(file, JSON.stringify(raw));
+  assert.deepEqual((await reopen()).list().map(instance => instance.deployment), ['native', 'native']);
+  raw.instances[0].deployment = 'podman';
+  await fs.writeFile(file, JSON.stringify(raw));
+  await rejects(reopen(), 'REMOTE_INSTANCE_STORE_INVALID');
+});
+
+test('a docker instance needs mount-safe host paths; a native one does not', async t => {
+  const { instances } = await fixture(t);
+  await rejects(instances.create(input({ remoteRoot: '/srv/a,b', deployment: 'docker' })), 'REMOTE_DOCKER_PATH_UNSUPPORTED');
+  await rejects(instances.create(input({ basePath: '/srv/ga"me', deployment: 'docker' })), 'REMOTE_DOCKER_PATH_UNSUPPORTED');
+  const native = await instances.create(input({ remoteRoot: '/srv/a,b' }));
+  assert.equal(native.deployment, 'native');
+  await rejects(instances.setDeployment('public-01', 'docker'), 'REMOTE_DOCKER_PATH_UNSUPPORTED');
+  assert.equal(instances.get('public-01').deployment, 'native');
+});
+
+test('setDeployment changes only the deployment and survives a reload', async t => {
+  const { instances, reopen } = await fixture(t);
+  const created = await instances.create(input());
+  const switched = await instances.setDeployment('public-01', 'docker');
+  assert.deepEqual(switched, { ...created, deployment: 'docker' });
+  assert.equal((await reopen()).get('public-01').deployment, 'docker');
+  assert.equal((await instances.setDeployment('public-01', 'native')).deployment, 'native');
+  for (const bad of ['podman', undefined, null, '']) await rejects(instances.setDeployment('public-01', bad), 'REMOTE_INSTANCE_INVALID');
+  await rejects(instances.setDeployment('nope', 'docker'), 'REMOTE_INSTANCE_NOT_FOUND');
+});

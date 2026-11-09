@@ -76,3 +76,33 @@ test('clear removes the state and tolerates a missing one', async t => {
   assert.equal(await store.read('public-01'), null);
   await store.clear('public-01');
 });
+
+// ---- Block 19: container identity ------------------------------------------------------------------------
+const CONTAINER = 'c'.repeat(64);
+const dockerState = overrides => state({ pid: null, createdAt: null, containerId: CONTAINER, ...overrides });
+
+test('a container id is stored for a Docker run and comes back', async t => {
+  const { store } = await fixture(t);
+  const written = await store.write('public-01', dockerState());
+  assert.equal(written.containerId, CONTAINER);
+  assert.deepEqual(await store.read('public-01'), written);
+  // containerId: null is the same as leaving it out; the key is then not stored
+  const cleared = await store.write('public-01', dockerState({ status: 'STOPPED', containerId: null }));
+  assert.ok(!('containerId' in cleared));
+});
+
+test('a state written by 4.18.24 (no containerId key) reads unchanged', async t => {
+  const { store, file } = await fixture(t);
+  await store.write('public-01', state());
+  const raw = JSON.parse(await fs.readFile(file('public-01'), 'utf8'));
+  assert.ok(!('containerId' in raw.state));
+  assert.equal((await store.read('public-01')).pid, 4242);
+});
+
+test('a container id is 64 hex, and never stored together with a pid or a process creation time', async t => {
+  const { store } = await fixture(t);
+  for (const containerId of ['abc', 'C'.repeat(64), `${CONTAINER}0`, 5, '']) await rejects(store.write('public-01', dockerState({ containerId })), 'REMOTE_STATE_INVALID');
+  await rejects(store.write('public-01', dockerState({ pid: 4242 })), 'REMOTE_STATE_INVALID');
+  await rejects(store.write('public-01', dockerState({ createdAt: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:777' })), 'REMOTE_STATE_INVALID');
+  assert.equal(await store.read('public-01'), null);
+});

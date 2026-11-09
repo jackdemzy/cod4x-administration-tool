@@ -103,3 +103,29 @@ test('remove is refused while the host is in use and works afterwards', async t 
   assert.equal(store.list().length, 0);
   await rejects(store.remove('lab-1'), 'REMOTE_HOST_NOT_FOUND');
 });
+
+// ---- Block 19: docker entry --------------------------------------------------------------------------------
+test('a host starts without a docker confirmation; setDocker stores and withdraws it', async t => {
+  const { store, reopen } = await fixture(t);
+  assert.equal((await store.create(input())).docker, null);
+  const confirmed = await store.setDocker('lab-1', { mode: 'ROOTFUL', confirmedAt: '2026-11-09T10:00:00.000Z' });
+  assert.deepEqual(confirmed.docker, { mode: 'ROOTFUL', confirmedAt: '2026-11-09T10:00:00.000Z' });
+  assert.deepEqual((await reopen()).get('lab-1').docker, confirmed.docker);
+  assert.equal((await store.setDocker('lab-1', null)).docker, null);
+  await rejects(store.setDocker('nope', null), 'REMOTE_HOST_NOT_FOUND');
+});
+
+test('an invalid docker entry is refused, also in a stored file; a file without the key loads as not confirmed', async t => {
+  const { store, file, reopen } = await fixture(t);
+  await store.create(input());
+  for (const bad of [{ mode: 'ROOT', confirmedAt: '2026-11-09T10:00:00.000Z' }, { mode: 'NO_DOCKER', confirmedAt: '2026-11-09T10:00:00.000Z' }, { mode: 'ROOTLESS' }, { mode: 'ROOTLESS', confirmedAt: 'yesterday' },
+    { mode: 'ROOTLESS', confirmedAt: '2026-11-09T10:00:00.000Z', extra: 1 }, 'ROOTLESS', []])
+    await rejects(store.setDocker('lab-1', bad), 'REMOTE_HOST_INVALID');
+  const raw = JSON.parse(await fs.readFile(file, 'utf8'));
+  delete raw.hosts[0].docker; // as written by 4.18.24
+  await fs.writeFile(file, JSON.stringify(raw));
+  assert.equal((await reopen()).get('lab-1').docker, null);
+  raw.hosts[0].docker = { mode: 'ROOT', confirmedAt: '2026-11-09T10:00:00.000Z' };
+  await fs.writeFile(file, JSON.stringify(raw));
+  await rejects(reopen(), 'REMOTE_HOST_STORE_INVALID');
+});
