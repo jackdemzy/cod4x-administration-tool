@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { registerRemoteLinuxRoutes, REMOTE_LINUX_BINDINGS } from '../lib/remote-linux-routes.mjs';
@@ -24,7 +25,9 @@ async function start(t) {
   };
   const runtime = { status: 'RUNNING', runId: 'r1', containerId: ID };
   const manager = {
+    coreImportRoot: '/data/remote-core-import',
     instances: { get: id => (id === 'srv-1' ? { id } : fail('REMOTE_INSTANCE_NOT_FOUND')) },
+    updateCore: async (id, input) => { calls.push(['updateCore', id, input.corePath]); return { id }; },
     install: async input => { calls.push(['install', input]); return { id: input.id, deployment: input.deployment ?? 'native' }; },
     setDeployment: async (id, input) => { calls.push(['setDeployment', id, input]); if (id !== 'srv-1') fail('REMOTE_INSTANCE_NOT_FOUND'); if (input.deployment === 'native') fail('REMOTE_INSTANCE_RUNNING'); return { instance: { id, deployment: input.deployment }, previous: 'native' }; },
     status: async id => ({ instance: { id, deployment: 'docker' }, runtime }),
@@ -77,6 +80,12 @@ test('deployment routes: the install passes an optional deployment on, the switc
   assert.equal((await call('admin', '/api/remote-instances', { ...body, deployment: 'docker' })).json.instance.deployment, 'docker');
   assert.equal(calls.at(-1)[1].deployment, 'docker');
   assert.equal((await call('admin', '/api/remote-instances', { ...body, image: 'x' })).json.code, 'REMOTE_ARGUMENT_INVALID');
+  // 4.18.25: a core named relative to the import directory is completed by the server; an absolute path is passed on and checked by the manager
+  assert.equal(calls.at(-1)[1].corePath, '/x/cod4x18_dedrun');
+  await call('admin', '/api/remote-instances', { ...body, corePath: '21.5/cod4x18_dedrun' });
+  assert.equal(calls.at(-1)[1].corePath, path.join('/data/remote-core-import', '21.5', 'cod4x18_dedrun'));
+  await call('admin', '/api/remote-instances/srv-1/update', { corePath: 'cod4x18_dedrun', coreVersion: '21.5', expectedCoreSha256: 'a'.repeat(64) });
+  assert.deepEqual(calls.at(-1), ['updateCore', 'srv-1', path.join('/data/remote-core-import', 'cod4x18_dedrun')]);
 
   assert.equal((await call('viewer', '/api/remote-instances/srv-1/deployment', { deployment: 'docker' })).status, 403);
   assert.equal((await call('operator', '/api/remote-instances/srv-1/deployment', {})).json.code, 'REMOTE_ARGUMENT_INVALID');
@@ -92,7 +101,9 @@ test('answers carry the container ID shortened to 12 characters, and Docker refu
   const { call } = await start(t);
   const one = await call('viewer', '/api/remote-instances/srv-1');
   assert.equal(one.json.status.runtime.containerId, ID.slice(0, 12));
-  const all = (await call('viewer', '/api/remote-instances')).json.instances;
+  const listed = await call('viewer', '/api/remote-instances');
+  assert.equal(listed.json.coreImportRoot, '/data/remote-core-import', 'the panel can name the import directory');
+  const all = listed.json.instances;
   assert.equal(all[0].runtime.containerId, ID.slice(0, 12));
   assert.deepEqual(all[1].runtime, { status: 'RUNNING', pid: 42 });
   assert.equal(all[2].error, 'REMOTE_CONNECT_FAILED');

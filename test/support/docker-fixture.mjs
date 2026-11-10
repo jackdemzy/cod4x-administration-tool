@@ -29,7 +29,8 @@ if (settings.mode === 'NO_DOCKER') die('Cannot connect to the Docker daemon at u
 const containers = () => fs.readdirSync(state).filter(name => name.startsWith('container-')).map(name => read(name));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const refresh = container => {
-  if (container.status === 'running' && !alive(container.supervisor)) {
+  // the exit file counts too: where PID 1 reaps late, an ended supervisor is still a zombie that kill(0) finds
+  if (container.status === 'running' && (!alive(container.supervisor) || fs.existsSync(path.join(container.dir, 'exit')))) {
     container.status = 'exited';
     try { container.exitCode = Number(fs.readFileSync(path.join(container.dir, 'exit'), 'utf8')); } catch { container.exitCode = 137; }
     write('container-' + container.id + '.json', container);

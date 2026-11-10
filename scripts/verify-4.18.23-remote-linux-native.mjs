@@ -56,7 +56,8 @@ try {
   hostService = new RemoteHostService({ store: hostStore, credentials });
   // Block 18b (4.18.24): a random RCON password for this run; it reaches the core only through the private exec file.
   const provisioned = [];
-  manager = new RemoteInstanceManager({ instances, hosts: hostService, state: new RemoteStateStore({ root: path.join(local, "state") }), backupRoot: path.join(local, "backups"),
+  await fs.mkdir(path.join(local, "core-import")); await fs.copyFile(corePath, path.join(local, "core-import", "cod4x18_dedrun")); // 4.18.25: cores are read from the import directory only
+  manager = new RemoteInstanceManager({ instances, hosts: hostService, coreImportRoot: path.join(local, "core-import"), state: new RemoteStateStore({ root: path.join(local, "state") }), backupRoot: path.join(local, "backups"),
     credentials: { async withRuntimeCredentials(subject, action) { return action({ rcon: Buffer.from(rconPassword) }); } }, onProvisioned: (instanceId, runId, info) => provisioned.push(info) });
   const lab = { id: "native", label: "native gate", host: env.REMOTE_TEST_HOST, port: Number(env.REMOTE_TEST_PORT || 22), username: env.REMOTE_TEST_USER };
   await hostService.createHost(lab);
@@ -71,7 +72,7 @@ try {
 
   // deliberate errors before anything is created
   const wrongName = path.join(local, "core-wrong"); await fs.copyFile(corePath, wrongName);
-  const install = (overrides = {}) => manager.install({ id, name: `Gate ${id}`, hostId: "native", port, remoteRoot: root, basePath: env.COD4X_BASEGAME, corePath, coreVersion: env.COD4X_CORE_VERSION || "21.5", expectedCoreSha256: coreSha256, ...overrides });
+  const install = (overrides = {}) => manager.install({ id, name: `Gate ${id}`, hostId: "native", port, remoteRoot: root, basePath: env.COD4X_BASEGAME, corePath: path.join(local, "core-import", "cod4x18_dedrun"), coreVersion: env.COD4X_CORE_VERSION || "21.5", expectedCoreSha256: coreSha256, ...overrides });
   const { session, uid, gid } = await hostService.connect("native");
   try {
     check("the login works and the user is not root", uid > 0, `uid ${uid}`);

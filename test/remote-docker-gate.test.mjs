@@ -57,4 +57,4 @@ async function sequence(t, options) {
 }
 
 test('gate: Container Restart ohne Datenverlust (scripted docker)', { skip: linux }, t => sequence(t, {}));
-test('gate: Container Restart ohne Datenverlust (real Docker daemon)', { skip: real, timeout: 600_000 }, t => sequence(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000 } }));
+test('gate: Container Restart ohne Datenverlust (real Docker daemon)', { skip: real, timeout: 600_000 }, t => sequence(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } }));

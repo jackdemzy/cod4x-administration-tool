@@ -130,7 +130,7 @@ test('remote Linux API on the real backend: permissions, host key, vault key, lo
   assert.equal(withoutKey.json.credentials.ssh.configured, false);
   const vaultHash = async () => (await call(operator, keyPath)).json.credentials.sha256;
   // before a key exists, the login stops with a fixed code and the server sees nothing
-  assert.equal((await call(operator, '/api/remote-instances', { id: 'one', name: 'One', hostId: 'lab-1', port: 28960, remoteRoot: '/srv/cod4x', basePath: '/srv/game', corePath: path.join(root, 'cod4x18_dedrun'), coreVersion: '21.5', expectedCoreSha256: 'a'.repeat(64) })).json.code, 'REMOTE_CORE_INVALID');
+  assert.equal((await call(operator, '/api/remote-instances', { id: 'one', name: 'One', hostId: 'lab-1', port: 28960, remoteRoot: '/srv/cod4x', basePath: '/srv/game', corePath: path.join(root, 'cod4x18_dedrun'), coreVersion: '21.5', expectedCoreSha256: 'a'.repeat(64) })).json.code, 'REMOTE_CORE_OUTSIDE_IMPORT'); // 4.18.25: not in the import directory
   // the key: write-only
   const secretPassphrase = 'a long secret passphrase for this key';
   const stored = await call(operator, `${keyPath}/ssh`, { expectedSha256: await vaultHash(), privateKey: clientKey.private, passphrase: undefined });
@@ -146,10 +146,13 @@ test('remote Linux API on the real backend: permissions, host key, vault key, lo
   assert.ok(secretPassphrase);
 
   // a core to install, and an install before the host key is known: stopped before any login
-  const core = path.join(root, 'core', 'cod4x18_dedrun');
-  await fs.mkdir(path.dirname(core)); await fs.writeFile(core, crypto.randomBytes(2048));
+  // 4.18.25: the backend created its import directory and names it; a core is read from there only
+  const importRoot = (await call(viewer, '/api/remote-instances')).json.coreImportRoot;
+  assert.equal(importRoot, path.join(root, 'data', 'remote-core-import'));
+  const core = path.join(importRoot, 'cod4x18_dedrun');
+  await fs.writeFile(core, crypto.randomBytes(2048));
   const coreHash = sha(await fs.readFile(core));
-  const install = (hostId, id = 'one') => ({ id, name: 'One', hostId, port: 28960, remoteRoot: '/srv/cod4x', basePath: '/srv/game', corePath: core, coreVersion: '21.5', expectedCoreSha256: coreHash });
+  const install = (hostId, id = 'one') => ({ id, name: 'One', hostId, port: 28960, remoteRoot: '/srv/cod4x', basePath: '/srv/game', corePath: 'cod4x18_dedrun', coreVersion: '21.5', expectedCoreSha256: coreHash }); // a name relative to the import directory
   const unverified = await call(operator, '/api/remote-instances', install('lab-1'));
   assert.deepEqual([unverified.status, unverified.json.code], [409, 'REMOTE_HOST_KEY_UNVERIFIED']);
   assert.equal(unverified.json.presentedSha256, normal.hostSha256);

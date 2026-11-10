@@ -54,7 +54,8 @@ try {
   await instances.load();
   const credentials = { async withRuntimeCredentials(subject, action) { return action({ privateKey: Buffer.from(keyBytes), passphrase: env.REMOTE_TEST_KEY_PASSPHRASE ? Buffer.from(env.REMOTE_TEST_KEY_PASSPHRASE) : undefined }); } };
   hostService = new RemoteHostService({ store: hostStore, credentials });
-  manager = new RemoteInstanceManager({ instances, hosts: hostService, state: new RemoteStateStore({ root: path.join(local, "state") }), backupRoot: path.join(local, "backups") });
+  await fs.mkdir(path.join(local, "core-import")); await fs.copyFile(corePath, path.join(local, "core-import", "cod4x18_dedrun")); // cores are read from the import directory only
+  manager = new RemoteInstanceManager({ instances, hosts: hostService, coreImportRoot: path.join(local, "core-import"), state: new RemoteStateStore({ root: path.join(local, "state") }), backupRoot: path.join(local, "backups") });
   await hostService.createHost({ id: "native", label: "docker gate", host: env.REMOTE_TEST_HOST, port: Number(env.REMOTE_TEST_PORT || 22), username: env.REMOTE_TEST_USER });
   const fingerprint = await hostService.probeHostKey("native");
   console.log(`Host key of ${env.REMOTE_TEST_HOST}: SHA256:${fingerprint.sha256Base64.replace(/=+$/, "")} (pinned for this run only)`);
@@ -64,7 +65,7 @@ try {
   const before = await hostService.dockerStatus("native");
   check("Docker answers the SSH user", before.mode !== "NO_DOCKER", `${before.mode} ${before.version || ""}`.trim());
   if (before.mode === "NO_DOCKER") throw Object.assign(new Error("install Docker on the server and let the SSH user reach it (rootless, or the docker group)"), { code: "REMOTE_DOCKER_UNAVAILABLE" });
-  const install = (overrides = {}) => manager.install({ id, name: `Docker ${id}`, hostId: "native", port, remoteRoot: root, basePath: env.COD4X_BASEGAME, corePath, coreVersion: env.COD4X_CORE_VERSION || "21.5", expectedCoreSha256: coreSha256, deployment: "docker", ...overrides });
+  const install = (overrides = {}) => manager.install({ id, name: `Docker ${id}`, hostId: "native", port, remoteRoot: root, basePath: env.COD4X_BASEGAME, corePath: path.join(local, "core-import", "cod4x18_dedrun"), coreVersion: env.COD4X_CORE_VERSION || "21.5", expectedCoreSha256: coreSha256, deployment: "docker", ...overrides });
   if (before.mode === "ROOTFUL") {
     console.log("NOTE the SSH user reaches Docker through the docker group: that is equivalent to root on this server.");
     check("a docker-group host is not confirmed without the word", await code(hostService.confirmDocker("native", { confirm: "yes" })) === "REMOTE_DOCKER_CONFIRMATION_REQUIRED" && hostStore.get("native").docker === null);

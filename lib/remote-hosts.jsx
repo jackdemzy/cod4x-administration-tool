@@ -27,6 +27,8 @@ const MESSAGES = {
   REMOTE_RCON_UNSUPPORTED: ['RCON ist für Remote-Server nicht verfügbar.', 'RCON is not available for remote servers.'],
   REMOTE_B3_UNSUPPORTED: ['B3 ist für Remote-Server nicht verfügbar.', 'B3 is not available for remote servers.'],
   REMOTE_OPERATION_BUSY: ['Für diesen Server läuft bereits ein Vorgang.', 'An operation is already running for this server.'],
+  REMOTE_CORE_INVALID: ['Die Core-Datei fehlt, heißt nicht „cod4x18_dedrun“ oder ihr SHA-256 stimmt nicht.', 'The core file is missing, is not named “cod4x18_dedrun” or its SHA-256 does not match.'],
+  REMOTE_CORE_OUTSIDE_IMPORT: ['Die Core-Datei liegt nicht im Import-Ordner von CONTROL.', 'The core file is not inside the import folder of CONTROL.'],
   REMOTE_INSTANCE_RUNNING: ['Der Server läuft. Bitte zuerst stoppen.', 'The server is running. Stop it first.'],
   REMOTE_RECOVERY_BLOCKED: ['Der Zustand auf dem Server ist unklar. Es wurde nichts gestoppt oder entfernt.', 'The state on the server is unclear. Nothing was stopped or removed.'],
   INSTANCE_PROCESS_IDENTITY_BLOCKED: ['Auf dem Server gehört ein Prozess oder Container mit diesem Namen nicht zu dieser Instanz. Er wurde nicht angefasst.', 'A process or container with this name on the server does not belong to this instance. It was not touched.'],
@@ -167,7 +169,7 @@ export function RemoteHostsPanel({ de, request }) {
   const [hosts, setHosts] = useState([]), [instances, setInstances] = useState([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(null), [message, setMessage] = useState('');
   const [dialog, setDialog] = useState(null), [confirmed, setConfirmed] = useState(false);
-  const [credentials, setCredentials] = useState({}), [output, setOutput] = useState(null), [docker, setDocker] = useState({});
+  const [credentials, setCredentials] = useState({}), [output, setOutput] = useState(null), [docker, setDocker] = useState({}), [coreImportRoot, setCoreImportRoot] = useState(null);
   const [hostForm, setHostForm] = useState(EMPTY_HOST), [installForm, setInstallForm] = useState(EMPTY_INSTALL);
   const [configEdit, setConfigEdit] = useState(null);
   const mounted = useRef(true), working = useRef(false);
@@ -190,7 +192,7 @@ export function RemoteHostsPanel({ de, request }) {
   const refresh = () => run(async () => {
     const [h, i] = await Promise.all([call('/api/remote-hosts'), call('/api/remote-instances')]);
     if (!mounted.current) return;
-    setHosts(h.hosts || []); setInstances(i.instances || []);
+    setHosts(h.hosts || []); setInstances(i.instances || []); setCoreImportRoot(typeof i.coreImportRoot === 'string' ? i.coreImportRoot : null);
   });
 
   const addHost = event => { event.preventDefault(); run(async () => {
@@ -301,8 +303,9 @@ export function RemoteHostsPanel({ de, request }) {
 
     <h4>{text(de, 'Server installieren', 'Install a server')}</h4>
     <p>{text(de, 'Das BaseGame muss auf dem Server schon vorhanden sein (nur gelesen). Hochgeladen werden nur der CoD4x-Linux-Core (Datei „cod4x18_dedrun“ auf diesem PC, SHA-256 bestätigen) und das Instanzverzeichnis.', 'The base game must already exist on the server (read only). Only the CoD4x Linux core (file “cod4x18_dedrun” on this PC, confirm its SHA-256) and the instance directory are uploaded.')}</p>
+    <p>{text(de, 'Die Core-Datei wird nur aus dem Import-Ordner von CONTROL gelesen. Lege „cod4x18_dedrun“ dort ab (Unterordner sind erlaubt, z. B. „21.5/cod4x18_dedrun“) und gib den Namen relativ zu diesem Ordner an.', 'The core file is read from the import folder of CONTROL only. Put “cod4x18_dedrun” there (subfolders are allowed, for example “21.5/cod4x18_dedrun”) and give its name relative to that folder.')} {coreImportRoot ? <code>{coreImportRoot}</code> : text(de, '(Ordner wird nach „Laden / aktualisieren“ angezeigt)', '(the folder is shown after “Load / refresh”)')}</p>
     <form onSubmit={install}>
-      {[['id', 'ID', 'ID'], ['name', 'Name', 'Name'], ['hostId', 'Host-ID', 'Host ID'], ['port', 'Server-Port', 'Server port'], ['remoteRoot', 'Zielverzeichnis (Server)', 'Target directory (server)'], ['basePath', 'BaseGame-Pfad (Server)', 'Base game path (server)'], ['corePath', 'Core-Datei (dieser PC)', 'Core file (this PC)'], ['coreVersion', 'Core-Version', 'Core version'], ['expectedCoreSha256', 'Core SHA-256', 'Core SHA-256']].map(([field, german, english]) =>
+      {[['id', 'ID', 'ID'], ['name', 'Name', 'Name'], ['hostId', 'Host-ID', 'Host ID'], ['port', 'Server-Port', 'Server port'], ['remoteRoot', 'Zielverzeichnis (Server)', 'Target directory (server)'], ['basePath', 'BaseGame-Pfad (Server)', 'Base game path (server)'], ['corePath', 'Core-Datei: Name oder Pfad im Import-Ordner', 'Core file name or path inside the import folder'], ['coreVersion', 'Core-Version', 'Core version'], ['expectedCoreSha256', 'Core SHA-256', 'Core SHA-256']].map(([field, german, english]) =>
         <label key={field} style={{ display: 'block' }}>{text(de, german, english)} <input type="text" value={installForm[field]} onChange={event => setInstallForm({ ...installForm, [field]: event.target.value })} required disabled={busy} autoComplete="off" /></label>)}
       <label style={{ display: 'block' }}>{text(de, 'Betriebsart', 'Deployment')} <select value={installForm.deployment} onChange={event => setInstallForm({ ...installForm, deployment: event.target.value })} disabled={busy}>
         <option value="native">{text(de, 'Nativ (Prozess auf dem Host)', 'Native (process on the host)')}</option>

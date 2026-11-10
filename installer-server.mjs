@@ -2454,12 +2454,16 @@ catch (error) { console.error(`[instances] registry unavailable: ${error.message
 // Block 18: remote Linux over SSH. The routes answer with REMOTE_*_STORE_INVALID while a list could not be loaded.
 try { await remoteHostStore.load(); await remoteInstanceStore.load(); }
 catch (error) { console.error(`[remote] registry unavailable: ${error.code || error.message}`); }
+// 4.18.25: the only directory a core file for a remote server is read from.
+const REMOTE_CORE_IMPORT_ROOT = dataPath("remote-core-import");
+try { await fs.mkdir(REMOTE_CORE_IMPORT_ROOT, { recursive: true, mode: 0o700 }); }
+catch (error) { console.error(`[remote] core import directory unavailable: ${error.code || error.message}`); }
 const remoteHostService = new RemoteHostService({ store: remoteHostStore, credentials: credentialService, audit });
 // Block 18b: one SSH session per host for RCON and monitoring; RCON for remote servers is the same
 // service as locally, with a client that runs the exchange on the server and the rmt_ vault entries.
 const remoteSessionPool = new RemoteSessionPool({ connect: hostId => remoteHostService.connect(hostId) });
 let remoteRconService = null;
-const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInstanceStore, hosts: remoteHostService, audit, state: new RemoteStateStore({ root: dataPath("remote") }), backupRoot: dataPath("remote-backups"),
+const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInstanceStore, hosts: remoteHostService, audit, state: new RemoteStateStore({ root: dataPath("remote") }), backupRoot: dataPath("remote-backups"), coreImportRoot: REMOTE_CORE_IMPORT_ROOT,
   credentials: remoteCredentials, onProvisioned: (id, runId, { rcon }) => remoteRconService?.recordProvisioning(id, runId, rcon ? "PROVISIONED" : "NOT_CONFIGURED") });
 const remoteRuntimeFor = id => ({ state: {}, async reconcileRuntimeState() { this.state = (await remoteInstanceManager.status(id)).runtime; } });
 remoteRconService = new InstanceRconService({ resolveInstance: id => remoteShadowStore.get(id), runtimeFor: remoteRuntimeFor, credentialService: remoteCredentials, audit: (level, event, details) => audit(level, event, { ...details, remote: true }),
