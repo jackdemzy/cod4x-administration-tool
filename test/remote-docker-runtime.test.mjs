@@ -27,6 +27,7 @@ test('start runs the core in a restricted container and reports RUNNING with a c
   const uid = `${process.getuid()}:${process.getgid()}`;
   assert.deepEqual(call, ['run', '--detach', '--name', 'cod4x-public-01', '--label', 'cod4x.control.instance=public-01', '--label', `cod4x.control.run=${runtime.runId}`,
     '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '256', '--memory', '1g',
+    '--log-driver', 'local', '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3',
     '--restart', 'no', '--network', 'bridge', '--user', uid, '--workdir', '/cod4/base',
     '--mount', `type=bind,source=${instance.basePath},target=/cod4/base,readonly`, '--mount', `type=bind,source=${instance.home}/core,target=/cod4/core,readonly`, '--mount', `type=bind,source=${instance.home},target=/cod4/home`, '--mount', `type=bind,source=${instance.home}/core,target=/cod4/home/core,readonly`,
     '--publish', `127.0.0.1:${instance.port}:${instance.port}/udp`, '--publish', `127.0.0.1:${instance.port}:${instance.port}/tcp`, imageId, '/cod4/core/cod4x18_dedrun',

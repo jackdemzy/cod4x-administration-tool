@@ -26,6 +26,7 @@ test('runContainerCommand is one fixed line', () => {
     'docker run --detach --name cod4x-public-01',
     "--label cod4x.control.instance=public-01 --label cod4x.control.run=0b1c2d3e-4f50-4a61-8b72-9c8d0e1f2a3b",
     '--read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g',
+    '--log-driver local --log-opt max-size=10m --log-opt max-file=3',
     '--restart no --network bridge --user 1000:1000 --workdir /cod4/base',
     "--mount 'type=bind,source=/srv/cod4,target=/cod4/base,readonly'",
     "--mount 'type=bind,source=/srv/servers/public-01/core,target=/cod4/core,readonly'",
