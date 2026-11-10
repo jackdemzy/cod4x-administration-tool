@@ -15,7 +15,7 @@ const docker = (...args) => run('docker', args).then(result => result.stdout);
 const hash = async file => (await run('sha256sum', [file])).stdout.split(' ')[0];
 
 test('Container Restart ohne Datenverlust: restart, and stop + start, keep every file; the container is restricted', { skip, timeout: 600_000 }, async t => {
-  const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000 } });
+  const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } });
   const instance = await f.install('real-01', { port: 28990 });
   const first = (await f.manager.start('real-01')).runtime;
   assert.equal(first.status, 'RUNNING');
@@ -87,7 +87,7 @@ test('Container Restart ohne Datenverlust: restart, and stop + start, keep every
 });
 
 test('a public instance is published on every IPv4 address, and two instances run side by side', { skip, timeout: 600_000 }, async t => {
-  const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000 } });
+  const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } });
   await f.install('real-02', { port: 28991 });
   await f.install('real-03', { port: 28992 });
   await f.instances.setNetwork('real-02', { scope: 'PUBLIC', publicAddress: null });
@@ -102,7 +102,7 @@ test('a public instance is published on every IPv4 address, and two instances ru
 });
 
 test('a core that exits at once is reported as a failed start with its output kept', { skip, timeout: 600_000 }, async t => {
-  const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000 } });
+  const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } });
   const instance = await f.install('real-04', { port: 28993 });
   // a "core" that prints one line and exits with 3
   await fs.writeFile(instance.core.path, '#!/bin/sh\necho gone early\nexit 3\n');

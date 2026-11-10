@@ -43,8 +43,8 @@ export async function createRemoteFixture(t, { ignoreTerm = false, timing = {}, 
     },
   };
   const manager = new RemoteInstanceManager({
-    instances, hosts, state, uploadChunkBytes: 64 * 1024, backupRoot: backups ? path.join(local, 'backups') : null,
-    pollMs: 20, startConfirmMs: 3000, stopGraceMs: 400, killWaitMs: 2000, ...timing, ...managerOptions,
+    instances, hosts, state, coreImportRoot: local, uploadChunkBytes: 64 * 1024, backupRoot: backups ? path.join(local, 'backups') : null,
+    pollMs: 20, startConfirmMs: 3000, startSettleMs: 60, stopGraceMs: 400, killWaitMs: 2000, ...timing, ...managerOptions,
     audit: (level, event, details) => audits.push({ level, event, ...details }),
   });
   let nextPort = 28960;

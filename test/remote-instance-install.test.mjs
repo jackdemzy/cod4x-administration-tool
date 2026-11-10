@@ -48,12 +48,12 @@ async function fixture(t, { state = null } = {}) {
       return { session, uid: process.getuid(), gid: process.getgid() };
     },
   };
-  const manager = new RemoteInstanceManager({ instances, hosts, state, uploadChunkBytes: 4096, audit: (level, event, details) => audits.push({ level, event, ...details }) });
+  const manager = new RemoteInstanceManager({ instances, hosts, state, coreImportRoot: local, uploadChunkBytes: 4096, audit: (level, event, details) => audits.push({ level, event, ...details }) });
   const request = overrides => ({
     id: 'public-01', name: 'Public 01', hostId: 'lab-1', port: 28960, remoteRoot: loopback.path('servers'), basePath: loopback.path('game'),
     corePath, coreVersion: '21.5', expectedCoreSha256: sha(CORE_BYTES), ...overrides,
   });
-  return { loopback, local, corePath, instances, manager, request, connects, closes, audits, control };
+  return { loopback, local, corePath, instances, hosts, manager, request, connects, closes, audits, control };
 }
 
 const mode = async file => (await fs.stat(file)).mode & 0o777;
@@ -265,4 +265,30 @@ test('updateCore restores the previous core when the swap fails half way', { ski
   assert.deepEqual(await fs.readFile(`${home}/core/cod4x18_dedrun`), CORE_BYTES, 'the old core is back in place');
   assert.equal(instances.get('public-01').core.sha256, sha(CORE_BYTES), 'the record is unchanged');
   assert.deepEqual(await fs.readdir(`${home}/core`), ['cod4x18_dedrun'], 'neither the temporary upload nor a stray .previous is left');
+});
+
+// ---- 4.18.25: the core is read from the import directory of CONTROL only ------------------------------------
+test('a core outside the import directory is refused before any connection: other folder, sibling prefix, "..", a linked folder', { skip }, async t => {
+  const { manager, request, local, corePath, connects } = await fixture(t);
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-remote-install-outside-'));
+  const sibling = `${local}-2`;
+  t.after(async () => { await fs.rm(outside, { recursive: true, force: true }); await fs.rm(sibling, { recursive: true, force: true }); });
+  const elsewhere = path.join(outside, 'cod4x18_dedrun'); await fs.copyFile(corePath, elsewhere);
+  await fs.mkdir(sibling); await fs.copyFile(corePath, path.join(sibling, 'cod4x18_dedrun'));
+  await fs.symlink(outside, path.join(local, 'linked')); // a folder inside the import directory that leads out of it
+  for (const file of [elsewhere, path.join(sibling, 'cod4x18_dedrun'), path.join(local, 'core', '..', '..', path.basename(outside), 'cod4x18_dedrun'), path.join(local, 'linked', 'cod4x18_dedrun')]) {
+    await rejects(manager.install(request({ corePath: file })), 'REMOTE_CORE_OUTSIDE_IMPORT');
+  }
+  // a path that is written with ".." but stays inside is the same file
+  assert.equal((await manager.install(request({ corePath: path.join(local, 'core', 'x', '..', 'cod4x18_dedrun') }))).id, 'public-01');
+  assert.deepEqual(connects, ['lab-1']);
+  await rejects(manager.updateCore('public-01', { corePath: elsewhere, coreVersion: '21.5', expectedCoreSha256: sha(CORE_BYTES) }), 'REMOTE_CORE_OUTSIDE_IMPORT');
+});
+
+test('without an import directory no core file is read at all', { skip }, async t => {
+  const { instances, hosts, request, connects } = await fixture(t);
+  const manager = new RemoteInstanceManager({ instances, hosts });
+  await rejects(manager.install(request()), 'REMOTE_CORE_OUTSIDE_IMPORT');
+  assert.deepEqual(connects, []);
+  assert.equal(manager.coreImportRoot, null);
 });

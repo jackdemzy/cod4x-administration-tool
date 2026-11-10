@@ -35,7 +35,7 @@ export COD4X_BASEGAME="$HOME/cod4-base"
 | ☐ | Befehl | Erwartung | Ergebnis |
 |---|---|---|---|
 | ☐ | `node scripts/preflight-4.18.25.mjs` | Exit 0, letzte Zeile beginnt mit `4.18.25 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
-| ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz 4.18.25 (mit laufendem Docker-Daemon): 823 Tests / 816 PASS / 7 SKIP; ohne Docker-Daemon kommen die Tests gegen echtes Docker als SKIP dazu. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
+| ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz 4.18.25 (mit laufendem Docker-Daemon): 826 Tests / 819 PASS / 7 SKIP; ohne Docker-Daemon kommen die Tests gegen echtes Docker als SKIP dazu. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
 
 Notiere `# tests`, `# pass`, `# fail`, `# skipped` und trage sie in `DEVELOPMENT_STATUS.md` („Last run“) ein.
 
@@ -182,6 +182,8 @@ node scripts/verify-4.18.25-docker-native.mjs
 | ☐ | **Letzte Zeile: `Container Restart ohne Datenverlust PASS (real sshd, real Docker, real core)`** | |
 
 Danach: `docker ps -a --filter name=cod4x-` zeigt keinen Container mehr; das Image `cod4x-control-runtime:<hash>` bleibt auf dem Server.
+
+Seit 4.18.25 liest die App die Core-Datei nur noch aus dem Import-Ordner `<Datenverzeichnis>/remote-core-import` (wird in „Remote Linux“ nach „Laden / aktualisieren“ angezeigt): `cod4x18_dedrun` dorthin kopieren und im Formular nur `cod4x18_dedrun` (oder z. B. `21.5/cod4x18_dedrun`) angeben. Die nativen Skripte kopieren `COD4X_CORE` selbst in einen eigenen Import-Ordner.
 
 Von Hand in der App (Remote Linux): beim Host „Docker-Status“ öffnen, bei docker-Gruppe das Wort eintippen und bestätigen, „Image bauen“, einen Server mit Betriebsart „Docker“ installieren, starten, RCON-Konsole und Monitoring prüfen, einen gestoppten Server auf „nativ“ und zurück umstellen.
 

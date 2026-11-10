@@ -167,5 +167,7 @@ test('Block 19: the install form offers the deployment and the panel still has n
   const html = render('RemoteHostsPanel', { de: false, request: noFetch });
   assert.match(html, /<select[^>]*>.*<option value="native"[^>]*>.*<option value="docker"/s);
   assert.match(html, /Docker needs a host where Docker was confirmed and the image was built/);
+  assert.match(html, /Core file name or path inside the import folder/);
+  assert.match(html, /is read from the import folder of CONTROL only/);
   assert.doesNotMatch(html, /type="password"/);
 });

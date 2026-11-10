@@ -210,6 +210,18 @@ test('the container exits by itself: FAILED with the exit code, or OOM_KILLED, a
   assert.equal((await f.manager.stop('public-01')).runtime.status, 'FAILED', 'nothing to stop');
 });
 
+test('a core that ends shortly after the container was seen running is a failed start, not RUNNING', { skip }, async t => {
+  const f = await createDockerFixture(t, { timing: { startSettleMs: 600 } });
+  const instance = await f.install('public-01');
+  await fs.writeFile(instance.core.path, '#!/bin/sh\necho gone early\nsleep 0.15\nexit 3\n');
+  const sha256 = (await import('node:crypto')).createHash('sha256').update(await fs.readFile(instance.core.path)).digest('hex');
+  await f.instances.setCore('public-01', { version: '21.5', sha256 });
+  await rejects(f.manager.start('public-01'), 'REMOTE_START_FAILED');
+  const saved = await f.state.read('public-01');
+  assert.deepEqual([saved.status, saved.exitReason], ['FAILED', 'EXITED_ON_START']);
+  assert.match((await f.manager.logs('public-01')).stdout, /gone early/);
+});
+
 test('docker cannot be asked: the state is kept and nothing is acted on', { skip }, async t => {
   const f = await createDockerFixture(t);
   await f.install('public-01');
