@@ -25,13 +25,16 @@ const bound = new Map(REMOTE_LINUX_BINDINGS.flatMap(entry => entry.routes.map(ro
 const plain = registered.filter(entry => typeof entry.route === "string");
 const exec = remoteFiles.flatMap(file => [...code(file).matchAll(/\bsession\.exec\(\s*(\w+\()?/g)].map(match => [file, match[1] ? match[1].slice(0, -1) : "<not a builder>"]));
 const BUILDERS = ["probeCommand", "makeDirectoriesCommand", "startCoreCommand", "signalCommand", "getinfoProbeCommand", "diskFreeCommand", "statCommand", "recoverHomeCommand", "removeRconFilesCommand", "rconExchangeCommand", "getstatusProbeCommand", "consoleTailCommand"];
+// Block 19 (4.18.25): the docker command lines have their own builder module with the same rules.
+const DOCKER_BUILDERS = ["dockerProbeCommand", "imageInspectCommand", "imageBuildCommand", "runContainerCommand", "inspectContainerCommand", "stopContainerCommand", "removeContainerCommand", "containerLogsCommand"];
+const exported = (file, builder) => read(file).includes(`export function ${builder}`) || read(file).includes(`export const ${builder}`);
 const transport = code("lib/ssh-transport.mjs");
 const server = read("installer-server.mjs");
 
 const checks = [
   ["ssh2 is imported in lib/ssh-transport.mjs only", lib.concat(["installer-server.mjs"]).filter(file => /from ["']ssh2["']|require\(["']ssh2["']\)/.test(code(file))).join() === "lib/ssh-transport.mjs"],
   ["no child_process in the remote modules (no local ssh client, no shell)", remoteFiles.every(file => !/child_process/.test(code(file)))],
-  ["every command sent to a server is built by lib/remote-commands.mjs", exec.length >= 8 && exec.every(([, builder]) => BUILDERS.includes(builder)) && BUILDERS.every(builder => read("lib/remote-commands.mjs").includes(`export function ${builder}`) || read("lib/remote-commands.mjs").includes(`export const ${builder}`))],
+  ["every command sent to a server is built by lib/remote-commands.mjs (docker lines by lib/docker-commands.mjs)", exec.length >= 8 && exec.every(([, builder]) => BUILDERS.includes(builder) || DOCKER_BUILDERS.includes(builder)) && BUILDERS.every(builder => exported("lib/remote-commands.mjs", builder)) && DOCKER_BUILDERS.every(builder => exported("lib/docker-commands.mjs", builder))],
   ["no password, agent or keyboard-interactive login in the transport", !/\bpassword\s*:|\bagent\s*:|tryKeyboard|keyboard-interactive/.test(transport) && /privateKey/.test(transport)],
   ["host key is checked before authentication (sha256 hash, async verifier)", /hostHash:\s*["']sha256["']/.test(transport) && /hostVerifier/.test(transport)],
   ["no remote route is registered without requirePermission", registered.length >= 25 && registered.every(entry => entry.guards.length === 1 && typeof entry.guards[0].permission === "string")],

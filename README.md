@@ -1,6 +1,6 @@
 # COD4X CONTROL – Features
 
-Version 4.18.24 · development source, not a release
+Version 4.18.25 · development source, not a release
 
 - Desktop app for Windows and Linux
 - Install, configure, run and monitor CoD4x dedicated servers
@@ -423,3 +423,7 @@ Die npm-Abhängigkeiten stehen unter eigenen, mit der AGPL vereinbaren Lizenzen 
 ## 4.18.24 remote RCON and B3 note
 
 4.18.24 implements Block 18b and closes the gaps Block 18 left for remote Linux servers. RCON (console, online players, kick) runs over SSH: a fixed python3 command on the server sends the packet to 127.0.0.1 there; the packet with the password travels over stdin and never appears in a command line. The RCON password reaches the remote core through a private file (0600) loaded with `+exec` and deleted once the core has read it. B3 is not started by CONTROL on remote servers; as in cod4-monitor (FloMtz2312, AGPL-3.0), CONTROL manages B3's own MySQL/MariaDB database over the network (players, admins, groups, penalties, ban, unban). The database helper has no TLS: use a VPN or Tailscale. Remote servers appear in monitoring (ids `rmt_<id>`) and the phone gateway offers the same actions as for local servers. Gate: `scripts/verify-4.18.24-remote-rcon-gate.mjs`; the native RCON steps are part of `scripts/verify-4.18.23-remote-linux-native.mjs` and have not been run yet.
+
+## 4.18.25 Docker deployment note
+
+4.18.25 implements roadmap Block 19. A server on an SSH host (Block 18) can run as a Docker container instead of a process: the instance gets the field `deployment` (`native` or `docker`). CONTROL builds one small runtime image on the host from a fixed Dockerfile (32-bit Debian, base pinned by digest, sent over stdin without a build context) and starts one container per instance. Nothing of the game is in the image: the base game and the uploaded, hash-checked core are mounted read-only, and the instance directory is the only writable mount, so `main`, `zone`, `mods`, `plugins` and `usermaps` stay ordinary directories on the host (bind mounts, no named volumes). The container has a read-only root file system, no capabilities, no new privileges, a process and memory limit, and Docker never restarts it. A restart, a stop followed by a start, and a switch between `native` and `docker` (only while the instance is stopped) keep every file. Reaching Docker through the `docker` group is equivalent to root on that host; CONTROL asks for a typed confirmation per host and prefers rootless Docker, where the server may not see the real source address of players. Ports published by Docker bypass `ufw`. Docker instances listen on IPv4 only. RCON, monitoring and phone actions work as for native remote servers. Not included: Docker on this PC, Docker Desktop, Compose. Checked in the cloud container with a scripted docker, a real Docker daemon and a real sshd, always with a stand-in core; the run with a real CoD4x core and base game (`scripts/verify-4.18.25-docker-native.mjs`) is still open. Details: `CHANGELOG-4.18.25.md`.

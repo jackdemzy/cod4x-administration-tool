@@ -170,7 +170,8 @@ export async function createLoopbackServer() {
   return {
     root, session,
     path: (...parts) => path.join(root, ...parts),
-    async cleanup() { await killStrays(); await fs.rm(root, { recursive: true, force: true }); },
+    // retries: the supervisor of a killed process may still write its exit file
+    async cleanup() { await killStrays(); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); },
   };
 }
 

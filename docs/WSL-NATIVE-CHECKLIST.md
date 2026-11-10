@@ -1,4 +1,4 @@
-# WSL-Checkliste: native Tests (Stand 4.18.24)
+# WSL-Checkliste: native Tests (Stand 4.18.25)
 
 Diese Checkliste enthält alles, was die Cloud-Umgebung **nicht** prüfen kann, weil dafür ein echter CoD4x-Core, ein echter `sshd` oder dein Windows-/Handy-Setup nötig ist. Jeder Punkt hat einen genauen Befehl, die erwartete PASS-Zeile und die Frage, was ein Fehlschlag bedeutet.
 
@@ -34,8 +34,8 @@ export COD4X_BASEGAME="$HOME/cod4-base"
 
 | ☐ | Befehl | Erwartung | Ergebnis |
 |---|---|---|---|
-| ☐ | `node scripts/preflight-4.18.24.mjs` | Exit 0, letzte Zeile beginnt mit `4.18.24 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
-| ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz: 679 Tests / 672 PASS / 7 SKIP. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
+| ☐ | `node scripts/preflight-4.18.25.mjs` | Exit 0, letzte Zeile beginnt mit `4.18.25 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
+| ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz 4.18.25 (mit laufendem Docker-Daemon): 823 Tests / 816 PASS / 7 SKIP; ohne Docker-Daemon kommen die Tests gegen echtes Docker als SKIP dazu. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
 
 Notiere `# tests`, `# pass`, `# fail`, `# skipped` und trage sie in `DEVELOPMENT_STATUS.md` („Last run“) ein.
 
@@ -150,6 +150,51 @@ Voraussetzung: B3 läuft auf dem Server mit MySQL/MariaDB; die Datenbank ist **v
 | ☐ | „B3 Datenbank“: Host/Port/DB/Benutzer speichern, „Verbindung testen“ | `Verbunden. Schema: COMPLETE`, **B3 Ready** | |
 | ☐ | „B3 Administration“: Spieler, Admins, Strafen werden angezeigt | Daten aus der Server-Datenbank | |
 | ☐ | Einen Test-Spieler bannen (mit Kick), dann entbannen | Ban in B3 sichtbar, Kick über RCON, Entbannen wirkt | |
+
+## 3c. Docker-Betrieb eines Remote-Servers (4.18.25)
+
+Voraussetzung: Abschnitt 3 ist eingerichtet (sshd, Testschlüssel, Core, BaseGame auf dem Server). Zusätzlich braucht der Server Docker und beim ersten Image-Bau Zugriff auf Docker Hub und die Debian-Paketquellen. Der SSH-Benutzer erreicht Docker entweder rootless (empfohlen) oder über die Gruppe `docker`. **Die Gruppe `docker` ist auf dem Server root-gleich**; das Skript läuft dann nur mit der ausdrücklichen Bestätigung `DOCKER_TEST_CONFIRM=DOCKER_ROOT_EQUIVALENT`.
+
+```bash
+# auf dem Server (WSL: Docker Engine in der Distribution, nicht Docker Desktop)
+docker info --format '{{.ServerVersion}} {{json .SecurityOptions}}'   # muss als Testbenutzer ohne sudo antworten
+
+# auf dem Steuer-PC, Variablen wie in Abschnitt 3.2
+export REMOTE_TEST_ROOT="$HOME/docker-gate"
+export DOCKER_TEST_CONFIRM=DOCKER_ROOT_EQUIVALENT    # nur bei docker-Gruppe, nicht bei rootless
+node scripts/verify-4.18.25-docker-native.mjs
+```
+
+| ☐ | Erwartete PASS-Zeile | Ergebnis |
+|---|---|---|
+| ☐ | `Docker answers the SSH user` (mit `ROOTLESS` oder `ROOTFUL` und Version) | |
+| ☐ | Nur docker-Gruppe: `a docker-group host is not confirmed without the word` | |
+| ☐ | `an install as container is refused before the host is confirmed` und `the host is confirmed with the mode it shows` | |
+| ☐ | `the runtime image is built from the fixed Dockerfile` und `the host reports the image as present` | |
+| ☐ | `Install creates the instance as a container instance` | |
+| ☐ | **`Start: the core runs in a container`** (der echte 32-Bit-Core startet im Image) | |
+| ☐ | `Health: getinfo answered through the port published on 127.0.0.1 of the server` | |
+| ☐ | `Logs: output of the container` | |
+| ☐ | `Restart: a new container runs` und `Restart: marker file and server.cfg are unchanged` | |
+| ☐ | `Stop: the container is gone` und `Start after stop: running again, files unchanged` | |
+| ☐ | `the deployment cannot be switched while the container runs` | |
+| ☐ | `Switched to native: the same files run as a process` und `Switched back: a container again, files unchanged` | |
+| ☐ | **Letzte Zeile: `Container Restart ohne Datenverlust PASS (real sshd, real Docker, real core)`** | |
+
+Danach: `docker ps -a --filter name=cod4x-` zeigt keinen Container mehr; das Image `cod4x-control-runtime:<hash>` bleibt auf dem Server.
+
+Von Hand in der App (Remote Linux): beim Host „Docker-Status“ öffnen, bei docker-Gruppe das Wort eintippen und bestätigen, „Image bauen“, einen Server mit Betriebsart „Docker“ installieren, starten, RCON-Konsole und Monitoring prüfen, einen gestoppten Server auf „nativ“ und zurück umstellen.
+
+| Fehlschlag bei | Wahrscheinliche Ursache |
+|---|---|
+| `Start: the core runs in a container` FAIL, darunter eine `ldd`-Ausgabe mit `not found` | **Hauptverdacht:** dem Image fehlt eine 32-Bit-Bibliothek, die der echte Core braucht (im Image ist nur `libstdc++6` mit Abhängigkeiten). Die `ldd`-Zeilen zurückschicken, dann wird das Dockerfile ergänzt. |
+| Start FAIL bei rootless, im Container-Log „Dedicated runtime must not run as root“ o. ä. | Der Core verweigert Benutzer 0 im Container (rootless bildet den SSH-Benutzer auf 0 ab). Ausgabe zurückschicken. |
+| `REMOTE_DOCKER_UNAVAILABLE` | `docker info` antwortet dem SSH-Benutzer nicht (Daemon aus, Benutzer nicht in der Gruppe, rootless-Socket nicht gesetzt: `DOCKER_HOST` muss in der nicht-interaktiven SSH-Sitzung gelten). |
+| `REMOTE_DOCKER_BUILD_FAILED` | Der Server erreicht Docker Hub oder die Debian-Paketquellen nicht, oder die Plattform `linux/386` läuft dort nicht. |
+| `Health … getinfo` bleibt `NO_ANSWER` | Port im Container nicht erreichbar oder der Core bindet nicht an `0.0.0.0`; Ausgabe von `Logs` zurückschicken. |
+| Spieler-Adressen falsch (alle gleich) | Rootless Docker mit Standard-Netzwerktreiber; bekannte Grenze, IP-Bans sind dann unzuverlässig. |
+
+---
 
 ## 4. Manuelle Punkte (kein Skript möglich)
 
