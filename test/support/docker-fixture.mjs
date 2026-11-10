@@ -57,7 +57,7 @@ if (command === 'info') {
 } else if (command === 'run') {
   const options = { labels: {}, mounts: [], publish: [] };
   let index = 1;
-  const flags = { '--detach': 0, '--read-only': 0, '--name': 1, '--label': 1, '--tmpfs': 1, '--cap-drop': 1, '--security-opt': 1, '--pids-limit': 1, '--memory': 1, '--restart': 1, '--network': 1, '--user': 1, '--workdir': 1, '--mount': 1, '--publish': 1 };
+  const flags = { '--detach': 0, '--read-only': 0, '--name': 1, '--label': 1, '--tmpfs': 1, '--cap-drop': 1, '--security-opt': 1, '--pids-limit': 1, '--memory': 1, '--log-driver': 1, '--log-opt': 1, '--restart': 1, '--network': 1, '--user': 1, '--workdir': 1, '--mount': 1, '--publish': 1 };
   for (; index < argv.length && argv[index].startsWith('--'); index++) {
     const flag = argv[index];
     if (!(flag in flags)) die('unknown flag: ' + flag, 125);
