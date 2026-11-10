@@ -84,11 +84,15 @@ test('build sends the Dockerfile on stdin without a context and the status then 
   assert.ok(f.audits.some(entry => entry.event === 'remote.host.docker_image_built'));
 });
 
-test('a failed build is reported by code only', { skip }, async t => {
+test('a failed build is reported by code, with a bounded tail of what Docker printed; the audit keeps the code only', { skip }, async t => {
   const f = await fixture(t);
   await f.service.confirmDocker('lab-1', { confirm: DOCKER_ROOTFUL_CONFIRMATION });
   await f.fake.set({ failBuild: true });
-  await rejects(f.service.buildDockerImage('lab-1'), 'REMOTE_DOCKER_BUILD_FAILED');
+  const failure = await f.service.buildDockerImage('lab-1').catch(error => error);
+  assert.equal(failure.code, 'REMOTE_DOCKER_BUILD_FAILED');
+  assert.match(failure.output, /failed to solve/);
+  assert.ok(Buffer.byteLength(failure.output) <= 4096);
+  assert.ok(!failure.output.includes('hunter2secret'), 'secrets are blacked out');
   assert.equal((await f.service.dockerStatus('lab-1')).image, 'MISSING');
   const entry = f.audits.find(audit => audit.event === 'remote.host.docker_image_build_failed');
   assert.deepEqual(Object.keys(entry).sort(), ['code', 'event', 'hostId', 'level']);
@@ -115,4 +119,16 @@ test('assertDockerReady: confirmed mode unchanged and the image built from this 
   await rejects(assertDockerReady(session, f.store.get('lab-1')), 'REMOTE_DOCKER_MODE_CHANGED');
   await f.fake.set({ mode: 'NO_DOCKER' });
   await rejects(assertDockerReady(session, f.store.get('lab-1')), 'REMOTE_DOCKER_UNAVAILABLE');
+});
+
+test('a confirmation can be withdrawn; starts are then refused until Docker is confirmed again', { skip }, async t => {
+  const f = await fixture(t);
+  await f.service.confirmDocker('lab-1', { confirm: DOCKER_ROOTFUL_CONFIRMATION });
+  assert.equal((await f.service.dockerStatus('lab-1')).confirmed, true);
+  const host = await f.service.withdrawDocker('lab-1');
+  assert.equal(host.docker, null);
+  assert.equal((await f.service.dockerStatus('lab-1')).confirmed, false);
+  assert.ok(f.audits.some(entry => entry.event === 'remote.host.docker_confirmation_withdrawn'));
+  await rejects(f.service.buildDockerImage('lab-1'), 'REMOTE_DOCKER_NOT_CONFIRMED');
+  await rejects(f.service.withdrawDocker('nope'), 'REMOTE_HOST_NOT_FOUND');
 });

@@ -25,9 +25,23 @@ Until 4.18.24 the install and update of a remote server read the core from any a
 ### New routes (all in the permission map, none offered to the phone gateway)
 
 - `GET /api/remote-hosts/:id/docker` (`diagnostics.read`): mode, version, confirmation, image state.
-- `POST /api/remote-hosts/:id/docker/confirm` and `POST /api/remote-hosts/:id/docker/image` (`server.manage`).
+- `POST` and `DELETE /api/remote-hosts/:id/docker/confirm`, `POST /api/remote-hosts/:id/docker/image` (`server.manage`).
 - `POST /api/remote-instances/:id/deployment` (`server.manage`); `POST /api/remote-instances` accepts an optional `deployment`.
 - Runtime answers carry the container ID shortened to 12 characters.
+
+### After the final review
+
+- A container without labels under the name of an instance blocks with `INSTANCE_PROCESS_IDENTITY_BLOCKED` on a real daemon too (it printed `null` for the missing label, which was read as "no usable answer").
+- `docker stop -t` instead of the deprecated `--time`.
+- The start wait has a fixed upper bound (`startConfirmMs + startSettleMs`); a container that flaps between running and unknown no longer holds the start.
+- Native servers get the same settle time: a core that ends right after it was seen alive is a failed start (`EXITED_ON_START`).
+- A stop on a failed Docker instance removes the ended container; the instance is then `STOPPED`.
+- A container is accepted at start and adopted by recover only when it runs the runtime image of the host (`REMOTE_DOCKER_IMAGE_MISMATCH`).
+- `docker` → `native` works on a host where the `docker` program is gone (`REMOTE_DOCKER_NOT_INSTALLED`); a daemon that does not answer still blocks the switch.
+- A failed image build answers with the last 4096 bytes Docker printed (redacted) and the panel shows them.
+- Logs of a container that was removed outside CONTROL are empty instead of showing the daemon's error.
+- `DELETE /api/remote-hosts/:id/docker/confirm` (`server.manage`) and a panel button withdraw the Docker confirmation of a host.
+- Core import: the file is opened with `O_NOFOLLOW` and checked again after the open; a folder named like `..21.5` is accepted.
 
 ### Limits
 

@@ -111,7 +111,8 @@ test('a core that exits at once is reported as a failed start with its output ke
   const saved = await f.state.read('real-04');
   assert.deepEqual([saved.status, saved.exitReason], ['FAILED', 'EXITED_ON_START']);
   assert.match((await f.manager.logs('real-04')).stdout, /gone early/);
-  assert.equal((await f.manager.stop('real-04')).runtime.status, 'FAILED');
+  assert.equal((await f.manager.stop('real-04')).runtime.status, 'STOPPED');
+  await assert.rejects(docker('container', 'inspect', 'cod4x-real-04'), 'the ended container was removed by the stop');
 });
 
 test('a container somebody else created under the name, without labels, blocks the start and is left alone', { skip, timeout: 600_000 }, async t => {

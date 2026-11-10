@@ -120,9 +120,10 @@ test('parseContainerId and parseContainerInspect', () => {
     { code: 0, stdout: line('running', 0, false, { id: 'short' }), stderr: Buffer.alloc(0) },
     { code: 0, stdout: line('flying', 0, false), stderr: Buffer.alloc(0) },
     { code: 0, stdout: line('running', '0', false), stderr: Buffer.alloc(0) },
-    { code: 127, stdout: Buffer.alloc(0), stderr: Buffer.from('docker: not found') },
   ];
   for (const result of failing) assert.equal(code(() => parseContainerInspect(result)), 'REMOTE_DOCKER_INSPECT_FAILED');
+  // no docker program at all is told apart from a daemon that does not answer
+  assert.equal(code(() => parseContainerInspect({ code: 127, stdout: Buffer.alloc(0), stderr: Buffer.from('docker: not found') })), 'REMOTE_DOCKER_NOT_INSTALLED');
 });
 
 test('parseImageInspect', () => {

@@ -208,7 +208,11 @@ test('the container exits by itself: FAILED with the exit code, or OOM_KILLED, a
   await f.fake.patch(runtime.containerId, { status: 'exited', exitCode: 137, oomKilled: true });
   status = (await f.manager.status('public-01')).runtime;
   assert.deepEqual([status.status, status.exitReason], ['FAILED', 'OOM_KILLED']);
-  assert.equal((await f.manager.stop('public-01')).runtime.status, 'FAILED', 'nothing to stop');
+  // stop on a failed instance removes the ended container
+  const stopped = (await f.manager.stop('public-01')).runtime;
+  assert.deepEqual([stopped.status, stopped.containerId ?? null], ['STOPPED', null]);
+  assert.deepEqual(await f.fake.containers(), []);
+  assert.equal((await f.manager.stop('public-01')).runtime.status, 'STOPPED', 'nothing left to stop');
 });
 
 test('a core that ends shortly after the container was seen running is a failed start, not RUNNING', { skip }, async t => {
@@ -249,12 +253,45 @@ test('logs of the container are bounded, valid text with secrets blacked out', {
   const noise = Buffer.alloc(2 * 1024 * 1024, 0xfe);
   await fs.writeFile(path.join(container.dir, 'stdout'), Buffer.concat([noise, Buffer.from('\nset rcon_password "hunter2secret"\nlast line\n')]));
   logs = await f.manager.logs('public-01', { limit: 4096 });
-  assert.ok(Buffer.byteLength(logs.stdout) <= 4096 * 3, 'bounded');
+  assert.ok(Buffer.byteLength(logs.stdout) <= 4096, 'bounded');
   assert.equal(logs.stdoutTruncated, true);
   assert.ok(logs.stdout.endsWith('last line\n'));
   assert.ok(!logs.stdout.includes('hunter2secret'));
   assert.equal(Buffer.from(logs.stdout).toString('utf8'), logs.stdout);
   await rejects(f.manager.logs('public-01', { limit: 2 * 1024 * 1024 }), 'REMOTE_ARGUMENT_INVALID');
+  // the container was removed behind CONTROL's back: no output, not the daemon's error as output of the core
+  await fs.rm(path.join(f.fake.directory, `container-${container.id}.json`));
+  logs = await f.manager.logs('public-01');
+  assert.deepEqual([logs.stdout, logs.stderr, logs.stdoutTruncated, logs.stderrTruncated], ['', '', false, false]);
+});
+
+test('a container that flaps between running and unknown does not hold the start forever', { skip }, async t => {
+  const f = await createDockerFixture(t, { timing: { startConfirmMs: 300, startSettleMs: 400 } });
+  await f.install('public-01');
+  let flap = null, failing = false;
+  t.after(() => clearInterval(flap));
+  const started = f.manager.start('public-01').then(() => 'RUNNING', error => error.code);
+  assert.ok(await until(async () => (await runCalls(f)).length === 1));
+  flap = setInterval(() => { failing = !failing; f.fake.set({ failInspect: failing }).catch(() => {}); }, 60);
+  const outcome = await Promise.race([started, new Promise(resolve => setTimeout(() => resolve('STILL_WAITING'), 4000))]);
+  clearInterval(flap);
+  await f.fake.set({ failInspect: false });
+  assert.equal(outcome, 'REMOTE_RECOVERY_BLOCKED');
+  assert.equal((await f.state.read('public-01')).recoveryBlocked, true);
+  await started;
+});
+
+test('a container that runs another image than the one CONTROL started is not accepted, at start or at recover', { skip }, async t => {
+  const f = await createDockerFixture(t);
+  await f.install('public-01');
+  await f.fake.set({ reportImage: `sha256:${'d'.repeat(64)}` });
+  await rejects(f.manager.start('public-01'), 'REMOTE_RECOVERY_BLOCKED');
+  const saved = await f.state.read('public-01');
+  assert.deepEqual([saved.status, saved.recoveryBlocked], ['STARTING', true]);
+  await rejects(f.manager.recover('public-01'), 'REMOTE_RECOVERY_AMBIGUOUS');
+  assert.equal((await running(f)).length, 1, 'left alone');
+  await f.fake.set({ reportImage: null });
+  assert.equal((await f.manager.recover('public-01')).runtime.status, 'RUNNING');
 });
 
 test('health asks the server through the port published on loopback', { skip }, async t => {
