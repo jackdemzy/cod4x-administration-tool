@@ -113,3 +113,12 @@ test('a core that exits at once is reported as a failed start with its output ke
   assert.match((await f.manager.logs('real-04')).stdout, /gone early/);
   assert.equal((await f.manager.stop('real-04')).runtime.status, 'FAILED');
 });
+
+test('a container somebody else created under the name, without labels, blocks the start and is left alone', { skip, timeout: 600_000 }, async t => {
+  const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } });
+  await f.install('real-05', { port: 28994 });
+  const foreign = (await docker('run', '--detach', '--name', 'cod4x-real-05', 'i386/debian:bookworm-slim', 'sleep', '300')).trim();
+  await assert.rejects(f.manager.start('real-05'), error => error.code === 'INSTANCE_PROCESS_IDENTITY_BLOCKED');
+  assert.equal(await f.state.read('real-05'), null, 'nothing was started');
+  assert.equal((await docker('container', 'inspect', '--format', '{{.Id}} {{.State.Status}}', 'cod4x-real-05')).trim(), `${foreign} running`);
+});

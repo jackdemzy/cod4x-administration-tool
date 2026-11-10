@@ -109,6 +109,9 @@ test('parseContainerId and parseContainerInspect', () => {
     { id: ID, name: 'cod4x-public-01', instance: 'public-01', run: RUN, image: IMAGE, status: 'running', exitCode: 0, oomKilled: false });
   assert.deepEqual(parseContainerInspect({ code: 0, stdout: line('exited', 137, true, { instance: '' }), stderr: Buffer.alloc(0) }).instance, '');
   assert.equal(parseContainerInspect({ code: 0, stdout: line('exited', 137, true), stderr: Buffer.alloc(0) }).oomKilled, true);
+  // a container without labels: a real daemon prints null for a missing label
+  const bare = parseContainerInspect({ code: 0, stdout: Buffer.from(`${JSON.stringify([ID, '/cod4x-public-01', null, null, IMAGE, 'running', 0, false])}\n`), stderr: Buffer.alloc(0) });
+  assert.deepEqual([bare.instance, bare.run], ['', '']);
   assert.equal(parseContainerInspect({ code: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('Error response from daemon: No such container: cod4x-public-01\n') }), null);
   assert.equal(parseContainerInspect({ code: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('error: no such object: x\n') }), null);
   const failing = [

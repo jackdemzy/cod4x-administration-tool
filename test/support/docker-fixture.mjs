@@ -86,13 +86,14 @@ if (command === 'info') {
   const container = find(argv[argv.length - 1]);
   if (settings.failInspect) die('Cannot connect to the Docker daemon');
   if (!container) die('Error response from daemon: No such container: ' + argv[argv.length - 1]);
-  process.stdout.write(JSON.stringify([container.id, '/' + container.name, container.labels['cod4x.control.instance'] || '', container.labels['cod4x.control.run'] || '', container.image, container.status, container.exitCode, container.oomKilled]) + '\n');
+  process.stdout.write(JSON.stringify([container.id, '/' + container.name, container.labels['cod4x.control.instance'] ?? null, container.labels['cod4x.control.run'] ?? null, container.image, container.status, container.exitCode, container.oomKilled]) + '\n');
 } else if (command === 'stop') {
   const container = find(argv[argv.length - 1]);
   if (!container) die('Error response from daemon: No such container');
   if (container.status === 'running') {
     const pid = Number(fs.readFileSync(path.join(container.dir, 'pid'), 'utf8'));
-    const grace = Number(argv[argv.indexOf('--time') + 1]) * 1000;
+    if (argv[1] !== '-t') die('fake docker: stop needs -t');
+    const grace = Number(argv[2]) * 1000;
     try { process.kill(pid, 'SIGTERM'); } catch {}
     for (let waited = 0; alive(container.supervisor) && waited < Math.min(grace, settings.graceMs ?? 400); waited += 20) sleep(20);
     if (alive(container.supervisor)) { try { process.kill(pid, 'SIGKILL'); } catch {} for (let waited = 0; alive(container.supervisor) && waited < 2000; waited += 20) sleep(20); }

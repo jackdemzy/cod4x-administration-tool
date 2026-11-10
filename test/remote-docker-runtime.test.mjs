@@ -86,7 +86,7 @@ test('a core that ignores SIGTERM is killed by docker stop after the grace perio
   assert.equal((await f.manager.stop('public-01')).runtime.status, 'STOPPED');
   assert.deepEqual(await f.fake.containers(), []);
   const stop = (await f.fake.calls()).find(call => call[0] === 'stop');
-  assert.deepEqual(stop.slice(0, 3), ['stop', '--time', '1'], 'the grace period of the manager, in whole seconds');
+  assert.deepEqual(stop.slice(0, 3), ['stop', '-t', '1'], 'the grace period of the manager, in whole seconds');
 });
 
 test('start is refused before any state is written: host not confirmed, image missing or outdated, mode changed, core changed', { skip }, async t => {
