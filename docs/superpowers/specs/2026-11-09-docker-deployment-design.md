@@ -134,3 +134,16 @@ Local Docker on the CONTROL PC, Docker Compose, named volumes, auto-restart afte
 1. Fake-transport gate, runs everywhere: install, build, start, restart, stop, logs and the switch in both directions against a scripted Docker.
 2. Real-Docker gate, runs wherever a Docker daemon is reachable (it is in the cloud test environment): a stand-in executable in place of the core writes into the home, the container is restarted and removed, the data is compared byte for byte, and the read-only mounts and the dropped capabilities are probed from inside.
 3. Native gate, run by Rafiki: real `sshd`, real core and BaseGame, a player joins before and after a restart. Added to `docs/WSL-NATIVE-CHECKLIST.md`.
+
+## Changes during implementation (2026-11-09)
+
+Decided while building, each with a test:
+
+- **Published address.** A PUBLIC instance is published on `0.0.0.0` (which includes loopback), every other instance on `127.0.0.1` only. The design said "loopback plus the public address"; `network.publicAddress` is the address as the master server sees it (it can be a NAT address), not an address of the host. Docker instances listen on IPv4 only.
+- **Core read-only through the home.** The core directory lies inside the writable home, so it is mounted a second time, read-only, over `/cod4/home/core`. A real-Docker test showed the core was writable without it.
+- **`/tmp`.** The read-only root gets a 16 MiB `tmpfs` at `/tmp` (`noexec`, `nosuid`).
+- **State.** `containerId` is an optional key of the saved state, written only for a container run.
+- **Unknown running container.** A running container of this instance that the saved state does not know blocks the start (`REMOTE_DOCKER_CONTAINER_EXISTS`); it is never adopted without a matching run label and never stopped.
+- **After a failed run.** The exited container and its ID stay until the next start or stop, so its output and exit reason can still be read. After a stop the container output is gone; `qconsole.log` in the home remains.
+- **RCON and monitoring.** The shared RCON service, the monitoring collector and the console treat a saved container ID like a pid when they decide whether a server runs. Without that a Docker instance was reported offline.
+- **Panel.** The install form always offers `docker` and the server refuses an unconfirmed host. The remote panel has no network form, so the `ufw` sentence is shown on every Docker instance.

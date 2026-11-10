@@ -618,6 +618,8 @@ SSH
 
 ## Block 19 – Docker
 
+> Status 4.18.25 (Block 19): Linux Docker for servers on SSH hosts. One container per instance from an image CONTROL builds on the host; base game and core read-only, the instance directory (main, zone, mods, plugins, usermaps) as a bind mount; a stopped instance can be switched between native and docker. Gate "Container Restart ohne Datenverlust" passes with a scripted docker, a real daemon and a real sshd, each with a stand-in core. Open: the native run with a real core and base game. Not included: local Docker, Docker Desktop, Compose.
+
 Optionaler Deployment-Modus:
 
 ```text
