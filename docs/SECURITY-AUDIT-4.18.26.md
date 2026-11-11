@@ -57,7 +57,7 @@ Checked without a finding: renderer isolation (`contextIsolation: true`, `nodeIn
 | ID | Title | Attacker | Grade | Status | Evidence |
 |----|-------|----------|-------|--------|----------|
 | A1-1 | An operator (`server.manage`) could make CONTROL run code of their choice: any executable as core (config, adopt, new instance, clone), plugins from any folder, free start arguments such as `+loadPlugin` | A2 | High | fixed | `test/security-runtime-code.test.mjs` |
-| A1-2 | A manifest file next to the core counted as proof of a verified core, and a Linux core or its folder could be writable by other users (swap after the hash check) | A4 | High | fixed | `test/security-runtime-code.test.mjs` |
+| A1-2 | A manifest file next to the core counted as proof of a verified core, and a Linux core or its folder could be writable by other users (swap after the hash check); group write is accepted only for the user's private group (umask 002) | A4 | High | fixed | `test/security-runtime-code.test.mjs` |
 | A1-3 | CONTROL itself is not refused as root/administrator; tar extraction as root keeps owners and setuid bits | A4 | Low | issue #40 |  |
 | A1-4 | Windows legacy runtime checks the PID without its creation time before stopping | A4 | Low | issue #40 |  |
 | A1-5 | Linux stop: race between the identity check and the signal (PID reuse) | A4 | Low | issue #40 |  |
@@ -69,11 +69,11 @@ Checked without a finding: renderer isolation (`contextIsolation: true`, `nodeIn
 | A2-4 | An unlocked vault stays unlocked until someone locks it (no idle lock) | A4 | Low | issue #41 |  |
 | A2-5 | Vault backups `backup-<uuid>.json` are never pruned | A4 | Low | issue #41 |  |
 | A3-1 | An operator (`config.manage`) chose the Python interpreter and the B3 folder, which CONTROL runs and hands the RCON and database passwords | A2 | High | fixed | `test/security-b3.test.mjs` |
-| A3-2 | A plugin setting (chat log, status file, ban list) could point B3 at any file, e.g. a shell start file that then receives player chat (also through ConfigParser `%(option)s` interpolation, found by `/security-review`) | A2 | High | fixed | `test/security-b3.test.mjs` |
+| A3-2 | A plugin setting (chat log, status file, ban list) could point B3 at any file, e.g. a shell start file that then receives player chat (also through ConfigParser `%(option)s` interpolation, found by `/security-review`, and through an XML entity, found by the final review) | A2 | High | fixed | `test/security-b3.test.mjs` |
 | A3-3 | An operator could trust plugin code that differs from the catalog | A2 | Medium | fixed | `test/security-b3.test.mjs` |
 | A3-4 | The B3 log showed full player IPs and GUIDs to read-only roles | A2 | Medium | fixed | `test/security-b3.test.mjs` |
 | A3-5 | Python and the B3 folders could be writable by other local users (code runs as the CONTROL user with the RCON and database passwords) | A4 | Medium | fixed | `test/security-b3.test.mjs` |
-| A3-6 | Plugin XML may contain a DOCTYPE with an internal subset (entity expansion can hang B3) | A2 | Low | issue #42 |  |
+| A3-6 | Plugin XML may contain a DOCTYPE with an internal subset (entity expansion can hang B3) | A2 | Low | fixed | `test/security-b3.test.mjs` |
 | A3-7 | With the `pluginmanager` plugin, a B3 admin can load modules in game that CONTROL never hashed | A2 | Low | issue #42 |  |
 | A3-8 | `POST /api/instances/:id/b3/integration/auth-password` is not covered by the credential guard (`no-store`) | A2 | Low | issue #42 |  |
 | A4-1 | A compromised host could exhaust CONTROL's memory with a directory listing that never ends (SFTP `readdir` without a limit) | A6 | Medium | fixed | `test/security-remote-host.test.mjs` |
@@ -98,6 +98,11 @@ Checked without a finding: renderer isolation (`contextIsolation: true`, `nodeIn
 | A6-5 | `docs/SECURITY-ADVISORIES.md` does not list the production dependency `ssh2` | A5 | Low | issue #45 |  |
 
 ## Rejected findings
+
+- **Area 5, login throttle eviction at 10 000 entries:** an attacker would need more than 10 000 distinct client keys; after A5-3 all loopback callers share one key and the gateway adds a per-user brake. No path for A1 to A7.
+- **Area 5, order of checks in `PATCH /api/users/:username`:** the route is admin-only (`user.manage`); the order changes no outcome for any other role.
+- **Final review, Host header:** a DNS-rebound page can make same-origin GET requests without an Origin header. Every such route that returns or changes anything needs the bearer token, which the page cannot obtain; only the unauthenticated health and catalogue routes answer. No Host allowlist was added.
+- **Final review, dev origins `localhost:5173`:** a local process on port 5173 gets a CORS grant, but every sensitive route still needs the bearer token. Kept for the development workflow.
 
 ## Native checks
 

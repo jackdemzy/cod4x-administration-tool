@@ -643,7 +643,7 @@ usermaps
 
 ## Block 20 – Security Audit
 
-> Status 4.18.26 (Block 20): audited by six independent reviewers, one per area. 6 High and 10 Medium findings reproduced by failing tests and fixed, 24 Low findings in issues #40 to #45; no Critical/High/Medium open. Report: `docs/SECURITY-AUDIT-4.18.26.md`; gate: `scripts/verify-4.18.26-security-gate.mjs`. Native checks (real core, Windows ACLs, desktop app) are listed in the report.
+> Status 4.18.26 (Block 20): audited by six independent reviewers, one per area. 6 High and 10 Medium findings reproduced by failing tests and fixed, 23 open Low findings in issues #40 to #45 (A3-6 fixed with A3-2); no Critical/High/Medium open. Report: `docs/SECURITY-AUDIT-4.18.26.md`; gate: `scripts/verify-4.18.26-security-gate.mjs`. Native checks (real core, Windows ACLs, desktop app) are listed in the report.
 
 ### Runtime
 

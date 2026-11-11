@@ -28,8 +28,8 @@ Six areas (local runtime, secrets, B3, remote Linux, remote access and admin API
 
 - **New admin-only permission `server.code` ("Server-Programmcode").** Only an administrator may choose or adopt a server core (`/api/runtime/config`, `/api/runtime/adopt`), create an instance (it picks a core), clone with another core, install or approve CoD4x plugins, start or restart the legacy runtime with an executable path or extra arguments, and set the B3 Python interpreter and B3 folder. Approving a changed shipped B3 plugin needs `b3.plugins.code` (admin). Operators still start, stop, restart, configure and clone with the same core; buttons for the moved actions answer 403 for them (the B3 approve button is hidden).
 - **Cores verified only by `cod4x-control-manifest.json`** (a file next to the core) are no longer verified. An administrator adopts such a core once again; the registry in the data folder is the only proof.
-- **Linux cores and B3/Python folders** that other users can write to (group/world write, or owned by another non-root user) are refused with `RUNTIME_EXECUTABLE_BLOCKED` or `B3_PATH_WRITABLE_BY_OTHERS`.
-- **B3 plugin settings** with an absolute path, a drive, a UNC path, `~`, `@home` or a `..` segment are refused (`B3_PLUGIN_CONFIG_INVALID`, reason `PATH_OUTSIDE_B3`). Use `@conf/…` or `@b3/…`.
+- **Linux cores and B3/Python folders** that other users can write to (world write, group write by a group other than the user's own private group, or owned by another non-root user) are refused with `RUNTIME_EXECUTABLE_BLOCKED` or `B3_PATH_WRITABLE_BY_OTHERS`.
+- **B3 plugin settings** with an absolute path, a drive, a UNC path, `~`, `@home`, a `..` segment, or an INI `%(option)s` reference to another option are refused (`B3_PLUGIN_CONFIG_INVALID`, reason `PATH_OUTSIDE_B3`); plugin XML may no longer contain a `<!DOCTYPE>` (also fixes A3-6). Use `@conf/…` for files B3 writes.
 - **B3 log for read-only roles** shows IPs as `a.b.c.x` and GUIDs as `…abcd`.
 - **Local backend** refuses requests from foreign web pages (`ORIGIN_REFUSED`); the desktop app identifies itself with a per-launch header. Scripts without an Origin and the vite dev server keep working.
 - **Desktop app**: links open in the system browser (https only); the window never navigates away from the app.
@@ -37,7 +37,7 @@ Six areas (local runtime, secrets, B3, remote Linux, remote access and admin API
 
 ## Not fixed (Low, tracked)
 
-24 Low findings, one GitHub issue per area: #40 (local runtime), #41 (secrets), #42 (B3), #43 (remote Linux), #44 (remote access and admin API), #45 (Electron and dependencies).
+23 Low findings (A3-6 was fixed along with A3-2), one GitHub issue per area: #40 (local runtime), #41 (secrets), #42 (B3), #43 (remote Linux), #44 (remote access and admin API), #45 (Electron and dependencies).
 
 ## Checks
 

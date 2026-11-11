@@ -105,3 +105,10 @@ test('A3-5: Python or a B3 folder writable by other users blocks B3', { skip: pr
   await fs.chmod(path.dirname(python), 0o755);
   await assertB3PathsPrivate({ pythonPath: python, b3Path });
 });
+
+test('A3-2 (final review): an XML entity cannot carry a path past the check', async () => {
+  const { validateB3PluginXml, unsafeB3PathLine } = await import('../lib/b3-plugin-validate.mjs');
+  const xml = '<!DOCTYPE configuration [<!ENTITY p "/home/ctl/.bashrc">]><configuration><settings name="s"><set name="file">&p;</set></settings></configuration>';
+  assert.ok(!validateB3PluginXml(xml).ok || unsafeB3PathLine(xml, 'xml') > 0, 'refused');
+  assert.equal(validateB3PluginXml('<!DOCTYPE configuration><configuration/>').ok, false, 'no DOCTYPE at all (A3-6)');
+});

@@ -82,3 +82,16 @@ test('A1-2: a Linux core in a folder others can write to is refused', { skip: pr
   const foreign = createLinuxRuntimeAdapter({ hostProcess: { platform: 'linux', getuid: () => process.getuid() + 1, geteuid: () => process.getuid() + 1 } });
   await assert.rejects(foreign.validateExecutable(exe), { code: 'RUNTIME_EXECUTABLE_BLOCKED' }, 'core owned by another non-root user');
 });
+
+test('A1-2 (final review): umask 002 folders pass when the group is the user\'s private group', { skip: process.platform !== 'linux' && 'Linux only' }, async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-a12g-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const exe = path.join(directory, 'cod4x18_dedrun');
+  await fs.writeFile(exe, 'core');
+  await fs.chmod(exe, 0o775);
+  await fs.chmod(directory, 0o775);
+  await createLinuxRuntimeAdapter({ privateGroup: () => true }).validateExecutable(exe);
+  await assert.rejects(createLinuxRuntimeAdapter({ privateGroup: () => false }).validateExecutable(exe), { code: 'RUNTIME_EXECUTABLE_BLOCKED' });
+  await fs.chmod(directory, 0o777);
+  await assert.rejects(createLinuxRuntimeAdapter({ privateGroup: () => true }).validateExecutable(exe), { code: 'RUNTIME_EXECUTABLE_BLOCKED' }, 'world write never passes');
+});
