@@ -6,7 +6,11 @@ Each area was read by its own independent reviewer. Every finding was then confi
 
 ## Area 1 – Local runtime
 
-Reviewed: no
+Reviewed: yes
+
+Reviewer: independent, read-only (2026-11-11). Two High findings, both reproduced by a failing test and fixed; the Medium candidate (A1-3) was regraded to Low because the core start already refuses root and archives come only from SHA-256-pinned sources; five more Low findings tracked as issues. Decision by the owner (2026-11-11): only an administrator may bring code; the operator still starts, stops and configures.
+
+Checked without a finding: Verified-Core gate on every start path (hash of the selected executable against the pinned manifest); Linux core without setuid/setgid and not a symlink; Linux core start refused as root; process identity on Linux (uid, gid, birth time, `fs_homepath`, `net_port`) before any signal; `fs_basepath`/`fs_homepath` overrides refused (now also for `+SET`, `+seta`, `+sets`); path traversal in installer targets (`assertSafeChildPath` for zip and tar entries); artifact SHA-256 pins and `redirect: "error"` downloads; runtime output redaction and bounded logs; core child environment.
 
 ## Area 2 – Secrets
 
@@ -40,6 +44,13 @@ Reviewed: no
 
 | ID | Title | Attacker | Grade | Status | Evidence |
 |----|-------|----------|-------|--------|----------|
+| A1-1 | An operator (`server.manage`) could make CONTROL run code of their choice: any executable as core (config, adopt, new instance, clone), plugins from any folder, free start arguments such as `+loadPlugin` | A2 | High | fixed | `test/security-runtime-code.test.mjs` |
+| A1-2 | A manifest file next to the core counted as proof of a verified core, and a Linux core or its folder could be writable by other users (swap after the hash check) | A4 | High | fixed | `test/security-runtime-code.test.mjs` |
+| A1-3 | CONTROL itself is not refused as root/administrator; tar extraction as root keeps owners and setuid bits | A4 | Low | open |  |
+| A1-4 | Windows legacy runtime checks the PID without its creation time before stopping | A4 | Low | open |  |
+| A1-5 | Linux stop: race between the identity check and the signal (PID reuse) | A4 | Low | open |  |
+| A1-6 | Zip extraction follows symlinks already in the target and has no size limit | A5 | Low | open |  |
+| A1-7 | Artifact downloads allow `http:` (the SHA-256 pin still protects the content) and mod archives may overwrite core files in the target | A5 | Low | open |  |
 | A2-1 | RCON password and master token in the local core's command line, readable by every local user on Linux (`/proc/<pid>/cmdline`) | A4 | High | fixed | `test/security-local-launch-secrets.test.mjs` |
 | A2-2 | Instance homes 0755 and the B3 game log 0644: typed `!auth` passwords readable by local users who can reach the data folder | A4 | Medium | fixed | `test/security-instance-permissions.test.mjs` |
 | A2-3 | `audit.ndjson` is created 0644 and only then set to 0600; the audit folder is created without a mode | A4 | Low | open |  |
