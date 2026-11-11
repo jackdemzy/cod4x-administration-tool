@@ -59,7 +59,8 @@ import { MonitorHost } from "./lib/monitor-host.mjs";
 import { MonitorAlerts } from "./lib/monitor-alerts.mjs";
 import { AlertNotifier } from "./lib/alert-notifier.mjs";
 import { readInstanceConsoleLog } from "./lib/instance-console-log.mjs";
-import { LoginThrottle } from "./lib/login-throttle.mjs";
+import { LoginThrottle, loginClient } from "./lib/login-throttle.mjs";
+import { DESKTOP_CLIENT_HEADER, localOriginDecision } from "./lib/local-origin-policy.mjs";
 import { RemoteSessions } from "./lib/remote-sessions.mjs";
 import { REMOTE_DEFAULT_PORT, REMOTE_ROUTES, REMOTE_PROXY_MAX_FAILURES, caddyfileTemplate, createRemoteGateway, listenRemoteGateway, remoteListenOptions } from "./lib/remote-gateway.mjs";
 import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecoveryCode, totpUri, verifyTotp } from "./lib/totp.mjs";
@@ -231,7 +232,9 @@ function getAuthSession(req) {
   const session = authSessions.get(token);
   if (!session) return null;
   const now = Date.now();
-  if (session.expiresAt <= now || session.absoluteExpiresAt <= now) {
+  // A5-4 (security audit 4.18.26): a disabled or deleted user loses every local session at once.
+  const owner = findAuthUser(session.username);
+  if (session.expiresAt <= now || session.absoluteExpiresAt <= now || !owner || owner.disabled) {
     authSessions.delete(token);
     return null;
   }
@@ -352,9 +355,22 @@ function authorizationBindingChecks() {
   return { ok: checks.every(c => c.pass), checks, bindings: RBAC_ENDPOINT_BINDINGS };
 }
 
-// Electron loads the renderer from file://, so explicitly allow the local backend origin.
+// Security audit 4.18.26 (A5-1, A5-2): only our own pages may call the admin API from a
+// browser. Electron loads the renderer from file:// (Origin "null") and adds a per-launch
+// secret header; the secret is taken out of the environment so no child process inherits it.
+const DESKTOP_CLIENT_TOKEN = process.env.COD4X_DESKTOP_CLIENT_TOKEN || "";
+delete process.env.COD4X_DESKTOP_CLIENT_TOKEN;
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const decision = localOriginDecision({
+    origin: req.headers.origin,
+    desktopHeader: req.headers[DESKTOP_CLIENT_HEADER],
+    desktopToken: DESKTOP_CLIENT_TOKEN,
+    ownOrigins: [`http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`],
+    preflight: req.method === "OPTIONS",
+  });
+  res.setHeader("Vary", "Origin");
+  if (!decision.allowed) return res.status(403).json({ ok: false, code: "ORIGIN_REFUSED", error: "Request from a foreign web page refused." });
+  if (decision.allowOrigin) res.setHeader("Access-Control-Allow-Origin", decision.allowOrigin);
   // Only the schema-backed instance config endpoint accepts PUT. Preserve
   // existing method exposure elsewhere; authentication/RBAC still guard writes.
   const instanceConfigPath = /^\/api\/instances\/[^/]+\/config\/?$/.test(req.path);
@@ -365,7 +381,7 @@ app.use((req, res, next) => {
   const remoteConfigPath = /^\/api\/remote-instances\/[^/]+\/config\/?$/.test(req.path);
   const remoteHostDeletePath = /^\/api\/remote-hosts\/[^/]+\/?$/.test(req.path);
   res.setHeader("Access-Control-Allow-Methods", `GET,POST,${instanceConfigPath || b3PluginPutPath || remoteConfigPath ? "PUT," : ""}${b3PluginDeletePath || remoteHostDeletePath ? "DELETE," : ""}OPTIONS`);
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-COD4X-Desktop");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -918,7 +934,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (!authUser) return res.status(428).json({ ok: false, error: "First-Run-Initialisierung erforderlich." });
     const username = String(req.body?.username || "").trim();
     const password = String(req.body?.password || "");
-    const throttleKey = LoginThrottle.key(req.socket.remoteAddress, username);
+    const throttleKey = LoginThrottle.key(loginClient(req.socket.remoteAddress), username);
     const lock = loginThrottle.check(throttleKey);
     if (lock.locked) {
       audit({ level: "warn", event: "auth.login_locked", details: { username } });
@@ -933,7 +949,8 @@ app.post("/api/auth/login", async (req, res) => {
     if (!candidate || candidate.disabled || !validUser || !validPassword) {
       const locked = loginThrottle.fail(throttleKey);
       audit({ level: "warn", event: locked ? "auth.login_locked" : "auth.login_failed", details: { username } });
-      return res.status(401).json({ ok: false, error: candidate?.disabled ? "Benutzer ist deaktiviert." : "Benutzername oder Passwort ungültig." });
+      // A5-2: only the right password may learn that the account is disabled.
+      return res.status(401).json({ ok: false, error: candidate?.disabled && validUser && validPassword ? "Benutzer ist deaktiviert." : "Benutzername oder Passwort ungültig." });
     }
     loginThrottle.succeed(throttleKey);
     const session = createAuthSession(candidate.username, candidate.role);
@@ -1085,6 +1102,7 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
       target.passwordHash = hashAuthPassword(req.body.password);
       for (const [token, session] of authSessions) if (session.username.toLowerCase() === target.username.toLowerCase()) authSessions.delete(token);
     }
+    if (target.disabled) for (const [token, session] of authSessions) if (session.username.toLowerCase() === target.username.toLowerCase()) authSessions.delete(token);
     target.updatedAt = new Date().toISOString();
     await saveAuthUsers();
     if (authUser?.username.toLowerCase() === target.username.toLowerCase()) await saveAuthUser(target);

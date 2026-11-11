@@ -2,9 +2,14 @@ const {app,BrowserWindow,dialog,ipcMain,safeStorage} = require('electron');
 const http = require('http');
 const {spawn} = require('child_process');
 const path=require('path');
+const crypto=require('crypto');
 let server=null;
 const PORT=8787;
 const HOST='127.0.0.1';
+// Security audit 4.18.26 (A5-1): the renderer is a file:// page, so its requests carry
+// Origin "null" like a sandboxed foreign page. A secret per launch, known only to this
+// process and the backend it starts, marks the requests that really come from our window.
+const DESKTOP_CLIENT_TOKEN=crypto.randomBytes(32).toString('hex');
 ipcMain.handle('select-runtime-folder', async () => {
   const result = await dialog.showOpenDialog({
     title: 'CoD4x Runtime-Verzeichnis auswählen',
@@ -86,7 +91,7 @@ ipcMain.handle('clear-remembered-login', async () => {
 
 function startBackend(){
   const serverPath=path.join(__dirname,'installer-server.mjs');
-  server=spawn(process.execPath,[serverPath],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',PORT:String(PORT),HOST,COD4X_DATA_ROOT:app.getPath('userData'),COD4X_RUNTIME_MODE:'interactive'},cwd:app.getPath('userData'),stdio:'ignore'});
+  server=spawn(process.execPath,[serverPath],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',PORT:String(PORT),HOST,COD4X_DATA_ROOT:app.getPath('userData'),COD4X_RUNTIME_MODE:'interactive',COD4X_DESKTOP_CLIENT_TOKEN:DESKTOP_CLIENT_TOKEN},cwd:app.getPath('userData'),stdio:'ignore'});
   server.on('exit',code=>{if(code && !app.isQuitting){dialog.showErrorBox('COD4X CONTROL','Installer backend exited with code '+code);}});
 }
 function waitForBackend(retries=40){
@@ -106,6 +111,10 @@ function waitForBackend(retries=40){
 
 async function createWindow(){
   const win=new BrowserWindow({width:1440,height:960,minWidth:1100,minHeight:720,backgroundColor:'#09090f',webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,preload:path.join(__dirname,'electron-preload.cjs')}});
+  win.webContents.session.webRequest.onBeforeSendHeaders({urls:[`http://${HOST}:${PORT}/*`]},(details,callback)=>{
+    details.requestHeaders['X-COD4X-Desktop']=DESKTOP_CLIENT_TOKEN;
+    callback({requestHeaders:details.requestHeaders});
+  });
   const ok=await waitForBackend();
   if(!ok){ dialog.showErrorBox('COD4X CONTROL','Das lokale Installer-Backend konnte nicht gestartet werden.'); app.quit(); return; }
   win.loadFile(path.join(__dirname,'dist','index.html'));
