@@ -21,7 +21,8 @@ async function start(t) {
   const hostService = {
     dockerStatus: async id => { known(id); calls.push(['dockerStatus', id]); return { mode: 'ROOTFUL', version: '29.1.0', confirmed: false, image: 'MISSING', note: 'ROOTFUL_ROOT_EQUIVALENT' }; },
     confirmDocker: async (id, input) => { known(id); calls.push(['confirmDocker', id, input]); if (input.confirm !== 'DOCKER_ROOT_EQUIVALENT') fail('REMOTE_DOCKER_CONFIRMATION_REQUIRED'); return { id, docker: { mode: 'ROOTFUL', confirmedAt: '2026-11-09T00:00:00.000Z' } }; },
-    buildDockerImage: async id => { known(id); calls.push(['buildDockerImage', id]); if (calls.filter(entry => entry[0] === 'buildDockerImage').length > 1) fail('REMOTE_DOCKER_BUILD_FAILED'); return { tag: 'cod4x-control-runtime:0123456789abcdef', id: `sha256:${'a'.repeat(64)}` }; },
+    withdrawDocker: async id => { known(id); calls.push(['withdrawDocker', id]); return { id, docker: null }; },
+    buildDockerImage: async id => { known(id); calls.push(['buildDockerImage', id]); if (calls.filter(entry => entry[0] === 'buildDockerImage').length > 1) throw Object.assign(new Error('REMOTE_DOCKER_BUILD_FAILED'), { code: 'REMOTE_DOCKER_BUILD_FAILED', output: 'ERROR: failed to solve\n' + 'y'.repeat(9000) }); return { tag: 'cod4x-control-runtime:0123456789abcdef', id: `sha256:${'a'.repeat(64)}` }; },
   };
   const runtime = { status: 'RUNNING', runId: 'r1', containerId: ID };
   const manager = {
@@ -70,6 +71,14 @@ test('docker host routes: status for readers, confirmation and image build for m
   assert.equal((await call('operator', '/api/remote-hosts/lab-1/docker/image', { tag: 'evil' })).json.code, 'REMOTE_ARGUMENT_INVALID');
   const failed = await call('operator', '/api/remote-hosts/lab-1/docker/image', {});
   assert.deepEqual([failed.status, failed.json.code], [400, 'REMOTE_DOCKER_BUILD_FAILED']);
+  assert.match(failed.json.output, /^ERROR: failed to solve/);
+  assert.ok(failed.json.output.length <= 4096, 'what Docker printed leaves the server bounded');
+  assert.equal(refused.json.output, undefined, 'no other refusal carries output');
+
+  assert.equal((await call('viewer', '/api/remote-hosts/lab-1/docker/confirm', undefined, 'DELETE')).status, 403);
+  const withdrawn = await call('operator', '/api/remote-hosts/lab-1/docker/confirm', undefined, 'DELETE');
+  assert.deepEqual([withdrawn.status, withdrawn.json.host.docker], [200, null]);
+  assert.equal((await call('operator', '/api/remote-hosts/nope/docker/confirm', undefined, 'DELETE')).status, 404);
 });
 
 test('deployment routes: the install passes an optional deployment on, the switch needs server.manage and an exact body', async t => {
@@ -119,7 +128,7 @@ test('answers carry the container ID shortened to 12 characters, and Docker refu
 test('the permission map lists the Docker routes under the permission the route asks for', () => {
   const of = route => REMOTE_LINUX_BINDINGS.filter(binding => binding.routes.includes(route)).map(binding => binding.permission);
   assert.deepEqual(of('GET /api/remote-hosts/:id/docker'), ['diagnostics.read']);
-  for (const route of ['POST /api/remote-hosts/:id/docker/confirm', 'POST /api/remote-hosts/:id/docker/image', 'POST /api/remote-instances/:id/deployment']) assert.deepEqual(of(route), ['server.manage'], route);
+  for (const route of ['POST /api/remote-hosts/:id/docker/confirm', 'DELETE /api/remote-hosts/:id/docker/confirm', 'POST /api/remote-hosts/:id/docker/image', 'POST /api/remote-instances/:id/deployment']) assert.deepEqual(of(route), ['server.manage'], route);
 });
 
 test('every Docker code the library can throw has a German and an English message in the panel', async () => {

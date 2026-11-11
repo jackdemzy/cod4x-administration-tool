@@ -84,7 +84,7 @@ One container per instance, named `cod4x-<instanceId>`, with the labels `cod4x.c
 
 `setDeployment(id, deployment)` changes the field of an existing instance. The directory layout is the same for both values, so no file is moved or rewritten.
 
-- Allowed only when the instance is `STOPPED` (or `FAILED` with no live process or container) and recovery is not blocked; otherwise `REMOTE_INSTANCE_ACTIVE`. The check and the write run under the same per-instance lock as start and stop, so a start cannot slip in between.
+- Allowed only when the instance is `STOPPED` (or `FAILED` with no live process or container) and recovery is not blocked; otherwise `REMOTE_INSTANCE_RUNNING`. The check and the write run under the same per-instance lock as start and stop, so a start cannot slip in between.
 - Before the write CONTROL verifies on the host that nothing of the old deployment is left: no process that passes the identity check, and no container named `cod4x-<id>`. A stopped container of this instance (matching labels) is removed; a container with foreign labels stops the switch (`INSTANCE_PROCESS_IDENTITY_BLOCKED`).
 - Switching to `docker` needs the same preconditions as a Docker install: host probe, the `ROOTFUL` confirmation where it applies, and host paths without `,` or `"`. The image is not built by the switch; a missing image is reported at the next start.
 - The stored runtime state is reset to idle with the switch, so a PID is never read as a container ID or the other way round.
@@ -147,3 +147,19 @@ Decided while building, each with a test:
 - **After a failed run.** The exited container and its ID stay until the next start or stop, so its output and exit reason can still be read. After a stop the container output is gone; `qconsole.log` in the home remains.
 - **RCON and monitoring.** The shared RCON service, the monitoring collector and the console treat a saved container ID like a pid when they decide whether a server runs. Without that a Docker instance was reported offline.
 - **Panel.** The install form always offers `docker` and the server refuses an unconfirmed host. The remote panel has no network form, so the `ufw` sentence is shown on every Docker instance.
+
+## Changes after the final review (2026-11-10)
+
+Each with a test that failed first:
+
+- **Error code of a refused switch.** The text above said `REMOTE_INSTANCE_ACTIVE`; the code has always been `REMOTE_INSTANCE_RUNNING` (the name Block 18 uses) and the text now says so.
+- **Ended container.** A stop on an instance whose container already ended removes that container and leaves the instance `STOPPED`, as the Status bullet says.
+- **Image of a container.** A container is reported `RUNNING` at start, and adopted by `recover`, only when it runs the runtime image of the host (`REMOTE_DOCKER_IMAGE_MISMATCH`, `REMOTE_RECOVERY_AMBIGUOUS`).
+- **Start confirmation.** A container, and a native core, must stay up for `startSettleMs` (1 s) before `RUNNING` is written. The wait ends after `startConfirmMs + startSettleMs` at the latest.
+- **Failed image build.** The answer carries the last 4096 bytes of what Docker printed, redacted. The audit log keeps the code only.
+- **Docker gone from a host.** `docker` → `native` is allowed when the host has no `docker` program any more (`REMOTE_DOCKER_NOT_INSTALLED` from the inspect, exit 127). A daemon that does not answer still blocks.
+- **Output of a removed container.** `logs` answers empty output instead of the daemon's error text.
+- **Confirmation.** `DELETE /api/remote-hosts/:id/docker/confirm` (`server.manage`) withdraws the Docker confirmation of a host.
+- **Core import.** The core file is opened with `O_NOFOLLOW` and compared with the file under the name after the open; a folder whose name only begins with `..` is inside the import directory.
+- **Unlabeled foreign container**, **`docker stop -t`**, **log driver `local`**: see `CHANGELOG-4.18.25.md`.
+

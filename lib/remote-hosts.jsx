@@ -42,12 +42,14 @@ const MESSAGES = {
   REMOTE_DOCKER_START_FAILED: ['Docker hat den Container nicht gestartet.', 'Docker did not start the container.'],
   REMOTE_DOCKER_CONTAINER_EXISTS: ['Ein laufender Container dieser Instanz ist CONTROL nicht bekannt. Er wurde nicht angefasst.', 'A running container of this instance is unknown to CONTROL. It was not touched.'],
   REMOTE_DOCKER_REMOVE_FAILED: ['Der gestoppte Container konnte nicht entfernt werden.', 'The stopped container could not be removed.'],
+  REMOTE_DOCKER_NOT_INSTALLED: ['Auf diesem Host ist kein docker-Programm vorhanden. Es wurde nichts verändert.', 'There is no docker program on this host. Nothing was changed.'],
+  REMOTE_DOCKER_IMAGE_MISMATCH: ['Der Container läuft nicht mit dem Image, das CONTROL gestartet hat. Er wurde nicht übernommen.', 'The container does not run the image CONTROL started. It was not adopted.'],
   REMOTE_DOCKER_INSPECT_FAILED: ['Docker hat keine verwertbare Antwort gegeben. Es wurde nichts verändert.', 'Docker gave no usable answer. Nothing was changed.'],
   REMOTE_DOCKER_PATH_UNSUPPORTED: ['Ein Pfad mit Komma oder Anführungszeichen kann nicht in einen Container eingebunden werden.', 'A path with a comma or a double quote cannot be mounted into a container.'],
   REMOTE_DEPLOYMENT_CHANGE_FAILED: ['Die Betriebsart konnte nicht umgestellt werden. Die Instanz ist unverändert.', 'The deployment could not be changed. The instance is unchanged.'],
 };
 
-export function RemoteError({ de, code, presentedSha256, pinnedSha256 }) {
+export function RemoteError({ de, code, presentedSha256, pinnedSha256, output }) {
   const safe = CODE.test(code || '') ? code : 'REMOTE_OPERATION_FAILED';
   if (safe === 'REMOTE_HOST_KEY_CHANGED') {
     return <div role="alert">
@@ -59,7 +61,9 @@ export function RemoteError({ de, code, presentedSha256, pinnedSha256 }) {
     </div>;
   }
   const message = MESSAGES[safe];
-  return <p role="alert">{message ? text(de, message[0], message[1]) : text(de, 'Vorgang fehlgeschlagen.', 'Operation failed.')} <code>{safe}</code></p>;
+  const shown = safe === 'REMOTE_DOCKER_BUILD_FAILED' && typeof output === 'string' && output ? output.slice(-4096) : null;
+  return <div role="alert"><p>{message ? text(de, message[0], message[1]) : text(de, 'Vorgang fehlgeschlagen.', 'Operation failed.')} <code>{safe}</code></p>
+    {shown && <><p>{text(de, 'Letzte Ausgabe von Docker:', 'Last output of Docker:')}</p><pre>{shown}</pre></>}</div>;
 }
 
 export function HostKeyDialog({ de, host, fingerprint, confirmed, onConfirm, onTrust, onCancel }) {
@@ -104,7 +108,7 @@ export function HostCredentialForm({ de, host, status, busy, onSave, onRemove })
 // The docker group is root on the host: that is confirmed per host by typing the word, never by a tick.
 export const DOCKER_CONFIRM_WORD = 'DOCKER_ROOT_EQUIVALENT';
 const IMAGE_STATE = { PRESENT: ['Image bereit', 'Image ready'], MISSING: ['Image fehlt', 'Image missing'], OUTDATED: ['Image veraltet', 'Image outdated'] };
-export function DockerHostLine({ de, status, busy, onConfirm, onBuild }) {
+export function DockerHostLine({ de, status, busy, onConfirm, onBuild, onWithdraw = () => {} }) {
   const [word, setWord] = useState('');
   if (!status) return null;
   if (status.mode === 'NO_DOCKER') return <p>{text(de, 'Docker ist auf diesem Host für den SSH-Benutzer nicht verfügbar.', 'Docker is not available to the SSH user on this host.')}</p>;
@@ -120,6 +124,7 @@ export function DockerHostLine({ de, status, busy, onConfirm, onBuild }) {
       <button type="button" disabled={busy || (rootful && word !== DOCKER_CONFIRM_WORD)} onClick={() => { const typed = rootful ? word : null; setWord(''); onConfirm(typed); }}>{text(de, 'Docker für diesen Host bestätigen', 'Confirm Docker for this host')}</button>
     </div>}
     <button type="button" disabled={busy || !status.confirmed} onClick={() => onBuild()}>{text(de, 'Image bauen', 'Build image')}</button>
+    {status.confirmed && <button type="button" disabled={busy} onClick={() => onWithdraw()}>{text(de, 'Bestätigung zurückziehen', 'Withdraw confirmation')}</button>}
   </div>;
 }
 
@@ -178,7 +183,7 @@ export function RemoteHostsPanel({ de, request }) {
   const call = useCallback(async (route, method = 'GET', body) => {
     const response = await request(route, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.ok === false) throw Object.assign(new Error('remote call failed'), { code: data.code, presentedSha256: data.presentedSha256, pinnedSha256: data.pinnedSha256 });
+    if (!response.ok || data.ok === false) throw Object.assign(new Error('remote call failed'), { code: data.code, presentedSha256: data.presentedSha256, pinnedSha256: data.pinnedSha256, output: data.output });
     return data;
   }, [request]);
 
@@ -186,7 +191,7 @@ export function RemoteHostsPanel({ de, request }) {
     if (working.current) return;
     working.current = true; setBusy(true); setError(null); setMessage('');
     try { await task(); }
-    catch (failure) { if (mounted.current) setError({ code: failure.code, presentedSha256: failure.presentedSha256, pinnedSha256: failure.pinnedSha256 }); }
+    catch (failure) { if (mounted.current) setError({ code: failure.code, presentedSha256: failure.presentedSha256, pinnedSha256: failure.pinnedSha256, output: failure.output }); }
     finally { working.current = false; if (mounted.current) setBusy(false); }
   }
   const refresh = () => run(async () => {
@@ -228,6 +233,11 @@ export function RemoteHostsPanel({ de, request }) {
   const confirmDocker = (host, confirm) => run(async () => {
     await call(`${dockerRoute(host)}/confirm`, 'POST', { confirm });
     setMessage(text(de, 'Docker für diesen Host bestätigt.', 'Docker confirmed for this host.'));
+    setHosts((await call('/api/remote-hosts')).hosts || []); await showDocker(host);
+  });
+  const withdrawDocker = host => run(async () => {
+    await call(`${dockerRoute(host)}/confirm`, 'DELETE');
+    setMessage(text(de, 'Docker-Bestätigung für diesen Host zurückgezogen. Docker-Server auf diesem Host starten erst nach einer neuen Bestätigung wieder.', 'Docker confirmation for this host withdrawn. Docker servers on this host start again only after a new confirmation.'));
     setHosts((await call('/api/remote-hosts')).hosts || []); await showDocker(host);
   });
   const buildImage = host => run(async () => {
@@ -289,7 +299,7 @@ export function RemoteHostsPanel({ de, request }) {
         <button type="button" disabled={busy} onClick={() => removeHost(host)}>{text(de, 'Host entfernen', 'Remove host')}</button>
       </div>
       {credentials[host.id] && <HostCredentialForm de={de} host={host} status={credentials[host.id]} busy={busy} onSave={body => saveKey(host, body)} onRemove={() => removeKey(host)} />}
-      <DockerHostLine de={de} status={docker[host.id]} busy={busy} onConfirm={word => confirmDocker(host, word)} onBuild={() => buildImage(host)} />
+      <DockerHostLine de={de} status={docker[host.id]} busy={busy} onConfirm={word => confirmDocker(host, word)} onBuild={() => buildImage(host)} onWithdraw={() => withdrawDocker(host)} />
     </li>)}</ul>
 
     <h4>{text(de, 'Server auf Hosts', 'Servers on hosts')}</h4>

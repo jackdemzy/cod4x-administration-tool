@@ -136,6 +136,8 @@ test('Block 19: a rootless host gets the note about player addresses, a confirme
   assert.match(confirmed, /Image outdated/);
   assert.doesNotMatch(confirmed, /<button[^>]*disabled=""[^>]*>Build image/);
   assert.doesNotMatch(confirmed, />Confirm Docker for this host</);
+  assert.match(confirmed, />Withdraw confirmation</);
+  assert.doesNotMatch(rootless, />Withdraw confirmation</, 'nothing to withdraw before a confirmation');
   const present = render('DockerHostLine', { ...props, status: { mode: 'ROOTLESS', version: '29.1.0', confirmed: true, image: 'PRESENT', note: 'ROOTLESS_SOURCE_ADDRESS' } });
   assert.match(present, /Image ready/);
   const none = render('DockerHostLine', { ...props, status: { mode: 'NO_DOCKER', version: null, confirmed: false, image: null, note: null } });

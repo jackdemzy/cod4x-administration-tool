@@ -282,6 +282,9 @@ test('a core outside the import directory is refused before any connection: othe
   // a path that is written with ".." but stays inside is the same file
   assert.equal((await manager.install(request({ corePath: path.join(local, 'core', 'x', '..', 'cod4x18_dedrun') }))).id, 'public-01');
   assert.deepEqual(connects, ['lab-1']);
+  // a folder whose name merely begins with two dots is inside
+  await fs.mkdir(path.join(local, '..21.5')); await fs.copyFile(corePath, path.join(local, '..21.5', 'cod4x18_dedrun'));
+  assert.equal((await manager.install(request({ id: 'public-02', port: 28999, corePath: path.join(local, '..21.5', 'cod4x18_dedrun') }))).id, 'public-02');
   await rejects(manager.updateCore('public-01', { corePath: elsewhere, coreVersion: '21.5', expectedCoreSha256: sha(CORE_BYTES) }), 'REMOTE_CORE_OUTSIDE_IMPORT');
 });
 

@@ -25,6 +25,7 @@ const die = (message, code = 1) => { process.stderr.write(message + '\n'); proce
 const argv = process.argv.slice(2);
 fs.appendFileSync(path.join(state, 'calls.log'), JSON.stringify(argv) + '\n');
 const settings = read('settings.json', { mode: 'ROOTFUL' });
+if (settings.mode === 'NOT_INSTALLED') die('sh: 1: docker: not found', 127);
 if (settings.mode === 'NO_DOCKER') die('Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?');
 const containers = () => fs.readdirSync(state).filter(name => name.startsWith('container-')).map(name => read(name));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -45,7 +46,7 @@ if (command === 'info') {
   process.stdout.write('29.0.0 ' + JSON.stringify(settings.mode === 'ROOTLESS' ? ['name=seccomp,profile=builtin', 'name=rootless'] : ['name=seccomp,profile=builtin']) + '\n');
 } else if (command === 'build') {
   const dockerfile = fs.readFileSync(0, 'utf8');
-  if (settings.failBuild || !dockerfile.startsWith('FROM ')) die('ERROR: failed to solve');
+  if (settings.failBuild || !dockerfile.startsWith('FROM ')) die('x'.repeat(20000) + '\nset rcon_password "hunter2secret"\nERROR: failed to solve: process "/bin/sh -c apt-get install" did not complete successfully');
   const tag = argv[argv.indexOf('--tag') + 1], label = argv[argv.indexOf('--label') + 1].split('=');
   const id = 'sha256:' + crypto.createHash('sha256').update(tag + dockerfile).digest('hex');
   const images = read('images.json', {}); images[tag] = { id, labels: { [label[0]]: label[1] } }; write('images.json', images);
@@ -86,13 +87,14 @@ if (command === 'info') {
   const container = find(argv[argv.length - 1]);
   if (settings.failInspect) die('Cannot connect to the Docker daemon');
   if (!container) die('Error response from daemon: No such container: ' + argv[argv.length - 1]);
-  process.stdout.write(JSON.stringify([container.id, '/' + container.name, container.labels['cod4x.control.instance'] || '', container.labels['cod4x.control.run'] || '', container.image, container.status, container.exitCode, container.oomKilled]) + '\n');
+  process.stdout.write(JSON.stringify([container.id, '/' + container.name, container.labels['cod4x.control.instance'] ?? null, container.labels['cod4x.control.run'] ?? null, settings.reportImage || container.image, container.status, container.exitCode, container.oomKilled]) + '\n');
 } else if (command === 'stop') {
   const container = find(argv[argv.length - 1]);
   if (!container) die('Error response from daemon: No such container');
   if (container.status === 'running') {
     const pid = Number(fs.readFileSync(path.join(container.dir, 'pid'), 'utf8'));
-    const grace = Number(argv[argv.indexOf('--time') + 1]) * 1000;
+    if (argv[1] !== '-t') die('fake docker: stop needs -t');
+    const grace = Number(argv[2]) * 1000;
     try { process.kill(pid, 'SIGTERM'); } catch {}
     for (let waited = 0; alive(container.supervisor) && waited < Math.min(grace, settings.graceMs ?? 400); waited += 20) sleep(20);
     if (alive(container.supervisor)) { try { process.kill(pid, 'SIGKILL'); } catch {} for (let waited = 0; alive(container.supervisor) && waited < 2000; waited += 20) sleep(20); }

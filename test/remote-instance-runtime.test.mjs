@@ -422,3 +422,21 @@ test('review: statusAll that finds a core gone sweeps a leftover password file',
   assert.notEqual(entries.find(entry => entry.instance.id === 'public-01').runtime.status, 'RUNNING');
   assert.deepEqual(await rconFiles(instance.home), []);
 });
+
+test('a core that ends shortly after it was seen alive is a failed start, not RUNNING', { skip }, async t => {
+  const { execFile } = await import('node:child_process');
+  const path = await import('node:path');
+  const buildCore = async (directory, name) => {
+    await fs.mkdir(directory, { recursive: true });
+    const source = path.join(directory, `${name}.c`), executable = path.join(directory, name);
+    await fs.writeFile(source, '#include <unistd.h>\n#include <stdio.h>\nint main(void) { puts("gone early"); fflush(stdout); usleep(150000); return 3; }\n');
+    await new Promise((resolve, reject) => execFile('gcc', [source, '-o', executable], error => (error ? reject(error) : resolve())));
+    await fs.rm(source);
+    return executable;
+  };
+  const f = await createRemoteFixture(t, { buildCore, timing: { startSettleMs: 600 } });
+  await f.install('public-01');
+  await rejects(f.manager.start('public-01'), 'REMOTE_START_FAILED');
+  const saved = await f.state.read('public-01');
+  assert.deepEqual([saved.status, saved.exitReason, saved.pid], ['FAILED', 'EXITED_ON_START', null]);
+});

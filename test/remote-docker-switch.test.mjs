@@ -168,3 +168,14 @@ test('a switch racing another operation on the instance is refused as busy', { s
   assert.equal(f.instances.get('public-01').deployment, 'docker');
   assert.equal(path.basename(f.instances.get('public-01').core.path), 'cod4x18_dedrun');
 });
+
+test('docker -> native works on a host where docker is no longer installed; a daemon that does not answer still blocks', { skip }, async t => {
+  const f = await createDockerFixture(t);
+  await f.install('public-01');
+  await f.fake.set({ mode: 'NO_DOCKER' });
+  await rejects(f.manager.setDeployment('public-01', { deployment: 'native' }), 'REMOTE_DOCKER_INSPECT_FAILED');
+  assert.equal(f.instances.get('public-01').deployment, 'docker');
+  await f.fake.set({ mode: 'NOT_INSTALLED' });
+  assert.equal((await f.manager.setDeployment('public-01', { deployment: 'native' })).instance.deployment, 'native');
+  await rejects(f.manager.setDeployment('public-01', { deployment: 'docker' }), 'REMOTE_DOCKER_UNAVAILABLE');
+});
