@@ -52,8 +52,10 @@ test('local server runs with or without a master token; the token reaches only t
   assert.equal((await masterService.status('master-a')).state, 'NOT_CONFIGURED');
   await setMaster('master-b', token);
   const listed = await manager.launch('master-b');
-  const args = children.get(listed.pid).args, index = args.indexOf('sv_authtoken');
-  assert.ok(index > 0 && args[index - 1] === '+set' && args[index + 1] === token && index < args.indexOf('+exec'), 'core receives sv_authtoken before server.cfg');
+  // Security audit 4.18.26 (A2-1): the token comes from the private launch file, not the arguments.
+  const child = children.get(listed.pid);
+  assert.ok(!child.args.includes('sv_authtoken') && !child.args.join(' ').includes(token), 'no token in the argument list');
+  assert.equal(child.execedSettings.sv_authtoken, token, 'core receives sv_authtoken from the launch file before server.cfg');
   const status = await masterService.status('master-b');
   assert.deepEqual([status.state, status.reason, status.transfer], ['TOKEN_CONFIGURED', 'LOOPBACK_BINDING', 'PROVISIONED']);
   assert.ok(auditEvents.some(entry => entry.event === 'master.registration.started' && entry.details.instanceId === 'master-b'));

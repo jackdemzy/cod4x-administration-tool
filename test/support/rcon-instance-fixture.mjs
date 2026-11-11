@@ -56,13 +56,25 @@ export async function createRconFixture({ masterOptions = {} } = {}) {
       children.set(child.pid, child);
       const home = argument(args, 'fs_homepath');
       const plugins = args.flatMap((value, i) => value === '+loadPlugin' ? [args[i + 1]] : []);
-      startFakeCod4xServer({ port: Number(argument(args, 'net_port')), password: argument(args, 'rcon_password') || '', hostname: instance.name, plugins }).then(async server => {
+      // Like the core: read every +exec file from <homepath>/main and print "execing <file>".
+      const execs = args.flatMap((value, i) => value === '+exec' ? [args[i + 1]] : []);
+      child.execedSettings = {};
+      const readExecs = async () => {
+        for (const name of execs) {
+          const file = path.join(home, 'main', name);
+          const text = await fs.readFile(file, 'latin1').catch(() => null);
+          if (text === null) continue;
+          if (name.startsWith('launch-')) child.launchFileMode = (await fs.stat(file)).mode;
+          for (const [, key, value] of text.matchAll(/^set (\w+) "([^"]*)"$/gm)) child.execedSettings[key] = value;
+        }
+      };
+      readExecs().then(() => startFakeCod4xServer({ port: Number(argument(args, 'net_port')), password: child.execedSettings.rcon_password || argument(args, 'rcon_password') || '', hostname: instance.name, plugins })).then(async server => {
         child.server = server; servers.push(server);
         child.on('exit', () => { child.gone = true; void server.close(); });
         await fs.mkdir(path.join(home, 'main'), { recursive: true });
         await fs.appendFile(path.join(home, 'main', 'qconsole.log'), `----- Server Initialization -----\n${plugins.map((name, i) => `Plugin ${name} loaded successfully. Server is currently running ${i + 1} plugins.\n`).join('')}Server: mp_backlot\nRcon from 127.0.0.1: status\n`);
         child.emit('spawn');
-        child.stdout.emit('data', Buffer.from(`CoD4X fake core ${instance.id} ready\n`));
+        child.stdout.emit('data', Buffer.from(`CoD4X fake core ${instance.id} ready\n${execs.map(name => `execing ${name}\n`).join('')}`));
       }, error => child.emit('error', error));
       return child;
     },
