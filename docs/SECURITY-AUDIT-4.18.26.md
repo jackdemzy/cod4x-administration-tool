@@ -22,7 +22,11 @@ Checked without a finding: master token (vault form check, only ids and codes in
 
 ## Area 3 – B3
 
-Reviewed: no
+Reviewed: yes
+
+Reviewer: independent, read-only (2026-11-11), checked against the eBc-B3 source. Two High and three Medium findings, all reproduced by a failing test and fixed; three Low findings tracked as issues. Following the owner's decision for area 1, choosing the Python interpreter or the B3 folder and trusting changed plugin code now need admin.
+
+Checked without a finding: Python process isolation (`shell: false`, `-E -B`, minimal environment, fresh temporary `cwd` for probe and helper, root refused on Linux, PID identity before any signal, secrets to the helper only over stdin); database credentials (password bound to host, port and user; DSN only in `b3.xml` 0600; redacted for the UI and in log lines; bound parameters; only audited SQL with pinned hashes); config injection into `b3.xml` and `plugin_auth.ini` (XML escaping, `g_log` pattern, character rules for `!auth` and database passwords, plugin name pattern); plugin files (every file directly in its folder, symlinks refused, NUL/UTF-8/size checks, custom code behind `b3.plugins.code`); CSRF on B3 routes (global Origin guard); permissions of the other B3 routes; secrets in errors and the audit; `!auth` redaction in logs.
 
 ## Area 4 – Remote Linux
 
@@ -42,7 +46,11 @@ Checked without a finding: gateway authentication (dummy hash for unknown users,
 
 ## Area 6 – Electron and dependencies
 
-Reviewed: no
+Reviewed: yes
+
+Reviewer: independent, read-only (2026-11-11). One Medium finding, reproduced by a failing test and fixed; four Low findings tracked as issues. `npm audit --omit=dev`: 0 vulnerabilities.
+
+Checked without a finding: renderer isolation (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity` and `webviewTag` at their safe defaults, no `<webview>` or `<iframe>`); preload surface (five fixed channels, no raw `ipcRenderer`); protocol and file handling (`loadFile` of the built page, no custom protocol, no `openPath`); no auto-updater and no runtime download in the app; backend spawn (fixed script, token through the environment and removed from it by the backend); production dependencies (`npm audit --omit=dev`).
 
 ## Findings
 
@@ -60,6 +68,14 @@ Reviewed: no
 | A2-3 | `audit.ndjson` is created 0644 and only then set to 0600; the audit folder is created without a mode | A4 | Low | open |  |
 | A2-4 | An unlocked vault stays unlocked until someone locks it (no idle lock) | A4 | Low | open |  |
 | A2-5 | Vault backups `backup-<uuid>.json` are never pruned | A4 | Low | open |  |
+| A3-1 | An operator (`config.manage`) chose the Python interpreter and the B3 folder, which CONTROL runs and hands the RCON and database passwords | A2 | High | fixed | `test/security-b3.test.mjs` |
+| A3-2 | A plugin setting (chat log, status file, ban list) could point B3 at any file, e.g. a shell start file that then receives player chat | A2 | High | fixed | `test/security-b3.test.mjs` |
+| A3-3 | An operator could trust plugin code that differs from the catalog | A2 | Medium | fixed | `test/security-b3.test.mjs` |
+| A3-4 | The B3 log showed full player IPs and GUIDs to read-only roles | A2 | Medium | fixed | `test/security-b3.test.mjs` |
+| A3-5 | Python and the B3 folders could be writable by other local users (code runs as the CONTROL user with the RCON and database passwords) | A4 | Medium | fixed | `test/security-b3.test.mjs` |
+| A3-6 | Plugin XML may contain a DOCTYPE with an internal subset (entity expansion can hang B3) | A2 | Low | open |  |
+| A3-7 | With the `pluginmanager` plugin, a B3 admin can load modules in game that CONTROL never hashed | A2 | Low | open |  |
+| A3-8 | `POST /api/instances/:id/b3/integration/auth-password` is not covered by the credential guard (`no-store`) | A2 | Low | open |  |
 | A4-1 | A compromised host could exhaust CONTROL's memory with a directory listing that never ends (SFTP `readdir` without a limit) | A6 | Medium | fixed | `test/security-remote-host.test.mjs` |
 | A4-2 | SFTP requests had no timeout: a host that never answers held the remote overview for every host, leaked sessions and kept the instance busy | A6 | Medium | fixed | `test/security-remote-host.test.mjs` |
 | A4-3 | `status()`, `statusAll()` and `health()` write the remote state outside the lock; `health()` ignores the busy flag | A2 | Low | open |  |
@@ -75,11 +91,20 @@ Reviewed: no
 | A5-6 | `/api/remote-instances/:id/credentials` is not covered by the credential guard (local-only, `no-store`, fixed JSON parse error) | A2 | Low | open |  |
 | A5-7 | Failed step-up codes on the gateway are not throttled | A2 | Low | open |  |
 | A5-8 | The `secrets.manage` permission is shown but no route requires it; vault and credential routes use `config.manage` | A2 | Low | open |  |
+| A6-1 | A link opened a new Electron window that could browse anywhere; the desktop header (A5-1) went with requests from any window or frame, so a hostile page there passed the backend's Origin check (and the IPC handlers did not check the sender) | A3 | Medium | fixed | `test/security-electron.test.mjs` |
+| A6-2 | No Content-Security-Policy in `index.html` | A3 | Low | open |  |
+| A6-3 | No permission request handler: Electron grants web permissions by default | A3 | Low | open |  |
+| A6-4 | `remembered-login.json` is written with the default file mode; on Linux without a keyring safeStorage falls back to weak protection | A4 | Low | open |  |
+| A6-5 | `docs/SECURITY-ADVISORIES.md` does not list the production dependency `ssh2` | A5 | Low | open |  |
 
 ## Rejected findings
 
 ## Native checks
 
 - **A2-1, launch file:** start a local instance with RCON password and master token on Windows and on Linux with the real CoD4x core. The console must show `execing launch-<id>.cfg`, RCON must work, the master server must accept the token, `main/` must hold no `launch-*.cfg` afterwards, and on Linux `cat /proc/<pid>/cmdline` must show neither secret. If the core does not print `execing` within 15 seconds, CONTROL deletes the file anyway and RCON stays without a password for that run.
+
+- **A3-5, Windows:** the writability check for Python and the B3 folders covers POSIX only. On Windows, install Python 2.7 and B3 in a folder only administrators can write to (not directly under `C:\`, where Authenticated Users may modify new subfolders), and check with `icacls` that no group other than Administrators, SYSTEM and the CONTROL user has write access.
+
+- **A6-1, desktop app:** on Windows, click "GitHub Release ↗" in the Update Manager: it must open in the system browser, not in a CONTROL window. The otpauth link and other links must not navigate the main window away. Login, RCON console and saving a config must still work (every request of the app page must carry the desktop header; requests without a frame lose it).
 
 - **A5-1, desktop app:** start the Electron app on Windows, create the administrator on a fresh data folder, log in, open the RCON console and save a config. Every request must succeed; the backend now refuses `Origin: null` without the per-launch `X-COD4X-Desktop` header that `electron-main.cjs` adds. The cloud tests cover the backend side only.

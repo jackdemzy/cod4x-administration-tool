@@ -1,4 +1,4 @@
-const {app,BrowserWindow,dialog,ipcMain,safeStorage} = require('electron');
+const {app,BrowserWindow,dialog,ipcMain,safeStorage,shell} = require('electron');
 const http = require('http');
 const {spawn} = require('child_process');
 const path=require('path');
@@ -10,7 +10,25 @@ const HOST='127.0.0.1';
 // Origin "null" like a sandboxed foreign page. A secret per launch, known only to this
 // process and the backend it starts, marks the requests that really come from our window.
 const DESKTOP_CLIENT_TOKEN=crypto.randomBytes(32).toString('hex');
-ipcMain.handle('select-runtime-folder', async () => {
+// Security audit 4.18.26 (A6-1): windows show only the app page, links open in the system
+// browser, the desktop header and the IPC handlers serve only the main window's app page.
+const {isAppPage,externalUrlAllowed,desktopHeaderAllowed}=require('./lib/electron-navigation-policy.cjs');
+const APP_INDEX=path.join(__dirname,'dist','index.html');
+let mainWebContentsId=null;
+function handle(channel, listener){
+  ipcMain.handle(channel, (event, ...args) => {
+    if(event.sender.id!==mainWebContentsId||!event.senderFrame||event.senderFrame.parent||!isAppPage(event.senderFrame.url,APP_INDEX)) throw new Error('IPC_SENDER_REFUSED');
+    return listener(event, ...args);
+  });
+}
+app.on('web-contents-created',(_event,contents)=>{
+  contents.setWindowOpenHandler(({url}) => { if(externalUrlAllowed(url)) shell.openExternal(url).catch(()=>{}); return {action:'deny'}; });
+  const stay=(event,url)=>{ if(!isAppPage(url,APP_INDEX)) event.preventDefault(); };
+  contents.on('will-navigate',stay);
+  contents.on('will-redirect',stay);
+  contents.on('will-attach-webview',event=>event.preventDefault());
+});
+handle('select-runtime-folder', async () => {
   const result = await dialog.showOpenDialog({
     title: 'CoD4x Runtime-Verzeichnis auswählen',
     properties: ['openDirectory'],
@@ -19,7 +37,7 @@ ipcMain.handle('select-runtime-folder', async () => {
   if (result.canceled || !result.filePaths[0]) return null;
   return result.filePaths[0];
 });
-ipcMain.handle('select-runtime-executable', async () => {
+handle('select-runtime-executable', async () => {
   const result = await dialog.showOpenDialog({
     title: 'COD4-Spiel-EXE auswählen',
     properties: ['openFile'],
@@ -70,9 +88,9 @@ async function readRememberedLogin(){
   }
 }
 
-ipcMain.handle('get-remembered-login', async () => readRememberedLogin());
+handle('get-remembered-login', async () => readRememberedLogin());
 
-ipcMain.handle('save-remembered-login', async (_event, payload) => {
+handle('save-remembered-login', async (_event, payload) => {
   if (!(await rememberedLoginAvailable())) return {ok:false, available:false};
   const username = String(payload?.username || '').trim();
   const password = String(payload?.password || '');
@@ -81,7 +99,7 @@ ipcMain.handle('save-remembered-login', async (_event, payload) => {
   return {ok:true, available:true};
 });
 
-ipcMain.handle('clear-remembered-login', async () => {
+handle('clear-remembered-login', async () => {
   try {
     const fs = require('fs/promises');
     await fs.rm(REMEMBERED_LOGIN_FILE(), {force:true});
@@ -111,13 +129,15 @@ function waitForBackend(retries=40){
 
 async function createWindow(){
   const win=new BrowserWindow({width:1440,height:960,minWidth:1100,minHeight:720,backgroundColor:'#09090f',webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,preload:path.join(__dirname,'electron-preload.cjs')}});
+  mainWebContentsId=win.webContents.id;
   win.webContents.session.webRequest.onBeforeSendHeaders({urls:[`http://${HOST}:${PORT}/*`]},(details,callback)=>{
-    details.requestHeaders['X-COD4X-Desktop']=DESKTOP_CLIENT_TOKEN;
+    if(desktopHeaderAllowed(details,mainWebContentsId,APP_INDEX)) details.requestHeaders['X-COD4X-Desktop']=DESKTOP_CLIENT_TOKEN;
+    else delete details.requestHeaders['X-COD4X-Desktop'];
     callback({requestHeaders:details.requestHeaders});
   });
   const ok=await waitForBackend();
   if(!ok){ dialog.showErrorBox('COD4X CONTROL','Das lokale Installer-Backend konnte nicht gestartet werden.'); app.quit(); return; }
-  win.loadFile(path.join(__dirname,'dist','index.html'));
+  win.loadFile(APP_INDEX);
 }
 app.whenReady().then(async()=>{startBackend();await createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
 app.on('before-quit',()=>{app.isQuitting=true;if(server)server.kill();});
