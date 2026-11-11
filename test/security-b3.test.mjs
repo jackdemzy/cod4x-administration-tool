@@ -61,12 +61,12 @@ async function pluginService(t) {
 
 test('A3-2: plugin settings cannot point B3 at files outside its folders', async t => {
   const service = await pluginService(t);
-  for (const value of ['/home/control/.bashrc', '~/.bashrc', '@home/x', '@conf/../../../.bashrc', 'C:\\Users\\x\\Start Menu\\Programs\\Startup\\x.bat', '\\\\host\\share\\x.bat', 'logs/../../../x']) {
+  for (const value of ['/home/control/.bashrc', '~/.bashrc', '@home/x', '@conf/../../../.bashrc', 'C:\\Users\\x\\Start Menu\\Programs\\Startup\\x.bat', '\\\\host\\share\\x.bat', 'logs/../../../x', '%(z)s/home/control/.bashrc']) {
     const { sha256 } = await service.readConfig('public-01', 'chatlogger');
-    await assert.rejects(service.saveConfig('public-01', 'chatlogger', { text: `[general]\nsave_to_file: yes\n[file]\nlogfile: ${value}\n`, expectedSha256: sha256 }), { code: 'B3_PLUGIN_CONFIG_INVALID', line: 4 }, value);
+    await assert.rejects(service.saveConfig('public-01', 'chatlogger', { text: `[general]\nsave_to_file: yes\n[file]\nlogfile: ${value}\nz:\n`, expectedSha256: sha256 }), { code: 'B3_PLUGIN_CONFIG_INVALID', line: 4 }, value);
   }
   const { sha256 } = await service.readConfig('public-01', 'chatlogger');
-  await service.saveConfig('public-01', 'chatlogger', { text: '# ~/.ssh/known_hosts in a comment is fine\n[file]\nlogfile: @conf/chatlog/other.log\nmessage: Wait... /me waves\nurl: https://example.org/a\n', expectedSha256: sha256 });
+  await service.saveConfig('public-01', 'chatlogger', { text: '# ~/.ssh/known_hosts in a comment is fine\n[file]\nlogfile: @conf/chatlog/other.log\nmessage: Wait... /me waves %(name)s has %(num_bans)s bans\nurl: https://example.org/a\n', expectedSha256: sha256 });
   const xml = '<configuration><settings name="settings"><set name="output_file">/etc/passwd</set></settings></configuration>';
   assert.equal((await import('../lib/b3-plugin-validate.mjs')).unsafeB3PathLine(xml, 'xml'), 1);
 });

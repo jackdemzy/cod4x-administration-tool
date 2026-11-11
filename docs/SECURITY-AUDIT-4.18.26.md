@@ -69,7 +69,7 @@ Checked without a finding: renderer isolation (`contextIsolation: true`, `nodeIn
 | A2-4 | An unlocked vault stays unlocked until someone locks it (no idle lock) | A4 | Low | issue #41 |  |
 | A2-5 | Vault backups `backup-<uuid>.json` are never pruned | A4 | Low | issue #41 |  |
 | A3-1 | An operator (`config.manage`) chose the Python interpreter and the B3 folder, which CONTROL runs and hands the RCON and database passwords | A2 | High | fixed | `test/security-b3.test.mjs` |
-| A3-2 | A plugin setting (chat log, status file, ban list) could point B3 at any file, e.g. a shell start file that then receives player chat | A2 | High | fixed | `test/security-b3.test.mjs` |
+| A3-2 | A plugin setting (chat log, status file, ban list) could point B3 at any file, e.g. a shell start file that then receives player chat (also through ConfigParser `%(option)s` interpolation, found by `/security-review`) | A2 | High | fixed | `test/security-b3.test.mjs` |
 | A3-3 | An operator could trust plugin code that differs from the catalog | A2 | Medium | fixed | `test/security-b3.test.mjs` |
 | A3-4 | The B3 log showed full player IPs and GUIDs to read-only roles | A2 | Medium | fixed | `test/security-b3.test.mjs` |
 | A3-5 | Python and the B3 folders could be writable by other local users (code runs as the CONTROL user with the RCON and database passwords) | A4 | Medium | fixed | `test/security-b3.test.mjs` |
