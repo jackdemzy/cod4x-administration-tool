@@ -63,7 +63,7 @@ export function B3PluginsPanel({ data, permissions = {}, de, busy, editor, onTog
         const custom = plugin.source === 'custom';
         const tick = trustKey(plugin.name, plugin.sha256);
         // A shipped module that changed again after its approval can be approved again (custom code is re-trusted by saving it).
-        const approvable = Boolean(plugin.sha256) && (plugin.state === 'NOT_APPROVED' || (plugin.state === 'INTEGRITY_MISMATCH' && plugin.source === 'shipped'));
+        const approvable = code && Boolean(plugin.sha256) && (plugin.state === 'NOT_APPROVED' || (plugin.state === 'INTEGRITY_MISMATCH' && plugin.source === 'shipped'));
         const stateText = (STATE_TEXT[plugin.state] || [plugin.state, plugin.state])[de ? 0 : 1];
         const needs = plugin.requires?.plugins || [], modules = plugin.requires?.pythonModules || [];
         const missing = needs.filter(need => !plugins.some(other => other.name === need && (other.source === 'fixed' || other.state === 'ENABLED')));

@@ -342,7 +342,7 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
-  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)"] },
+  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   ...REMOTE_LINUX_BINDINGS,
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
@@ -2656,7 +2656,7 @@ function b3Route(action) {
 }
 app.get("/api/b3/dependencies/matrix", requirePermission("diagnostics.read"), b3Route(async () => ({ matrix: B3_DEPENDENCY_MATRIX, source: { repository: B3_SOURCE.repository, commit: B3_SOURCE.commit, b3Version: B3_SOURCE.b3Version, blockedSql: B3_SOURCE.blockedSql }, auditReport: "docs/EBC-B3-AUDIT.md" })));
 app.get("/api/b3/environment", requirePermission("config.manage"), b3Route(async () => ({ environment: await b3Environment.read() })));
-app.post("/api/b3/environment", requirePermission("config.manage"), b3Route(async req => {
+app.post("/api/b3/environment", requirePermission("server.code"), b3Route(async req => {
   const environment = await b3Environment.save(req.body);
   // New paths: dashboards must not show the previous interpreter/source check.
   b3Service.invalidateDependencies();
@@ -2669,9 +2669,9 @@ app.post("/api/b3/dependencies/check", requirePermission("config.manage"), b3Rou
   audit(result.overall === "BLOCKED" ? "warn" : "info", "b3.dependencies.checked", { actor: req.auth.username, overall: result.overall, blocking: result.blocking, python: result.python?.version || null });
   return { dependencies: result };
 }));
-app.get("/api/instances/:id/b3", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.status(req.params.id) })));
+app.get("/api/instances/:id/b3", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.status(req.params.id, { full: hasPermission(req.auth.role, "config.manage") }) })));
 app.get("/api/instances/:id/b3/dashboard", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.dashboard(req.params.id, { fresh: req.query.fresh === "1" }) })));
-app.get("/api/instances/:id/b3/logs", requirePermission("diagnostics.read"), instanceRoute(async req => ({ logs: await b3Service.logs(req.params.id) })));
+app.get("/api/instances/:id/b3/logs", requirePermission("diagnostics.read"), instanceRoute(async req => ({ logs: await b3Service.logs(req.params.id, { full: hasPermission(req.auth.role, "config.manage") }) })));
 // Generated config with credential values redacted.
 app.get("/api/instances/:id/b3/config", requirePermission("config.manage"), instanceRoute(async req => ({ config: await b3Service.config(req.params.id) })));
 // Block 16: B3 <-> CoD4x integration (b3hide + auth). No gateway route exists for it.
@@ -2729,7 +2729,7 @@ app.put(`${b3PluginsBase}/:name/config`, requirePermission("config.manage"), ins
   auditB3Plugin("config_saved", req, req.params.name);
   return { config };
 }));
-app.post(`${b3PluginsBase}/:name/approve`, requirePermission("config.manage"), instanceRoute(async req => {
+app.post(`${b3PluginsBase}/:name/approve`, requirePermission("b3.plugins.code"), instanceRoute(async req => {
   const { sha256 } = b3PluginBody(req, ["sha256"], "B3_PLUGIN_CONFIG_INVALID");
   const plugin = await b3PluginService.approve(req.params.id, req.params.name, sha256);
   auditB3Plugin("approved", req, plugin.name, plugin.sha256);
