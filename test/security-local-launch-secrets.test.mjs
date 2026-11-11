@@ -45,3 +45,17 @@ test('A2-1: a launch file left by a crash is removed before the next start', asy
   await manager.launch('argv-b');
   assert.deepEqual((await fs.readdir(main)).filter(name => name.startsWith('launch-')), []);
 });
+
+test('A2-1 (PR #46 review): without "execing <file>" the transfer is UNKNOWN, not PROVISIONED', async t => {
+  const value = await createRconFixture({ printExecing: false, managerOptions: { launchFileWaitMs: 300 } });
+  t.after(value.cleanup);
+  const { manager, create, setRcon, setMaster, rconService, masterService, store } = value;
+  await create('argv-c');
+  await setRcon('argv-c', rcon);
+  await setMaster('argv-c', master);
+  await manager.launch('argv-c');
+  assert.equal(rconService.status('argv-c').provisioning, 'UNKNOWN');
+  assert.equal((await masterService.status('argv-c')).transfer, 'UNKNOWN');
+  const main = path.join(store.get('argv-c').homePath, 'main');
+  assert.deepEqual((await fs.readdir(main)).filter(name => name.startsWith('launch-')), [], 'the file is still removed after the timeout');
+});

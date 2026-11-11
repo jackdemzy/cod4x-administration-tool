@@ -35,6 +35,8 @@ Six areas (local runtime, secrets, B3, remote Linux, remote access and admin API
 - **Desktop app**: links open in the system browser (https only); the window never navigates away from the app.
 - **Remote hosts**: an SFTP request without an answer fails after 15 s (uploads 60 s) with `REMOTE_TIMEOUT`; a listing with more than 65 536 entries fails with `REMOTE_LISTING_TOO_LARGE`.
 
+- **PR review fixes**: the Python import folders (`<prefix>/lib/python*`, its `site-packages`, `dist-packages`, `lib-dynload`, `<prefix>/local/lib/python*`, and a virtualenv's base prefix) are checked before the probe runs; a stored plugin config with an outside path blocks the B3 start (`B3_PLUGIN_CONFIG_INVALID`); a B3 start tightens an older home (0700) and game log (0600) itself; without the core's `execing <file>` line the RCON and master token transfer is reported as `UNKNOWN`, not `PROVISIONED`; SFTP listings also count empty and `.`/`..` pages.
+
 ## Not fixed (Low, tracked)
 
 23 Low findings (A3-6 was fixed along with A3-2), one GitHub issue per area: #40 (local runtime), #41 (secrets), #42 (B3), #43 (remote Linux), #44 (remote access and admin API), #45 (Electron and dependencies).

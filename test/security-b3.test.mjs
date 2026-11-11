@@ -112,3 +112,46 @@ test('A3-2 (final review): an XML entity cannot carry a path past the check', as
   assert.ok(!validateB3PluginXml(xml).ok || unsafeB3PathLine(xml, 'xml') > 0, 'refused');
   assert.equal(validateB3PluginXml('<!DOCTYPE configuration><configuration/>').ok, false, 'no DOCTYPE at all (A3-6)');
 });
+
+test('A3-2 (PR #46 review): a stored plugin config with an outside path blocks the B3 start', async t => {
+  const service = await pluginService(t);
+  assert.deepEqual((await service.plan('public-01')).blockers, []);
+  const instance = service.instance('public-01');
+  await fs.writeFile(service.configFile(instance, 'chatlogger', 'ini'), '[file]\nlogfile: /home/control/.bashrc\n');
+  assert.deepEqual((await service.plan('public-01')).blockers, [{ code: 'B3_PLUGIN_CONFIG_INVALID', plugin: 'chatlogger' }]);
+});
+
+test('A2-2 (PR #46 review): a B3 start tightens an old home and game log', { skip: process.platform === 'win32' && 'POSIX modes only' }, async t => {
+  const { prepareB3Runtime } = await import('../lib/b3-config.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-a22-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const homePath = path.join(root, 'home');
+  await fs.mkdir(path.join(homePath, 'main'), { recursive: true });
+  await fs.chmod(homePath, 0o755);
+  const log = path.join(homePath, 'main', 'games_mp.log');
+  await fs.writeFile(log, '', { mode: 0o644 });
+  await fs.chmod(log, 0o644);
+  await prepareB3Runtime({ id: 'old', port: 28960, homePath }, 'games_mp.log');
+  assert.equal((await fs.stat(homePath)).mode & 0o777, 0o700);
+  assert.equal((await fs.stat(log)).mode & 0o777, 0o600);
+});
+
+test('A3-5 (PR #46 review): Python import folders writable by others block the probe', { skip: process.platform !== 'linux' && 'POSIX modes only' }, async t => {
+  const { assertB3PathsPrivate } = await import('../lib/b3-dependencies.mjs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-a35py-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const env = path.join(root, 'env'), base = path.join(root, 'base');
+  const python = path.join(env, 'bin', 'python');
+  await fs.mkdir(path.dirname(python), { recursive: true });
+  await fs.writeFile(python, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const sitePackages = path.join(env, 'lib', 'python2.7', 'site-packages');
+  await fs.mkdir(sitePackages, { recursive: true });
+  await fs.mkdir(path.join(base, 'lib', 'python2.7'), { recursive: true });
+  await fs.writeFile(path.join(env, 'lib', 'python2.7', 'orig-prefix.txt'), base);
+  await assertB3PathsPrivate({ pythonPath: python });
+  await fs.chmod(sitePackages, 0o777);
+  await assert.rejects(assertB3PathsPrivate({ pythonPath: python }), { code: 'B3_PATH_WRITABLE_BY_OTHERS' }, 'virtualenv site-packages');
+  await fs.chmod(sitePackages, 0o755);
+  await fs.chmod(path.join(base, 'lib', 'python2.7'), 0o777);
+  await assert.rejects(assertB3PathsPrivate({ pythonPath: python }), { code: 'B3_PATH_WRITABLE_BY_OTHERS' }, 'base standard library');
+});

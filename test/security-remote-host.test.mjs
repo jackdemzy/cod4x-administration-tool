@@ -58,3 +58,13 @@ test('A4-2: an upload the host never answers fails instead of hanging', async ()
   const files = createRemoteFiles({ sftp, filesystem: {}, timeoutMs: 50 });
   await assert.rejects(files.writeFileExclusive('/srv/x', Buffer.from('x')), error => ['REMOTE_TIMEOUT', 'REMOTE_UPLOAD_FAILED'].includes(error.code));
 });
+
+test('A4-1 (PR #46 review): empty or dot-only SFTP pages cannot keep a listing open', async () => {
+  const { sftpList } = await import('../lib/remote-linux-runtime.mjs');
+  for (const page of [[], [{ filename: '.' }, { filename: '..' }]]) {
+    let calls = 0;
+    const request = async method => { if (method === 'readdir') { calls += 1; if (calls > 1000) throw new Error('unbounded'); return page; } return 'handle'; };
+    await assert.rejects(sftpList(request, '/srv', 10), { code: 'REMOTE_LISTING_TOO_LARGE' });
+    assert.ok(calls <= 13, `stopped after ${calls} pages`);
+  }
+});
