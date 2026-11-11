@@ -26,7 +26,11 @@ Reviewed: no
 
 ## Area 4 – Remote Linux
 
-Reviewed: no
+Reviewed: yes
+
+Reviewer: independent, read-only (2026-11-11). Two Medium findings (denial of service by a compromised host), both reproduced by a failing test and fixed; five Low findings tracked as issues. The inherited missing Recover button has no security effect: a blocked state refuses start, stop and switch, and `POST /api/remote-instances/:id/recover` exists.
+
+Checked without a finding: shell injection (every command builder quotes or uses fixed patterns, RCON password and Dockerfile over stdin); path traversal on the host (`assertRemotePosixPath`, homes derived from ids); symlinks and hard links on the host (`lstat`, `nlink`, dev/ino, `wx` uploads); host key pinning and first contact (no login before the pin, pin never overwritten, vault binds it to `createdAt`); a compromised host reaching code or secrets on CONTROL (no local `child_process` with remote data, strict parsers, `exec` bounded and timed, private key never leaves CONTROL); isolation between hosts and instances; remote output only after redaction and limits; secrets in errors; Docker hardening (`--read-only`, `--cap-drop ALL`, `no-new-privileges`, pinned image digest, label checks); Docker confirmation per host; route permissions; root refused (`validRemoteUser`, uid 0); ownership and modes on the host; local core import; RCON over SSH.
 
 ## Area 5 – Remote access and admin API
 
@@ -56,6 +60,13 @@ Reviewed: no
 | A2-3 | `audit.ndjson` is created 0644 and only then set to 0600; the audit folder is created without a mode | A4 | Low | open |  |
 | A2-4 | An unlocked vault stays unlocked until someone locks it (no idle lock) | A4 | Low | open |  |
 | A2-5 | Vault backups `backup-<uuid>.json` are never pruned | A4 | Low | open |  |
+| A4-1 | A compromised host could exhaust CONTROL's memory with a directory listing that never ends (SFTP `readdir` without a limit) | A6 | Medium | fixed | `test/security-remote-host.test.mjs` |
+| A4-2 | SFTP requests had no timeout: a host that never answers held the remote overview for every host, leaked sessions and kept the instance busy | A6 | Medium | fixed | `test/security-remote-host.test.mjs` |
+| A4-3 | `status()`, `statusAll()` and `health()` write the remote state outside the lock; `health()` ignores the busy flag | A2 | Low | open |  |
+| A4-4 | The remote root is not checked for owner or group/world write access | A6 | Low | open |  |
+| A4-5 | `hostname` and `map` from the host's getinfo reply reach the UI without a length limit or control-character filter | A6 | Low | open |  |
+| A4-6 | The SSH session pool keeps a logged-in session up to 60 s after the vault is locked or the key removed | A4 | Low | open |  |
+| A4-7 | Docker mounts are made by the daemon as root (parent traversal checks do not apply) and the container has no CPU limit | A2 | Low | open |  |
 | A5-1 | A hostile web page could create the first administrator before setup (CORS `*`, no Origin check on `/api/auth/init`) | A3 | Medium | fixed | `test/security-admin-api.test.mjs` |
 | A5-2 | A hostile web page could lock the local login and learn whether a user is disabled | A3 | Medium | fixed | `test/security-admin-api.test.mjs` |
 | A5-3 | Login brake bypass: X-Forwarded-For from a local caller at the gateway, rotating 127.x source addresses on 8787 | A4 | Medium | fixed | `test/remote.test.mjs`, `test/security-admin-api.test.mjs` |
