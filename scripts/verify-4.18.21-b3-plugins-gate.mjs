@@ -117,10 +117,10 @@ const checks = [
   ["Restart hint PLUGINS_CHANGED follows b3PluginsRevision (no hash over config files)", restartHints({ plan, credentialDigest: "a", startedWith: started, pluginsRevision: 4 }).b3 === "PLUGINS_CHANGED"
     && restartHints({ plan, credentialDigest: "a", startedWith: started, pluginsRevision: 3 }).b3 === null && restartHints({ plan, startedWith: { fingerprint: plan.fingerprint }, pluginsRevision: 0 }).b3 === null
     && restartHints({ plan, startedWith: started, pluginsRevision: null }).b3 === null && b3PluginMessage("PLUGINS_CHANGED", "en").includes("restart")],
-  ["b3.plugins.code is admin-only and guards the four code routes; switches, configs and approvals need config.manage; reads diagnostics.read", server.includes('{ id: "b3.plugins.code"')
+  ["b3.plugins.code is admin-only and guards the four code routes; switches and configs need config.manage, approvals b3.plugins.code since 4.18.26 (A3-3); reads diagnostics.read", server.includes('{ id: "b3.plugins.code"')
     && matrix.includes("admin: Object.freeze([...RBAC_PERMISSION_IDS])") && ["operator", "auditor", "viewer", "monitor"].every(role => roleLine(role) && !roleLine(role).includes("b3.plugins.code"))
     && route("post", "/custom", "b3.plugins.code") && route("get", "/custom/:name/code", "b3.plugins.code") && route("put", "/custom/:name/code", "b3.plugins.code") && route("delete", "/custom/:name", "b3.plugins.code")
-    && route("post", "/:name/${action}", "config.manage") && route("get", "/:name/config", "config.manage") && route("put", "/:name/config", "config.manage") && route("post", "/:name/approve", "config.manage")
+    && route("post", "/:name/${action}", "config.manage") && route("get", "/:name/config", "config.manage") && route("put", "/:name/config", "config.manage") && route("post", "/:name/approve", "b3.plugins.code")
     && server.includes('app.get(b3PluginsBase, requirePermission("diagnostics.read")') && ui.includes("me.permissions?.includes('b3.plugins.code')") && ui.includes("This code runs with the rights of the B3 process.")],
   ["No phone gateway route touches B3 plugins", !/b3/i.test(routes)],
   ["Audit: b3.plugin.<event> with instanceId, actor, name (+ sha256 for approvals and code), never config or code content",

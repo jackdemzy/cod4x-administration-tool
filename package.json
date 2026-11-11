@@ -7,7 +7,7 @@
     "build": "vite build && vite build -c vite.remote.config.js",
     "start": "node installer-server.mjs",
     "dist:win": "npm run build && electron-builder --win nsis",
-    "preflight": "node scripts/preflight-4.18.25.mjs"
+    "preflight": "node scripts/preflight-4.18.26.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
@@ -17,7 +17,7 @@
     "ssh2": "^1.17.0",
     "tar": "^7.4.3"
   },
-  "version": "4.18.25",
+  "version": "4.18.26",
   "license": "AGPL-3.0-or-later",
   "engines": {
     "node": ">=22.12"

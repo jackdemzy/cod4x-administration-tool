@@ -19,14 +19,16 @@ try {
   const none = await manager.launch("master-none");
   const noneStatus = await masterService.status("master-none");
   check("Without token: server starts and runs locally", await running(manager, "master-none", none.pid));
-  check("Without token: no sv_authtoken passed, Master = NOT_CONFIGURED", !children.get(none.pid).args.includes("sv_authtoken") && noneStatus.state === "NOT_CONFIGURED");
+  check("Without token: no sv_authtoken passed, Master = NOT_CONFIGURED", !children.get(none.pid).args.includes("sv_authtoken") && children.get(none.pid).execedSettings?.sv_authtoken === undefined && noneStatus.state === "NOT_CONFIGURED");
 
   await fixture.setMaster("master-token", token);
   const stopped = await masterService.status("master-token");
   check("Token stored: TOKEN_CONFIGURED before start", stopped.state === "TOKEN_CONFIGURED" && stopped.reason === "SERVER_STOPPED");
   const withToken = await manager.launch("master-token");
   const args = children.get(withToken.pid).args;
-  check("With token: sv_authtoken reaches the core before server.cfg", args[args.indexOf("sv_authtoken") + 1] === token && args.indexOf("sv_authtoken") < args.indexOf("+exec"));
+  // 4.18.26 (security audit A2-1): the token travels in the private launch file, executed before server.cfg.
+  const execs = args.flatMap((value, index) => value === "+exec" ? [args[index + 1]] : []);
+  check("With token: sv_authtoken reaches the core through the launch file before server.cfg", !args.includes(token) && children.get(withToken.pid).execedSettings?.sv_authtoken === token && /^launch-/.test(execs[0]) && execs[1] === "server.cfg");
   check("With token: server runs locally", await running(manager, "master-token", withToken.pid));
   const loopback = await masterService.status("master-token");
   check("Loopback binding is reported instead of a false registration", loopback.state === "TOKEN_CONFIGURED" && loopback.reason === "LOOPBACK_BINDING" && loopback.verified === false);
@@ -39,7 +41,7 @@ try {
   await fixture.setMaster("master-locked", token);
   credentialService.lock();
   const locked = await manager.launch("master-locked");
-  check("Locked vault: server still starts, without token", await running(manager, "master-locked", locked.pid) && !children.get(locked.pid).args.includes("sv_authtoken"));
+  check("Locked vault: server still starts, without token", await running(manager, "master-locked", locked.pid) && !children.get(locked.pid).args.includes("sv_authtoken") && children.get(locked.pid).execedSettings?.sv_authtoken === undefined);
 
   const instances = await Promise.all(["master-none", "master-token", "master-locked"].map(id => manager.status(id)));
   const persisted = await fs.readFile(path.join(store.get("master-token").homePath, "logs", "runtime-state.json"), "utf8");

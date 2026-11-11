@@ -1,6 +1,6 @@
 # COD4X CONTROL – Features
 
-Version 4.18.25 · development source, not a release
+Version 4.18.26 · development source, not a release
 
 - Desktop app for Windows and Linux
 - Install, configure, run and monitor CoD4x dedicated servers
@@ -427,3 +427,7 @@ Die npm-Abhängigkeiten stehen unter eigenen, mit der AGPL vereinbaren Lizenzen 
 ## 4.18.25 Docker deployment note
 
 4.18.25 implements roadmap Block 19. A server on an SSH host (Block 18) can run as a Docker container instead of a process: the instance gets the field `deployment` (`native` or `docker`). CONTROL builds one small runtime image on the host from a fixed Dockerfile (32-bit Debian, base pinned by digest, sent over stdin without a build context) and starts one container per instance. Nothing of the game is in the image: the base game and the uploaded, hash-checked core are mounted read-only, and the instance directory is the only writable mount, so `main`, `zone`, `mods`, `plugins` and `usermaps` stay ordinary directories on the host (bind mounts, no named volumes). The container has a read-only root file system, no capabilities, no new privileges, a process and memory limit, and Docker never restarts it. A restart, a stop followed by a start, and a switch between `native` and `docker` (only while the instance is stopped) keep every file. Reaching Docker through the `docker` group is equivalent to root on that host; CONTROL asks for a typed confirmation per host and prefers rootless Docker, where the server may not see the real source address of players. Ports published by Docker bypass `ufw`. Docker instances listen on IPv4 only. RCON, monitoring and phone actions work as for native remote servers. Since this release the core for a remote server is read only from the import folder `<data root>/remote-core-import` (shown in the panel); put `cod4x18_dedrun` there and name it relative to that folder. Not included: Docker on this PC, Docker Desktop, Compose. Checked in the cloud container with a scripted docker, a real Docker daemon and a real sshd, always with a stand-in core; the run with a real CoD4x core and base game (`scripts/verify-4.18.25-docker-native.mjs`) is still open. Details: `CHANGELOG-4.18.25.md`.
+
+## 4.18.26 Security audit note
+
+4.18.26 implements roadmap Block 20. Six areas were each read by an independent reviewer; every finding was reproduced by a failing test, Critical/High/Medium were fixed and Low findings are tracked in issues #40 to #45. The report with every finding, its grade and its test is `docs/SECURITY-AUDIT-4.18.26.md`; `scripts/verify-4.18.26-security-gate.mjs` is part of the preflight. Visible changes: the new admin-only permission `server.code` (choosing or adopting a core, creating instances, installing CoD4x plugins, free start arguments, the B3 interpreter and folder), cores verified only by a manifest next to them must be adopted again, folders other users can write to are refused for Linux cores and for B3, and B3 plugin settings may not point outside B3's folders. Details: `CHANGELOG-4.18.26.md`.
