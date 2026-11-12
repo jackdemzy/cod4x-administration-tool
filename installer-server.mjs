@@ -2443,7 +2443,7 @@ const b3AdminService = new InstanceB3AdminService({ store: instanceStore, rcon: 
 const b3DatabasePoints = { assertNoRecovery: id => instanceManager.assertNoRecovery(id), capture: (...args) => instanceManager.databasePoints().capture(...args), markRecovery: (...args) => instanceManager.databasePoints().markRecovery(...args) };
 const b3DatabaseService = new InstanceB3DatabaseService({ store: instanceStore, credentials: credentialService, environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, entry), points: b3DatabasePoints });
 // Block 16b: B3 plugins per instance; the B3 start re-verifies them and records the revision.
-const b3PluginService = new InstanceB3PluginService({ store: instanceStore, environment: b3EnvironmentForRuntime, guard: (id, action, options) => instanceManager.guardFor(id, action, options) });
+const b3PluginService = new InstanceB3PluginService({ store: instanceStore, environment: b3EnvironmentForRuntime, exclusive: (id, action) => instanceManager.exclusive(id, action), guard: (id, action, options) => instanceManager.guardFor(id, action, options) });
 const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, plugins: b3PluginService, recoveryCheck: id => instanceManager.assertNoRecovery(id), onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
 instanceManager = new ServerInstanceManager({
   store: instanceStore,
@@ -2520,7 +2520,7 @@ function instanceRoute(action, status = 200) {
       const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY", "B3_PLUGIN_CONFLICT", "RECOVERY_REQUIRED"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED", "RESTORE_POINT_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : error.code === "RESTORE_POINT_CODE_PERMISSION" ? 403 : error.code === "RESTORE_POINT_NOT_FOUND" ? 404 : 400;
       // Start blockers carry only their code and plugin name, so the UI can say which plugin blocks.
       const blockers = publicBlockers(error);
-      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message, ...(Number.isInteger(error.line) ? { line: error.line } : {}), ...(blockers ? { blockers } : {}) });
+      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message, ...(Number.isInteger(error.line) ? { line: error.line } : {}), ...(blockers ? { blockers } : {}), ...(typeof error.safetyPointId === "string" ? { safetyPointId: error.safetyPointId, rolledBack: error.rolledBack === true, recoveryRequired: error.recoveryRequired === true } : {}) });
     }
   };
 }
@@ -2630,7 +2630,11 @@ app.post("/api/instances/:id/restore-points", requirePermission("config.manage")
 app.get("/api/instances/:id/restore-points/:pointId/integrity", requirePermission("config.manage"), instanceRoute(async req => instanceManager.restorePointIntegrity(req.params.id, req.params.pointId)));
 app.post("/api/instances/:id/restore-points/:pointId/restore", requirePermission("config.manage"), instanceRoute(async req => {
   const { includeB3Database = false, confirmation } = restoreBody(req, ["includeB3Database", "confirmation"]);
-  return instanceManager.restoreRestorePoint(req.params.id, req.params.pointId, { includeB3Database, confirmation }, { actor: req.auth.username, canCode: hasPermission(req.auth.role, "server.code") });
+  // Unknown errors (e.g. a file system error with a path in its text) leave as RESTORE_POINT_FAILED.
+  return instanceManager.restoreRestorePoint(req.params.id, req.params.pointId, { includeB3Database, confirmation }, { actor: req.auth.username, canCode: hasPermission(req.auth.role, "server.code") }).catch(error => {
+    if (typeof error.code === "string" && /^(RESTORE_POINT_|RECOVERY_|INSTANCE_|B3_)/.test(error.code)) throw error;
+    throw Object.assign(new Error("RESTORE_POINT_FAILED"), { code: "RESTORE_POINT_FAILED", safetyPointId: error.safetyPointId, rolledBack: error.rolledBack, recoveryRequired: error.recoveryRequired });
+  });
 }));
 app.post("/api/instances/:id/core", requirePermission("server.code"), instanceRoute(async req => instanceManager.changeCore(req.params.id, req.body, req.auth.username)));
 

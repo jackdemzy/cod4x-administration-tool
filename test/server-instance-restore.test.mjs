@@ -171,3 +171,61 @@ test('an operator cannot bring back an older core or plugin approval through a c
   assert.ok(admin.restored.includes('record'));
   assert.equal(store.get('alpha').serverCore.executablePath, executablePath);
 });
+
+test('a restore whose record no longer fits writes nothing; one that fails half-way is put back from the safety point', async t => {
+  const { root, manager, store, instance, executablePath } = await fixture(t);
+  const cfg = path.join(instance.homePath, 'main', 'server.cfg');
+  const { pointId } = await manager.createRestorePoint('alpha');
+  await fs.appendFile(cfg, '// later\n');
+  const today = await fs.readFile(cfg);
+  // The old core is gone: the record check refuses before the first write.
+  const other = path.join(root, 'core2', 'cod4x18_dedrun');
+  await fs.mkdir(path.dirname(other));
+  await fs.writeFile(other, 'core two');
+  await manager.changeCore('alpha', { executablePath: other, version: '21.5' });
+  await fs.rename(executablePath, `${executablePath}.gone`);
+  const refused = await manager.restoreRestorePoint('alpha', pointId, {}, { canCode: true }).catch(error => error);
+  assert.ok(refused.beforeWrite);
+  assert.match(refused.safetyPointId, /Z-[0-9a-f]{8}$/);
+  assert.deepEqual(await fs.readFile(cfg), today);
+  assert.equal(store.get('alpha').serverCore.executablePath, other);
+  await fs.rename(`${executablePath}.gone`, executablePath);
+  // The record write fails after the files: the safety point puts the files back.
+  const realReplace = store.replaceRecord.bind(store);
+  let calls = 0;
+  store.replaceRecord = async (...args) => { if (calls++ === 0) throw Object.assign(new Error('EIO'), { code: 'EIO' }); return realReplace(...args); };
+  const failed = await manager.restoreRestorePoint('alpha', pointId, {}, { canCode: true }).catch(error => error);
+  assert.equal(failed.rolledBack, true);
+  assert.deepEqual(await fs.readFile(cfg), today);
+  assert.equal(store.get('alpha').serverCore.executablePath, other);
+  assert.equal(await manager.restorePoints.recovery('local:alpha'), null);
+});
+
+test('a core that changed since the point is not switched to', async t => {
+  const { root, manager, store, executablePath } = await fixture(t);
+  const { pointId } = await manager.createRestorePoint('alpha');
+  const other = path.join(root, 'core2', 'cod4x18_dedrun');
+  await fs.mkdir(path.dirname(other));
+  await fs.writeFile(other, 'core two');
+  await manager.changeCore('alpha', { executablePath: other, version: '21.5' });
+  await fs.writeFile(executablePath, 'replaced core');
+  await assert.rejects(manager.restoreRestorePoint('alpha', pointId, {}, { canCode: true }), { code: 'RESTORE_POINT_CORE_CHANGED' });
+  assert.equal(store.get('alpha').serverCore.executablePath, other);
+});
+
+test('the rollback of a B3 plugin change leaves b3/database.json alone', async t => {
+  const { manager, instance } = await fixture(t);
+  const b3 = path.join(instance.homePath, 'b3');
+  await fs.mkdir(path.join(b3, 'plugins'), { recursive: true });
+  await fs.writeFile(path.join(b3, 'database.json'), '{"a":1}', { mode: 0o600 });
+  const error = await manager.guardFor('alpha', 'b3.plugin.change', {
+    change: async () => {
+      await fs.writeFile(path.join(b3, 'plugins', 'new.ini'), 'x', { mode: 0o600 });
+      await fs.writeFile(path.join(b3, 'database.json'), '{"a":2}', { mode: 0o600 }); // stands for a parallel database settings change
+    },
+    verify: async () => { throw Object.assign(new Error('B3_PLUGIN_INVALID'), { code: 'B3_PLUGIN_INVALID' }); },
+  }).catch(caught => caught);
+  assert.equal(error.rolledBack, true);
+  assert.equal(await fs.readFile(path.join(b3, 'database.json'), 'utf8'), '{"a":2}');
+  assert.deepEqual((await fs.readdir(path.join(b3, 'plugins'))).filter(name => !name.startsWith('.')), []);
+});

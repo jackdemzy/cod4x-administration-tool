@@ -29,6 +29,10 @@ A rollback after an automatic change puts back only the record fields that chang
 - **The B3 database is only reset on request:** tick the box and type `B3-DATENBANK ZURÜCKSETZEN`. Readiness needs a new database test afterwards.
 - **New: core change for a local instance** (`POST /api/instances/:id/core`, admin) and **`Core zurücksetzen`** for remote servers (`POST /api/remote-instances/:id/core/rollback`, `update.execute`): puts the kept `.previous` back after checking its hash against a core-update backup.
 - **The installer** downloads and checks every artifact before the first write, needs the standard server stopped (`RUNTIME_CONFIGURATION_BUSY`), and refuses archives with symbolic or hard links (`INSTALL_ARCHIVE_INVALID`) and targets with linked folders (`INSTALL_TARGET_INVALID`).
+- **A manual restore checks before it writes:** the registry entry (paths, port) and, when it would switch to another core, that core's hash from the point (`RESTORE_POINT_CORE_CHANGED`). If it fails half-way, the safety point is put back at once; only if that fails too the instance is marked `RECOVERY_REQUIRED`. The answer names the safety point.
+- B3 plugin changes now run under the instance lock (`INSTANCE_OPERATION_BUSY` while another operation runs); their rollback leaves `b3/database.json` alone.
+- Behaviour changes: a CoD4x plugin install, enable or approve is rolled back while another enabled plugin is already broken (disable and remove still work); the installer refuses while the standard server runs, also for another target.
+- Known limit: when a remote core update loses the kept `.previous` as well, `Core zurücksetzen` answers `REMOTE_BACKUP_INVALID`; the core then has to be put back by hand on the host.
 - Remote backups carry their cause (`manual`, `config.change`, `core.update`, `restore.safety`); backups written before 4.18.27 still list and restore.
 
 ## Routes

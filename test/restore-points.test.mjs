@@ -99,3 +99,13 @@ test('a group-writable point directory is refused', { skip: process.platform !==
   await fs.chmod(path.join(root, 'local_alpha', pointId), 0o770);
   await assert.rejects(store.read('local:alpha', pointId), { code: 'RESTORE_POINT_INVALID' });
 }));
+
+test('a broken recovery mark does not block the capture of the next point, clearRecovery removes it', () => fixture(async (store, root) => {
+  await store.capture('local:alpha', { action: 'config.change', entries, data: {}, refs: {} });
+  await fs.writeFile(path.join(root, 'local_alpha', 'recovery.json'), '{broken', { mode: 0o600 });
+  await assert.rejects(store.recovery('local:alpha'), { code: 'RESTORE_POINT_INVALID' });
+  const { pointId } = await store.capture('local:alpha', { action: 'restore.safety', entries, data: {}, refs: {} });
+  assert.match(pointId, /Z-[0-9a-f]{8}$/);
+  await store.clearRecovery('local:alpha');
+  assert.equal(await store.recovery('local:alpha'), null);
+}));
