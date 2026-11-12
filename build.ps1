@@ -28,11 +28,9 @@ Write-Host "Node: $(node --version)"
 Write-Host "npm : $(npm --version)"
 Write-Host ''
 
-Write-Host '[1/4] Prüfe Source ...'
-npm run preflight
-if ($LASTEXITCODE -ne 0) { throw "Preflight fehlgeschlagen (ExitCode $LASTEXITCODE)." }
-
-Write-Host '[2/4] Installiere Dependencies ...'
+# Dependencies come first: the preflight runs the test suite, and those tests import
+# npm packages (tar, express, ssh2). On a fresh source folder they are not there yet.
+Write-Host '[1/4] Installiere Dependencies ...'
 $lockfile = Join-Path $PSScriptRoot 'package-lock.json'
 if (Test-Path $lockfile) {
   Write-Host 'package-lock.json gefunden -> npm ci'
@@ -61,6 +59,10 @@ if (-not (Test-Path $stdUtils)) {
   throw "NSIS-Abhängigkeit unvollständig: StdUtils.nsh fehlt weiterhin unter $stdUtils"
 }
 Write-Host 'NSIS-Abhängigkeit OK: StdUtils.nsh vorhanden.' -ForegroundColor Green
+
+Write-Host '[2/4] Prüfe Source ...'
+npm run preflight
+if ($LASTEXITCODE -ne 0) { throw "Preflight fehlgeschlagen (ExitCode $LASTEXITCODE)." }
 
 Write-Host '[3/4] Baue React/Vite ...'
 npm run build

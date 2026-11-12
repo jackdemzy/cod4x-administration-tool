@@ -15,6 +15,7 @@ const checks = [
   ["BUILD_INFO validation", info.validation === "preflight-4.18.27"],
   ["build.ps1 banner", build.includes("COD4X CONTROL 4.18.27 - Windows Build")],
   ["build.ps1 installer path", build.includes("COD4X-CONTROL-Setup-4.18.27-x64.exe")],
+  ["build.ps1 installs dependencies before the preflight", build.indexOf("npm ci") >= 0 && build.indexOf("npm run preflight") > build.indexOf("npm ci") && build.indexOf("npm run preflight") > build.indexOf("npm install --no-audit")],
   ["README current runtime note", readme.includes("## 4.18.27 Recovery and backup note")],
 ];
 for (const [name, ok] of checks) console.log(`${ok ? "PASS" : "FAIL"} ${name}`);
