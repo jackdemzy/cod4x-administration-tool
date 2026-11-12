@@ -390,7 +390,7 @@ Added:
 
 ## One-command Windows build
 
-On Windows, install Node.js 22.12 or newer (recommended: 24 LTS), then double-click `build.cmd`. The script checks the source, installs npm dependencies, runs the Vite production build, creates the Electron NSIS installer, and verifies that the expected EXE exists.
+On Windows, install Node.js 22.12 or newer (recommended: 24 LTS), then double-click `build.cmd`. The script installs npm dependencies first (`npm ci`), then checks the source (`npm run preflight`, whose tests need those packages), runs the Vite production build, creates the Electron NSIS installer, and verifies that the expected EXE exists.
 
 Equivalent PowerShell command:
 
