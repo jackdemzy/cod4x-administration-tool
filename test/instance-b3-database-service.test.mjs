@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { InstanceB3DatabaseService, verifyBackup } from '../lib/instance-b3-database-service.mjs';
+import { InstanceB3DatabaseService, verifyBackup, restoreBatches } from '../lib/instance-b3-database-service.mjs';
 import { parseSchemaFile, EBC_CONFIRMATION } from '../lib/b3-database.mjs';
 
 const PASSWORD = 'Db-Secret-Pass!9';
@@ -40,7 +40,7 @@ function scriptedHelper(script) {
   return { helper, calls };
 }
 
-async function fixture(script, action, { running = false, locked = false, password = PASSWORD } = {}) {
+async function fixture(script, action, { running = false, locked = false, password = PASSWORD, points = null } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-b3-database-')));
   const b3Path = path.join(root, 'ebc-b3');
   await fs.mkdir(path.join(b3Path, 'b3', 'sql', 'mysql'), { recursive: true });
@@ -70,7 +70,7 @@ async function fixture(script, action, { running = false, locked = false, passwo
   const service = new InstanceB3DatabaseService({
     store: { get: id => { assert.equal(id, 'server-a'); return instance; } },
     credentials, environment: { read: async () => ({ pythonPath: '/usr/bin/python2.7', b3Path }) },
-    b3IsRunning: async () => running, onEvent: event => events.push(event), helper, now: () => new Date('2026-10-20T10:15:00.000Z'),
+    b3IsRunning: async () => running, onEvent: event => events.push(event), helper, now: () => new Date('2026-10-20T10:15:00.000Z'), points,
   });
   const rawSave = service.save.bind(service);
   service.save = async (id, input) => { const result = await rawSave(id, input); await service.invalidate(id); return result; };
@@ -486,4 +486,124 @@ test('query writes run under the instance lock; a changed host needs the passwor
     await rawSave('server-a', { ...SETTINGS, host: 'evil.example' });
     await assert.rejects(service.query('server-a', 'players', { search: '', limit: 50, offset: 0 }), { code: /B3_DATABASE_PASSWORD_REENTRY_REQUIRED|B3_DATABASE_NOT_READY/ });
   });
+});
+
+// ---- Block 21: migration rollback and database restore ----------------------------------------------------
+function pointsStub({ recovery = false } = {}) {
+  const stub = { captured: [], marked: [],
+    async assertNoRecovery() { if (recovery) throw Object.assign(new Error('RECOVERY_REQUIRED'), { code: 'RECOVERY_REQUIRED' }); },
+    async capture(id, action, { refs }) { stub.captured.push({ id, action, refs }); return { pointId: '20261020T101500Z-0000abcd' }; },
+    async markRecovery(id, pointId) { stub.marked.push(pointId); } };
+  return stub;
+}
+const zeroRows = tables => Object.fromEntries(Object.keys(tables).map(name => [name, 0]));
+
+test('failed migration replays the dump and drops created tables', async () => {
+  const { penalties, data, ...partial } = complete();
+  const points = pointsStub();
+  await fixture({
+    probe: [{ tables: partial }, { tables: { ...partial, penalties } }, { tables: { ...partial, penalties } }, { tables: partial }],
+    backup: [{ tables: zeroRows(partial) }], apply: [{ statements: 2 }, { statements: 1 }, { statements: 1 }],
+  }, async ({ service, calls, events }) => {
+    await service.save('server-a', SETTINGS);
+    const error = await service.migrate('server-a').catch(caught => caught);
+    assert.equal(error.code, 'MIGRATION_FAILED');
+    assert.equal(error.rolledBack, true);
+    assert.equal(error.restorePointId, '20261020T101500Z-0000abcd');
+    assert.equal(points.captured[0].action, 'b3.migration');
+    assert.equal(points.captured[0].refs.b3mysql.path, error.backup.path);
+    const applies = calls.filter(call => call.op === 'apply');
+    assert.equal(applies[1].statements[0], 'SET NAMES utf8');
+    assert.ok(applies[1].statements.includes('DROP TABLE IF EXISTS `clients`'));
+    assert.deepEqual(applies[2].statements, ['DROP TABLE IF EXISTS `penalties`']);
+    assert.ok(events.some(event => event.event === 'b3.database.rolled_back'));
+    assert.deepEqual(points.marked, []);
+  }, { points });
+});
+
+test('a rollback that leaves extra tables marks the instance for recovery', async () => {
+  const { penalties, data, ...partial } = complete();
+  const points = pointsStub();
+  await fixture({
+    probe: [{ tables: partial }, { tables: { ...partial, penalties } }, { tables: { ...partial, penalties } }, { tables: { ...partial, penalties } }],
+    backup: [{ tables: zeroRows(partial) }], apply: [{ statements: 2 }, { statements: 1 }, { statements: 1 }],
+  }, async ({ service, events }) => {
+    await service.save('server-a', SETTINGS);
+    const error = await service.migrate('server-a').catch(caught => caught);
+    assert.equal(error.code, 'MIGRATION_FAILED');
+    assert.equal(error.rolledBack, false);
+    assert.equal(error.recoveryRequired, true);
+    assert.deepEqual(points.marked, ['20261020T101500Z-0000abcd']);
+    assert.ok(events.some(event => event.event === 'b3.database.rollback_failed'));
+  }, { points });
+});
+
+test('a migration is refused while the instance needs a recovery', async () => {
+  await fixture({}, async ({ service, calls }) => {
+    await service.save('server-a', SETTINGS);
+    await assert.rejects(service.migrate('server-a'), { code: 'RECOVERY_REQUIRED' });
+    assert.deepEqual(calls, []);
+  }, { points: pointsStub({ recovery: true }) });
+});
+
+test('restoreDump replays a verified dump, drops extra B3 tables and needs a new test', async () => {
+  const { penalties, ...partial } = complete();
+  await fixture({ backup: [{ tables: { clients: 3, groups: 8 } }], probe: [{ tables: { clients: [], groups: [], penalties } }], apply: [{ statements: 3 }, { statements: 1 }] }, async ({ service, calls, instance, events }) => {
+    await service.save('server-a', SETTINGS);
+    const dump = await service.dumpForPoint('server-a');
+    const result = await service.restoreDump('server-a', dump);
+    assert.deepEqual(result.dropped, ['penalties']);
+    assert.deepEqual(calls.filter(call => call.op === 'apply')[0].statements, ['SET NAMES utf8', 'DROP TABLE IF EXISTS `clients`', 'DROP TABLE IF EXISTS `groups`']);
+    const stored = JSON.parse(await fs.readFile(file(instance), 'utf8'));
+    assert.deepEqual([stored.lastCheck.code, stored.lastCheck.ready], ['B3_DATABASE_RESTORED', false]);
+    assert.ok(events.some(event => event.event === 'b3.database.restored'));
+    void partial;
+  });
+});
+
+test('dump with a changed byte is refused before any apply call', async () => {
+  await fixture({ backup: [{ tables: { clients: 3 } }] }, async ({ service, calls }) => {
+    await service.save('server-a', SETTINGS);
+    const dump = await service.dumpForPoint('server-a');
+    const bytes = await fs.readFile(dump.path);
+    bytes[bytes.length - 2] ^= 1;
+    await fs.writeFile(dump.path, bytes);
+    await assert.rejects(service.restoreDump('server-a', dump), { code: 'RESTORE_POINT_INVALID' });
+    assert.ok(!calls.some(call => call.op === 'apply'));
+  });
+});
+
+test('dump path outside b3/backups is refused', async () => {
+  await fixture({}, async ({ service, calls, root, instance }) => {
+    await service.save('server-a', SETTINGS);
+    const text = backupText({ clients: 1 });
+    for (const target of [path.join(root, 'b3-20261020T101500Z.sql'), path.join(instance.homePath, 'b3', 'b3-20261020T101500Z.sql'), path.join(instance.homePath, 'b3', 'backups', '..', 'database.sql')]) {
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, text);
+      await assert.rejects(service.restoreDump('server-a', { path: target, sha256: sha(Buffer.from(text)), tables: { clients: 1 } }), { code: 'RESTORE_POINT_INVALID' });
+    }
+    await assert.rejects(service.restoreDump('server-a', { path: 1, sha256: 'x', tables: {} }), { code: 'RESTORE_POINT_INVALID' });
+    assert.deepEqual(calls, []);
+  });
+});
+
+test('restoreDump is refused while B3 runs', async () => {
+  await fixture({}, async ({ service, calls }) => {
+    await assert.rejects(service.restoreDump('server-a', { path: '/x', sha256: 'a'.repeat(64), tables: {} }), { code: 'B3_RUNNING' });
+    assert.deepEqual(calls, []);
+  }, { running: true });
+});
+
+test('batches never exceed 512 KiB and split multi-line statements quote-aware', () => {
+  const create = 'CREATE TABLE `t` (\n  `id` int,\n  `name` varchar(9) DEFAULT \'a;b\'\n)';
+  const rows = Array.from({ length: 4000 }, (_, index) => `INSERT INTO \`t\` VALUES (${index}, '${'x'.repeat(300)}');`);
+  const text = ['-- COD4X CONTROL B3 backup v1', 'SET NAMES utf8;', '-- TABLE t ROWS 4000', 'DROP TABLE IF EXISTS `t`;', `${create};`, ...rows].join('\n') + '\n';
+  const batches = restoreBatches(text);
+  assert.ok(batches.length > 1);
+  for (const batch of batches) {
+    assert.equal(batch[0], 'SET NAMES utf8');
+    assert.ok(batch.reduce((sum, sql) => sum + Buffer.byteLength(sql), 0) <= 512 * 1024);
+  }
+  assert.equal(batches[0][2], create);
+  assert.equal(batches.flat().filter(sql => sql !== 'SET NAMES utf8').length, 4002);
 });

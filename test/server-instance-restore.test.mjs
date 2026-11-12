@@ -121,3 +121,31 @@ test('restore while the server runs is refused', async t => {
   const { pointId } = await restorePoints.capture('local:alpha', { action: 'manual', manual: true, data: { record: { id: 'alpha' } } });
   await assert.rejects(manager.restoreRestorePoint('alpha', pointId, {}, { canCode: true }), { code: 'INSTANCE_RUNTIME_BUSY' });
 });
+
+test('a point with a B3 dump: without the confirmation the database is never touched, with it the dump is replayed', async t => {
+  const { manager, restorePoints } = await fixture(t);
+  const calls = [];
+  manager.b3Database = { restoreDump: async (id, dump) => { calls.push({ id, dump }); }, dumpForPoint: async () => ({ path: '/x/b3-1.sql', sha256: 'a'.repeat(64), tables: { clients: 1 } }) };
+  const { pointId } = await manager.createRestorePoint('alpha', { includeB3Database: true });
+  assert.ok((await restorePoints.read('local:alpha', pointId)).manifest.parts.includes('b3mysql'));
+  await assert.rejects(manager.restoreRestorePoint('alpha', pointId, { includeB3Database: true, confirmation: 'B3-Datenbank zurücksetzen' }, { canCode: true }), { code: 'RESTORE_POINT_CONFIRMATION_REQUIRED' });
+  const without = await manager.restoreRestorePoint('alpha', pointId, {}, { canCode: true });
+  assert.ok(without.skipped.includes('b3mysql'));
+  assert.deepEqual(calls, []);
+  const withDb = await manager.restoreRestorePoint('alpha', pointId, { includeB3Database: true, confirmation: B3_DATABASE_CONFIRMATION }, { canCode: true });
+  assert.ok(withDb.restored.includes('b3mysql'));
+  assert.deepEqual(calls.map(call => call.dump.path), ['/x/b3-1.sql']);
+});
+
+test('databasePoints: the migration point carries the dump reference and a failed rollback blocks launch', async t => {
+  const { manager, restorePoints } = await fixture(t);
+  const points = manager.databasePoints();
+  const { pointId } = await points.capture('alpha', 'b3.migration', { refs: { b3mysql: { path: '/x/b3-1.sql', sha256: 'a'.repeat(64), tables: {} } } });
+  const { manifest } = await restorePoints.read('local:alpha', pointId);
+  assert.equal(manifest.action, 'b3.migration');
+  assert.equal(manifest.refs.b3mysql.path, '/x/b3-1.sql');
+  await points.assertNoRecovery('alpha');
+  await points.markRecovery('alpha', pointId);
+  await assert.rejects(points.assertNoRecovery('alpha'), { code: 'RECOVERY_REQUIRED' });
+  await assert.rejects(manager.launch('alpha'), { code: 'RECOVERY_REQUIRED' });
+});
