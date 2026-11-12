@@ -149,3 +149,25 @@ test('databasePoints: the migration point carries the dump reference and a faile
   await assert.rejects(points.assertNoRecovery('alpha'), { code: 'RECOVERY_REQUIRED' });
   await assert.rejects(manager.launch('alpha'), { code: 'RECOVERY_REQUIRED' });
 });
+
+// Security review 4.18.27: a config point holds the whole record, so its core and plugin approvals
+// would come back with it. Without server.code that is refused when they differ from today.
+test('an operator cannot bring back an older core or plugin approval through a config point', async t => {
+  const { root, manager, store, instance, executablePath } = await fixture(t);
+  const current = await manager.configEngine.read(instance);
+  const entries = current.entries.map(entry => entry.name === 'sv_hostname' ? { ...entry, value: 'Changed' } : entry);
+  const { restorePointId } = await manager.changeConfiguration('alpha', { expectedSha256: current.sha256, entries });
+  assert.equal(store.get('alpha').serverCore.executablePath, executablePath);
+  // Same core and plugins as in the point: an operator may restore it.
+  const same = await manager.restoreRestorePoint('alpha', restorePointId, {}, { canCode: false });
+  assert.deepEqual(same.restored.sort(), ['config', 'record']);
+  const other = path.join(root, 'core2', 'cod4x18_dedrun');
+  await fs.mkdir(path.dirname(other));
+  await fs.writeFile(other, 'core two');
+  await manager.changeCore('alpha', { executablePath: other, version: '21.5' });
+  await assert.rejects(manager.restoreRestorePoint('alpha', restorePointId, {}, { canCode: false }), { code: 'RESTORE_POINT_CODE_PERMISSION' });
+  assert.equal(store.get('alpha').serverCore.executablePath, other);
+  const admin = await manager.restoreRestorePoint('alpha', restorePointId, {}, { canCode: true });
+  assert.ok(admin.restored.includes('record'));
+  assert.equal(store.get('alpha').serverCore.executablePath, executablePath);
+});

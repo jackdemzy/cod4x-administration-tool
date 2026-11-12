@@ -100,7 +100,10 @@ test('a linked plugin directory is refused', { skip: process.platform === 'win32
 test('pointBringsCode: plugins, core and B3 custom code need server.code, configs do not', async t => {
   const { instance, points } = await fixture(t);
   const point = await capture(points, instance, PARTS_BY_ACTION.manual);
-  assert.equal(pointBringsCode(point.manifest, ['config', 'record']), false);
+  assert.equal(pointBringsCode(point.manifest, ['config', 'record'], instance), false);
+  assert.equal(pointBringsCode(point.manifest, ['config', 'record']), true); // without today's record: assume code
+  assert.equal(pointBringsCode(point.manifest, ['config', 'record'], { ...instance, serverCore: { ...instance.serverCore, version: '21.2' } }), true);
+  assert.equal(pointBringsCode(point.manifest, ['config', 'record'], { ...instance, plugins: [{ name: 'x' }] }), true);
   assert.equal(pointBringsCode(point.manifest, ['plugins']), true);
   assert.equal(pointBringsCode(point.manifest, ['core']), true);
   assert.equal(pointBringsCode(point.manifest, ['b3files']), true);

@@ -25,7 +25,7 @@ A rollback after an automatic change puts back only the record fields that chang
 ## What administrators notice
 
 - **Panel „Wiederherstellungspunkte“** per local instance and under the installer: list (time, cause, parts, size, state), create, check, restore. Before a restore the current state is kept as its own point (`restore.safety`).
-- **Code needs `server.code`.** Restoring a point that brings code back (CoD4x plugins, the core, files under `b3/extplugins/`, installed files of the standard server) is for administrators only; operators can restore configuration and B3 settings.
+- **Code needs `server.code`.** Restoring a point that brings code back (CoD4x plugins, the core, files under `b3/extplugins/`, installed files of the standard server) is for administrators only; operators can restore configuration and B3 settings. A point's registry entry counts as code too when its core or plugin approvals differ from today's (`RESTORE_POINT_CODE_PERMISSION`).
 - **The B3 database is only reset on request:** tick the box and type `B3-DATENBANK ZURÜCKSETZEN`. Readiness needs a new database test afterwards.
 - **New: core change for a local instance** (`POST /api/instances/:id/core`, admin) and **`Core zurücksetzen`** for remote servers (`POST /api/remote-instances/:id/core/rollback`, `update.execute`): puts the kept `.previous` back after checking its hash against a core-update backup.
 - **The installer** downloads and checks every artifact before the first write, needs the standard server stopped (`RUNTIME_CONFIGURATION_BUSY`), and refuses archives with symbolic or hard links (`INSTALL_ARCHIVE_INVALID`) and targets with linked folders (`INSTALL_TARGET_INVALID`).
