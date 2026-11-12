@@ -1400,7 +1400,7 @@ function ProductionRuntimePanel({lang}){
   return <>
     <Header
       title={de ? "Production Runtime" : "Production Runtime"}
-      sub={de ? "4.18.26 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3-Datenbank, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Fernzugriff" : "4.18.26 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3-Datenbank, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Remote Access"}
+      sub={de ? "4.18.27 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3-Datenbank, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Fernzugriff · Wiederherstellungspunkte" : "4.18.27 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3-Datenbank, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Remote Access · Restore points"}
     />
 
     <ServerInstancesPanel lang={lang} executablePath={executablePath} baseGamePath={baseGamePath} platform={platform} cod4x={cod4x}/>
@@ -2483,7 +2483,7 @@ function ControlApp({user,onLogout}){
     <main className="app-main" style={{flex:1,padding:"0 30px 30px",overflow:"auto",maxWidth:"calc(100vw - 228px)"}}>
       <header className="topbar">
         <div><div className="topbar-kicker">COD4X CONTROL <span>/</span> {currentLabel.toUpperCase()}</div><div className="topbar-title">{tab==="overview"?"SERVER OVERVIEW":"SERVER ADMINISTRATION"}</div></div>
-        <div className="topbar-right"><span className="topbar-version">4.18.26</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>Logout</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
+        <div className="topbar-right"><span className="topbar-version">4.18.27</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>Logout</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
       </header>
       <div className="content-frame">
         {tab==="overview"&&<><Header title="COD4X CONTROL" sub={lang==="de"?"Serververwaltung":"Server administration"}/><Section title={lang==="de"?"Server":"Server"}><div style={{fontSize:12,color:C.muted}}>Bereit. Wähle links nur den Bereich, den du gerade benötigst.</div></Section></>}
@@ -2500,7 +2500,7 @@ function ControlApp({user,onLogout}){
         {tab==="versions"&&<VersionManager t={t} lang={lang}/>}
         {tab==="tools"&&<><DvarBrowser t={t}/><GSCAssistant t={t} lang={lang}/></>}
       </div>
-      <footer className="app-footer"><span>COD4X CONTROL 4.18.26</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
+      <footer className="app-footer"><span>COD4X CONTROL 4.18.27</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
     </main>
   </div>;
 }

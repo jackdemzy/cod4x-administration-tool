@@ -34,7 +34,7 @@ export COD4X_BASEGAME="$HOME/cod4-base"
 
 | ☐ | Befehl | Erwartung | Ergebnis |
 |---|---|---|---|
-| ☐ | `node scripts/preflight-4.18.26.mjs` | Exit 0, darin `Security audit gate PASS`, letzte Zeile beginnt mit `4.18.26 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
+| ☐ | `node scripts/preflight-4.18.27.mjs` | Exit 0, darin `Block 21 recovery gate PASS` und `Security audit gate PASS`, letzte Zeile beginnt mit `4.18.27 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
 | ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz 4.18.25 (mit laufendem Docker-Daemon): 832 Tests / 825 PASS / 7 SKIP; ohne Docker-Daemon kommen die Tests gegen echtes Docker als SKIP dazu. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
 
 Notiere `# tests`, `# pass`, `# fail`, `# skipped` und trage sie in `DEVELOPMENT_STATUS.md` („Last run“) ein.
@@ -206,6 +206,16 @@ Von Hand in der App (Remote Linux): beim Host „Docker-Status“ öffnen, bei d
 | ☐ | Desktop-App (A5-1, A6-1) | Windows-App auf frischem Datenordner starten: Admin anlegen, einloggen, RCON-Konsole öffnen, Config speichern (alles muss gehen). Im Update-Manager „GitHub Release ↗“ klicken: öffnet sich im System-Browser, nicht in einem CONTROL-Fenster. Der otpauth-Link verlässt die App nicht. | |
 | ☐ | Ordnerrechte Python/B3 unter Windows (A3-5) | `icacls <Python-Ordner>` und `icacls <B3-Ordner>`: Schreibrecht nur für Administratoren, SYSTEM und den CONTROL-Benutzer (nicht „Authentifizierte Benutzer“). | |
 | ☐ | Operator ohne Code-Rechte (A1-1, A3-1) | Als Operator einloggen: Core wählen/übernehmen, Plugin installieren und B3-Python setzen werden abgelehnt; Start, Stopp und Konfiguration gehen. | |
+
+## 3e. Wiederherstellungspunkte (Block 21, 4.18.27)
+
+| ☐ | Punkt | So prüfen | Ergebnis |
+|---|---|---|---|
+| ☐ | Config-Änderung und Plugin-Installation mit echtem Core | Lokale Instanz (Windows und WSL, echter Core): eine Config-Änderung speichern, ein Plugin installieren; im Panel „Wiederherstellungspunkte“ stehen zwei automatische Punkte. Den älteren einspielen (als Admin): `server.cfg` und `plugins/` sind wie vorher, das neue Plugin liegt unter `plugins/.removed/`. Danach startet der Server normal. | |
+| ☐ | Plugin-DLL unter Windows | Server gestoppt, Plugin-DLL ersetzen und einen Punkt davor einspielen: die DLL wird ersetzt (keine Sperre, weil gestoppt). Bei laufendem Server wird das Einspielen mit `INSTANCE_RUNTIME_BUSY` abgelehnt. | |
+| ☐ | B3-Migration gegen echtes MySQL | Testdatenbank mit B3-Tabellen, Migration mit eBc-Opt-in so stören, dass sie scheitert (z. B. Rechte für CREATE entziehen): die Tabellen sind danach wie vor der Migration, die Sicherung unter `b3/backups/` ist eingespielt. Einen manuellen Punkt mit B3-Datenbank anlegen, Daten ändern, mit Häkchen und `B3-DATENBANK ZURÜCKSETZEN` einspielen: die Daten sind wie zum Punkt. | |
+| ☐ | Core wechseln (lokal) | Als Admin einen anderen erlaubten Core wählen: der Server startet mit ihm; den Punkt davor einspielen: wieder der alte Core. Als Operator wird `/core` mit 403 abgelehnt. | |
+| ☐ | Remote-Core zurücksetzen | Remote-Server: Core-Update, dann „Core zurücksetzen“: der alte Core und seine Version sind zurück, der Server startet. | |
 
 ---
 
