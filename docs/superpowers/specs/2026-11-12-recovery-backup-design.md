@@ -1,6 +1,6 @@
 # Recovery and backup (Roadmap Block 21, 4.18.27)
 
-Status: **draft, waiting for Rafiki's review.** Decisions 1 to 3 were made by Rafiki on 2026-11-12; everything under "Design" is the proposal that follows from them. The implementation plan will be `docs/superpowers/plans/2026-11-12-recovery-backup.md` and is written only after this spec is approved.
+Status: **approved by Rafiki on 2026-11-12 00:31 UTC.** Decisions 1 to 3 were made by Rafiki on 2026-11-12; everything under "Design" is the proposal that follows from them. The implementation plan will be `docs/superpowers/plans/2026-11-12-recovery-backup.md` and is written only after this spec is approved.
 
 ## Roadmap text (Block 21, copied)
 
