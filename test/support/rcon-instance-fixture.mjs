@@ -19,7 +19,7 @@ export const VAULT_PASSPHRASE = 'Disposable rcon fixture passphrase!';
 // Real store, runtime manager, credential vault, RCON service and UDP sockets.
 // Only process creation/inspection is replaced: each "spawned core" is the UDP
 // test double, configured from the exact argument list CONTROL passes.
-export async function createRconFixture({ masterOptions = {} } = {}) {
+export async function createRconFixture({ masterOptions = {}, printExecing = true, managerOptions = {} } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-rcon-'));
   const basePath = path.join(root, 'game');
   const executablePath = path.join(root, 'core', 'cod4x18_dedrun.exe');
@@ -39,7 +39,7 @@ export async function createRconFixture({ masterOptions = {} } = {}) {
     clientFactory: options => new RconClient({ ...options, timeoutMs: 400 }) });
   const masterService = new InstanceMasterService({ resolveInstance: id => store.get(id), runtimeFor: id => manager.runtime(id), credentialService, audit, ...masterOptions });
   const argument = (args, name) => { const index = args.findIndex((value, i) => value === '+set' && args[i + 1] === name); return index < 0 ? null : args[index + 2]; };
-  manager = new ServerInstanceManager({ store, credentialService, rconService, masterService, runtimeFactory: (instance, options) => createRuntimeManager({
+  manager = new ServerInstanceManager({ ...managerOptions, store, credentialService, rconService, masterService, runtimeFactory: (instance, options) => createRuntimeManager({
     fs, path, crypto, process: { platform: 'win32', pid: process.pid, env: {} }, dataPath: (...parts) => path.join(root, ...parts),
     SERVER_CORE_DEFINITIONS: { windows: { executable: 'cod4x18_dedrun.exe' } }, serverCoreDefinition: () => ({ executable: 'cod4x18_dedrun.exe' }),
     normalizeServerPlatform: value => value, normalizeRuntimePath: value => value,
@@ -56,13 +56,25 @@ export async function createRconFixture({ masterOptions = {} } = {}) {
       children.set(child.pid, child);
       const home = argument(args, 'fs_homepath');
       const plugins = args.flatMap((value, i) => value === '+loadPlugin' ? [args[i + 1]] : []);
-      startFakeCod4xServer({ port: Number(argument(args, 'net_port')), password: argument(args, 'rcon_password') || '', hostname: instance.name, plugins }).then(async server => {
+      // Like the core: read every +exec file from <homepath>/main and print "execing <file>".
+      const execs = args.flatMap((value, i) => value === '+exec' ? [args[i + 1]] : []);
+      child.execedSettings = {};
+      const readExecs = async () => {
+        for (const name of execs) {
+          const file = path.join(home, 'main', name);
+          const text = await fs.readFile(file, 'latin1').catch(() => null);
+          if (text === null) continue;
+          if (name.startsWith('launch-')) child.launchFileMode = (await fs.stat(file)).mode;
+          for (const [, key, value] of text.matchAll(/^set (\w+) "([^"]*)"$/gm)) child.execedSettings[key] = value;
+        }
+      };
+      readExecs().then(() => startFakeCod4xServer({ port: Number(argument(args, 'net_port')), password: child.execedSettings.rcon_password || argument(args, 'rcon_password') || '', hostname: instance.name, plugins })).then(async server => {
         child.server = server; servers.push(server);
         child.on('exit', () => { child.gone = true; void server.close(); });
         await fs.mkdir(path.join(home, 'main'), { recursive: true });
         await fs.appendFile(path.join(home, 'main', 'qconsole.log'), `----- Server Initialization -----\n${plugins.map((name, i) => `Plugin ${name} loaded successfully. Server is currently running ${i + 1} plugins.\n`).join('')}Server: mp_backlot\nRcon from 127.0.0.1: status\n`);
         child.emit('spawn');
-        child.stdout.emit('data', Buffer.from(`CoD4X fake core ${instance.id} ready\n`));
+        child.stdout.emit('data', Buffer.from(`CoD4X fake core ${instance.id} ready\n${printExecing ? execs.map(name => `execing ${name}\n`).join('') : ''}`));
       }, error => child.emit('error', error));
       return child;
     },

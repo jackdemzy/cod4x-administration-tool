@@ -42,7 +42,7 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-b3p-http-'));
   const port = await freePort();
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^COD4X_/i.test(key)));
-  Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_MONITOR: 'off' });
+  Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_MONITOR: 'off', COD4X_DESKTOP_CLIENT_TOKEN: 'd'.repeat(64) /* desktop app scenario (security audit A5-1) */ });
   const child = spawn(process.execPath, [fileURLToPath(new URL('../installer-server.mjs', import.meta.url))], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let diagnostics = '';
   for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { diagnostics = (diagnostics + chunk.toString()).slice(-200000); });
@@ -89,12 +89,14 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
   assert.equal(list.json.restart, null, 'no hint while B3 is stopped');
   assert.equal((await call(viewer, `${base}/duel/enable`, {})).status, 403);
 
-  // permissions: operator switches, configures and approves, but writes no code.
+  // permissions: operator switches and configures; trusting changed code (approve) and
+  // writing code need admin (security audit 4.18.26, A3-3).
   const enabled = await call(operator, `${base}/duel/enable`, {});
   assert.equal(enabled.status, 200, enabled.json.error);
   assert.equal(enabled.json.plugin.state, 'NOT_APPROVED');
-  assert.equal((await call(operator, `${base}/duel/approve`, { sha256: enabled.json.plugin.sha256, extra: 1 })).json.code, 'B3_PLUGIN_CONFIG_INVALID');
-  const approved = await call(operator, `${base}/duel/approve`, { sha256: enabled.json.plugin.sha256 });
+  assert.equal((await call(operator, `${base}/duel/approve`, { sha256: enabled.json.plugin.sha256 })).status, 403);
+  assert.equal((await call(admin, `${base}/duel/approve`, { sha256: enabled.json.plugin.sha256, extra: 1 })).json.code, 'B3_PLUGIN_CONFIG_INVALID');
+  const approved = await call(admin, `${base}/duel/approve`, { sha256: enabled.json.plugin.sha256 });
   assert.equal(approved.status, 200, approved.json.error);
   assert.equal(approved.json.plugin.state, 'ENABLED');
   assert.equal((await call(operator, `${base}/custom`, { name: 'myplug', from: 'template' })).status, 403);
@@ -190,7 +192,7 @@ test('B3 plugins API on the real backend', { timeout: 60000 }, async t => {
   for (const [event, name] of [['b3.plugin.enabled', 'duel'], ['b3.plugin.approved', 'duel'], ['b3.plugin.custom_created', 'myplug'], ['b3.plugin.config_saved', 'myplug'], ['b3.plugin.code_saved', 'myplug'], ['b3.plugin.deleted', 'uploaded'], ['b3.plugin.disabled', 'duel']]) {
     const entry = find(event, name);
     assert.ok(entry, `${event} ${name}`);
-    assert.deepEqual([entry.details.instanceId, entry.details.actor], ['b3p-01', event === 'b3.plugin.custom_created' || event === 'b3.plugin.code_saved' || event === 'b3.plugin.deleted' ? 'b3pAdmin' : 'ops']);
+    assert.deepEqual([entry.details.instanceId, entry.details.actor], ['b3p-01', event === 'b3.plugin.custom_created' || event === 'b3.plugin.code_saved' || event === 'b3.plugin.deleted' || event === 'b3.plugin.approved' ? 'b3pAdmin' : 'ops']);
   }
   assert.equal(find('b3.plugin.code_saved', 'myplug').details.sha256, savedCode.json.code.sha256);
   assert.equal(find('b3.plugin.approved', 'duel').details.sha256, enabled.json.plugin.sha256);

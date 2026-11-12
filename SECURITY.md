@@ -57,6 +57,10 @@ At runtime CONTROL keeps these values outside the source tree: secrets in the en
 
 If a secret was committed by mistake, treat it as leaked: revoke or rotate it first (new RCON password, new Discord webhook, new TOTP enrolment), then remove it from the repository. Deleting the file in a new commit is not enough, because it stays in the history.
 
+## Security audit
+
+The 4.18.26 audit (Roadmap Block 20) and its findings, grades and regression tests: [`docs/SECURITY-AUDIT-4.18.26.md`](docs/SECURITY-AUDIT-4.18.26.md). Since then only an administrator may bring code that CONTROL runs (permission `server.code`).
+
 ## Development and review
 
 Security depends on how changes are made, not only on reports. Every change to this repository, by a person or by an AI coding agent, follows these rules:

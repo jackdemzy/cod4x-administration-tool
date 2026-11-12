@@ -15,12 +15,14 @@ test('launch passes rcon_password from the vault only to the spawned core and re
   await setRcon('rcon-a', secret);
   const state = await manager.launch('rcon-a');
   const child = children.get(state.pid);
-  const index = child.args.indexOf('rcon_password');
-  assert.ok(index > 0 && child.args[index - 1] === '+set' && child.args[index + 1] === secret, 'core receives the password as +set argument');
-  assert.ok(index < child.args.indexOf('+exec'), 'password is set before server.cfg is executed');
+  // Security audit 4.18.26 (A2-1): the password is never an argument; the core reads it
+  // from a private launch file executed before server.cfg.
+  assert.ok(!child.args.includes('rcon_password') && !child.args.join(' ').includes(secret), 'no password in the argument list');
+  assert.equal(child.execedSettings.rcon_password, secret, 'core receives the password from the launch file');
+  assert.ok(child.args.indexOf('+exec') < child.args.lastIndexOf('server.cfg') - 1, 'launch file is executed before server.cfg');
   const status = await manager.status('rcon-a');
   noSecret(status, 'instance status'); noSecret(runtimeEvents, 'runtime events');
-  assert.ok(status.runtime.history.find(entry => entry.event === 'runtime.started').args.includes('[redacted]'));
+  assert.ok(status.runtime.history.find(entry => entry.event === 'runtime.started').args.some(value => /^launch-[0-9a-f-]{36}\.cfg$/.test(value)), 'history shows only the launch file name');
   const persisted = await fs.readFile(path.join(store.get('rcon-a').homePath, 'logs', 'runtime-state.json'), 'utf8');
   assert.ok(persisted.length > 0); noSecret(persisted, 'persisted runtime state');
 });

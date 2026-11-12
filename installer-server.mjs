@@ -59,7 +59,8 @@ import { MonitorHost } from "./lib/monitor-host.mjs";
 import { MonitorAlerts } from "./lib/monitor-alerts.mjs";
 import { AlertNotifier } from "./lib/alert-notifier.mjs";
 import { readInstanceConsoleLog } from "./lib/instance-console-log.mjs";
-import { LoginThrottle } from "./lib/login-throttle.mjs";
+import { LoginThrottle, loginClient } from "./lib/login-throttle.mjs";
+import { DESKTOP_CLIENT_HEADER, localOriginDecision } from "./lib/local-origin-policy.mjs";
 import { RemoteSessions } from "./lib/remote-sessions.mjs";
 import { REMOTE_DEFAULT_PORT, REMOTE_ROUTES, REMOTE_PROXY_MAX_FAILURES, caddyfileTemplate, createRemoteGateway, listenRemoteGateway, remoteListenOptions } from "./lib/remote-gateway.mjs";
 import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecoveryCode, totpUri, verifyTotp } from "./lib/totp.mjs";
@@ -231,7 +232,9 @@ function getAuthSession(req) {
   const session = authSessions.get(token);
   if (!session) return null;
   const now = Date.now();
-  if (session.expiresAt <= now || session.absoluteExpiresAt <= now) {
+  // A5-4 (security audit 4.18.26): a disabled or deleted user loses every local session at once.
+  const owner = findAuthUser(session.username);
+  if (session.expiresAt <= now || session.absoluteExpiresAt <= now || !owner || owner.disabled) {
     authSessions.delete(token);
     return null;
   }
@@ -270,6 +273,8 @@ const RBAC_PERMISSIONS = [
   { id: "monitor.read", label: "Monitoring", description: "Serverstatus, Spielerzahlen, Verlauf und Ausfälle lesen (Block 24)." },
   // Block 16b: custom B3 plugin code runs as the B3 process user; admin only.
   { id: "b3.plugins.code", label: "B3-Plugin-Code", description: "Eigene B3-Plugins anlegen, hochladen und bearbeiten." },
+  // Security audit 4.18.26 (A1-1): code CONTROL runs as its own user; admin only.
+  { id: "server.code", label: "Server-Programmcode", description: "Server-Core wählen und übernehmen, CoD4x-Plugins installieren, freie Startargumente." },
 ];
 const RBAC_PERMISSION_IDS = RBAC_PERMISSIONS.map(p => p.id);
 const RBAC_MATRIX = Object.freeze({
@@ -316,6 +321,18 @@ function requirePermission(permission, { quietAllowed = false } = {}) {
   };
 }
 
+// Security audit 4.18.26 (A1-1): a server.manage route that brings code (another core,
+// free start arguments) only when the request asks for it; runs after requirePermission.
+function requireCodeWhen(bringsCode) {
+  return (req, res, next) => {
+    if (!bringsCode(req.body || {}) || hasPermission(req.auth?.role, "server.code")) return next();
+    audit("warn", "rbac.permission.checked", { username: req.auth?.username, role: req.auth?.role, permission: "server.code", allowed: false });
+    res.status(403).json({ ok: false, error: "Permission denied", permission: "server.code", role: req.auth?.role });
+  };
+}
+const runtimeBringsCode = body => Boolean(body.executablePath) || (body.args !== undefined && !(Array.isArray(body.args) && body.args.length === 0));
+const cloneBringsCode = body => body.serverCore !== undefined;
+
 const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "installation", permission: "install.execute", routes: ["POST /api/installer"] },
   { area: "updates", permission: "update.execute", routes: ["POST /api/fpschallenge/anticheat/download/:version"] },
@@ -325,6 +342,7 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
+  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   ...REMOTE_LINUX_BINDINGS,
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
@@ -352,9 +370,22 @@ function authorizationBindingChecks() {
   return { ok: checks.every(c => c.pass), checks, bindings: RBAC_ENDPOINT_BINDINGS };
 }
 
-// Electron loads the renderer from file://, so explicitly allow the local backend origin.
+// Security audit 4.18.26 (A5-1, A5-2): only our own pages may call the admin API from a
+// browser. Electron loads the renderer from file:// (Origin "null") and adds a per-launch
+// secret header; the secret is taken out of the environment so no child process inherits it.
+const DESKTOP_CLIENT_TOKEN = process.env.COD4X_DESKTOP_CLIENT_TOKEN || "";
+delete process.env.COD4X_DESKTOP_CLIENT_TOKEN;
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const decision = localOriginDecision({
+    origin: req.headers.origin,
+    desktopHeader: req.headers[DESKTOP_CLIENT_HEADER],
+    desktopToken: DESKTOP_CLIENT_TOKEN,
+    ownOrigins: [`http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`],
+    preflight: req.method === "OPTIONS",
+  });
+  res.setHeader("Vary", "Origin");
+  if (!decision.allowed) return res.status(403).json({ ok: false, code: "ORIGIN_REFUSED", error: "Request from a foreign web page refused." });
+  if (decision.allowOrigin) res.setHeader("Access-Control-Allow-Origin", decision.allowOrigin);
   // Only the schema-backed instance config endpoint accepts PUT. Preserve
   // existing method exposure elsewhere; authentication/RBAC still guard writes.
   const instanceConfigPath = /^\/api\/instances\/[^/]+\/config\/?$/.test(req.path);
@@ -365,7 +396,7 @@ app.use((req, res, next) => {
   const remoteConfigPath = /^\/api\/remote-instances\/[^/]+\/config\/?$/.test(req.path);
   const remoteHostDeletePath = /^\/api\/remote-hosts\/[^/]+\/?$/.test(req.path);
   res.setHeader("Access-Control-Allow-Methods", `GET,POST,${instanceConfigPath || b3PluginPutPath || remoteConfigPath ? "PUT," : ""}${b3PluginDeletePath || remoteHostDeletePath ? "DELETE," : ""}OPTIONS`);
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-COD4X-Desktop");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -704,7 +735,8 @@ function runtimeCoreRegistryFile(target) {
 
 async function readRuntimeCoreManifest(target) {
   const manifestPath = assertSafeChildPath(target, "cod4x-control-manifest.json");
-  try { return { manifest: JSON.parse(await fs.readFile(manifestPath, "utf8")), manifestPath, source: "runtime" }; } catch {}
+  // Security audit 4.18.26 (A1-2): only the registry in CONTROL's data folder counts. A
+  // manifest next to the core can be written by anyone who can write the core folder.
   try { return { manifest: JSON.parse(await fs.readFile(runtimeCoreRegistryFile(target), "utf8")), manifestPath: runtimeCoreRegistryFile(target), source: "registry" }; } catch {}
   return { manifest: null, manifestPath, source: null };
 }
@@ -918,7 +950,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (!authUser) return res.status(428).json({ ok: false, error: "First-Run-Initialisierung erforderlich." });
     const username = String(req.body?.username || "").trim();
     const password = String(req.body?.password || "");
-    const throttleKey = LoginThrottle.key(req.socket.remoteAddress, username);
+    const throttleKey = LoginThrottle.key(loginClient(req.socket.remoteAddress), username);
     const lock = loginThrottle.check(throttleKey);
     if (lock.locked) {
       audit({ level: "warn", event: "auth.login_locked", details: { username } });
@@ -933,7 +965,8 @@ app.post("/api/auth/login", async (req, res) => {
     if (!candidate || candidate.disabled || !validUser || !validPassword) {
       const locked = loginThrottle.fail(throttleKey);
       audit({ level: "warn", event: locked ? "auth.login_locked" : "auth.login_failed", details: { username } });
-      return res.status(401).json({ ok: false, error: candidate?.disabled ? "Benutzer ist deaktiviert." : "Benutzername oder Passwort ungültig." });
+      // A5-2: only the right password may learn that the account is disabled.
+      return res.status(401).json({ ok: false, error: candidate?.disabled && validUser && validPassword ? "Benutzer ist deaktiviert." : "Benutzername oder Passwort ungültig." });
     }
     loginThrottle.succeed(throttleKey);
     const session = createAuthSession(candidate.username, candidate.role);
@@ -1085,6 +1118,7 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
       target.passwordHash = hashAuthPassword(req.body.password);
       for (const [token, session] of authSessions) if (session.username.toLowerCase() === target.username.toLowerCase()) authSessions.delete(token);
     }
+    if (target.disabled) for (const [token, session] of authSessions) if (session.username.toLowerCase() === target.username.toLowerCase()) authSessions.delete(token);
     target.updatedAt = new Date().toISOString();
     await saveAuthUsers();
     if (authUser?.username.toLowerCase() === target.username.toLowerCase()) await saveAuthUser(target);
@@ -1925,10 +1959,10 @@ app.post("/api/installer", requirePermission("install.execute"), async (req, res
 // ─── 4.17.2 Runtime Discovery / Existing-Core Adoption ─────────────────────
 app.get("/api/runtime/search",requirePermission("diagnostics.read"),async(_req,res)=>{const correlationId=crypto.randomUUID();try{const candidates=await searchRuntimeCores();audit("info","runtime.core.search",{correlationId,count:candidates.length});res.json({ok:true,correlationId,candidates});}catch(err){audit("warn","runtime.core.search.failed",{correlationId,error:err.message});res.status(500).json({ok:false,correlationId,error:err.message});}});
 app.get("/api/runtime/preflight",requirePermission("diagnostics.read"),async(req,res)=>{try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform}),core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);res.json({ok:core.verified&&baseGame.valid,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
-app.post("/api/runtime/config",requirePermission("server.manage"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),executablePath=normalizeRuntimeExecutablePath(req.body?.executablePath||defaultRuntime.state.executablePath||"",platform);if(!policyState.security.allowedCod4xVersions.includes(cod4x))throw new Error(`Unsupported CoD4x version: ${cod4x}`);if(!(await pathExists(executablePath)))throw new Error(`${serverCoreDefinition(platform).executable} wurde am ausgewählten Server-Core-Pfad nicht gefunden.`);const baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.body?.baseGamePath,defaultRuntime.state));if(!baseGame.valid){const err=new Error(baseGame.reasons.map(item=>item.message).join("; "));err.code="BASEGAME_INVALID";throw err;}defaultRuntime.state.baseGamePath=baseGame.baseGamePath;defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=null;defaultRuntime.state.runtimeRoot=null;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();runtimeEvent("runtime.configuration.saved",{correlationId,target:requested,platform,cod4x,executablePath,executable:defaultRuntime.state.executable});await persistRuntimeState();res.json({ok:true,correlationId,runtime:defaultRuntime.state});});}catch(err){audit("warn","runtime.configuration.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
+app.post("/api/runtime/config",requirePermission("server.code"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),executablePath=normalizeRuntimeExecutablePath(req.body?.executablePath||defaultRuntime.state.executablePath||"",platform);if(!policyState.security.allowedCod4xVersions.includes(cod4x))throw new Error(`Unsupported CoD4x version: ${cod4x}`);if(!(await pathExists(executablePath)))throw new Error(`${serverCoreDefinition(platform).executable} wurde am ausgewählten Server-Core-Pfad nicht gefunden.`);const baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.body?.baseGamePath,defaultRuntime.state));if(!baseGame.valid){const err=new Error(baseGame.reasons.map(item=>item.message).join("; "));err.code="BASEGAME_INVALID";throw err;}defaultRuntime.state.baseGamePath=baseGame.baseGamePath;defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=null;defaultRuntime.state.runtimeRoot=null;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();runtimeEvent("runtime.configuration.saved",{correlationId,target:requested,platform,cod4x,executablePath,executable:defaultRuntime.state.executable});await persistRuntimeState();res.json({ok:true,correlationId,runtime:defaultRuntime.state});});}catch(err){audit("warn","runtime.configuration.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
 app.get("/api/runtime/status",requirePermission("diagnostics.read"),async(_req,res)=>{try{await reconcileRuntimeState();res.json({ok:true,runtime:defaultRuntime.state,hostPlatform:process.platform,supportedServerPlatforms:Object.keys(SERVER_CORE_DEFINITIONS),nativeExecutable:defaultRuntime.state.executable,candidateRoots:runtimeCandidateRoots()});}catch(err){res.status(500).json({ok:false,error:err.message});}});
-app.post("/api/runtime/adopt",requirePermission("server.manage"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:req.body?.executablePath||defaultRuntime.state.executablePath||"",platform}),result=await adoptExistingRuntimeExecutable({executablePath,cod4x,fpsPromod:req.body?.fpsPromod||"custom",platform});defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=resolved.target;defaultRuntime.state.runtimeRoot=resolved.root;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();await persistRuntimeState();const core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);audit("info","runtime.core.adopted",{correlationId,target:resolved.target,executablePath,cod4x,sha256:result.manifest.executableSha256,verification:"operator-adopted"});res.status(201).json({ok:true,correlationId,requested,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,core,runtime:defaultRuntime.state});});}catch(err){audit("warn","runtime.core.adoption.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
-app.post("/api/runtime/start",requirePermission("server.manage"),async(req,res)=>{const correlationId=crypto.randomUUID();try{const runtime=await startRuntime({relative:req.body?.path||defaultRuntime.state.target||"./server",executablePath:req.body?.executablePath||defaultRuntime.state.executablePath||"",baseGamePath:req.body?.baseGamePath||"",expectedCod4x:String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),args:req.body?.args||[],platform:req.body?.platform||defaultRuntime.state.platform||"windows"});audit("info","runtime.started",{correlationId,pid:runtime.pid,target:runtime.target,executablePath:runtime.executablePath,cod4x:runtime.cod4x});res.status(201).json({ok:true,correlationId,runtime});}catch(err){audit("warn","runtime.start.blocked",{correlationId,error:err.message,code:err.code||"RUNTIME_START_FAILED",runtimeTarget:err.runtimeTarget||null});res.status(400).json({ok:false,error:err.message,correlationId,runtime:defaultRuntime.state});}});
+app.post("/api/runtime/adopt",requirePermission("server.code"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:req.body?.executablePath||defaultRuntime.state.executablePath||"",platform}),result=await adoptExistingRuntimeExecutable({executablePath,cod4x,fpsPromod:req.body?.fpsPromod||"custom",platform});defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=resolved.target;defaultRuntime.state.runtimeRoot=resolved.root;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();await persistRuntimeState();const core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);audit("info","runtime.core.adopted",{correlationId,target:resolved.target,executablePath,cod4x,sha256:result.manifest.executableSha256,verification:"operator-adopted"});res.status(201).json({ok:true,correlationId,requested,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,core,runtime:defaultRuntime.state});});}catch(err){audit("warn","runtime.core.adoption.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
+app.post("/api/runtime/start",requirePermission("server.manage"),requireCodeWhen(runtimeBringsCode),async(req,res)=>{const correlationId=crypto.randomUUID();try{const runtime=await startRuntime({relative:req.body?.path||defaultRuntime.state.target||"./server",executablePath:req.body?.executablePath||defaultRuntime.state.executablePath||"",baseGamePath:req.body?.baseGamePath||"",expectedCod4x:String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),args:req.body?.args||[],platform:req.body?.platform||defaultRuntime.state.platform||"windows"});audit("info","runtime.started",{correlationId,pid:runtime.pid,target:runtime.target,executablePath:runtime.executablePath,cod4x:runtime.cod4x});res.status(201).json({ok:true,correlationId,runtime});}catch(err){audit("warn","runtime.start.blocked",{correlationId,error:err.message,code:err.code||"RUNTIME_START_FAILED",runtimeTarget:err.runtimeTarget||null});res.status(400).json({ok:false,error:err.message,correlationId,runtime:defaultRuntime.state});}});
 
 app.post("/api/runtime/stop", requirePermission("server.manage"), async (_req, res) => {
   const correlationId = crypto.randomUUID();
@@ -1942,7 +1976,7 @@ app.post("/api/runtime/stop", requirePermission("server.manage"), async (_req, r
   }
 });
 
-app.post("/api/runtime/restart", requirePermission("server.manage"), async (req, res) => {
+app.post("/api/runtime/restart", requirePermission("server.manage"), requireCodeWhen(runtimeBringsCode), async (req, res) => {
   const correlationId = crypto.randomUUID();
   try {
     const runtime = await restartRuntime({
@@ -1963,7 +1997,7 @@ app.post("/api/runtime/restart", requirePermission("server.manage"), async (req,
 
 // Compatibility endpoint: the legacy server-start route now uses the 4.18.0
 // runtime manager so there is only one authoritative process-control path.
-app.post("/api/server/start", requirePermission("server.manage"), async (req, res) => {
+app.post("/api/server/start", requirePermission("server.manage"), requireCodeWhen(runtimeBringsCode), async (req, res) => {
   const correlationId = crypto.randomUUID();
   try {
     const runtime = await startRuntime({
@@ -2540,9 +2574,9 @@ function auditMasterToken(req, removed, credential) {
 app.post("/api/instances/:id/credentials/:kind", requirePermission("config.manage"), credentialRoute(async req => ({ credential: auditMasterToken(req, false, await instanceManager.changeCredential(req.params.id, req.params.kind, req.body)) })));
 app.post("/api/instances/:id/credentials/:kind/remove", requirePermission("config.manage"), credentialRoute(async req => ({ credential: auditMasterToken(req, true, await instanceManager.changeCredential(req.params.id, req.params.kind, req.body, true)) })));
 app.get("/api/instances", requirePermission("diagnostics.read"), instanceRoute(async () => ({ instances: await instanceManager.list(), root: instanceRoot, hostPlatform: process.platform === "win32" ? "windows" : process.platform === "linux" ? "linux" : "unsupported" })));
-app.post("/api/instances", requirePermission("server.manage"), instanceRoute(async req => ({ instance: await instanceManager.create(req.body) }), 201));
+app.post("/api/instances", requirePermission("server.code"), instanceRoute(async req => ({ instance: await instanceManager.create(req.body) }), 201));
 app.get("/api/instances/:id", requirePermission("diagnostics.read"), instanceRoute(async req => ({ instance: await instanceManager.status(req.params.id) })));
-app.post("/api/instances/:id/clone", requirePermission("server.manage"), instanceRoute(async req => ({ instance: await instanceManager.clone(req.params.id, req.body) }), 201));
+app.post("/api/instances/:id/clone", requirePermission("server.manage"), requireCodeWhen(cloneBringsCode), instanceRoute(async req => ({ instance: await instanceManager.clone(req.params.id, req.body) }), 201));
 app.post("/api/instances/:id/start", requirePermission("server.manage"), instanceRoute(async req => ({ runtime: await instanceManager.launch(req.params.id) }), 201));
 app.post("/api/instances/:id/stop", requirePermission("server.manage"), instanceRoute(async req => ({ runtime: await instanceManager.stop(req.params.id) })));
 app.post("/api/instances/:id/restart", requirePermission("server.manage"), instanceRoute(async req => ({ runtime: await instanceManager.launch(req.params.id, true) })));
@@ -2593,8 +2627,8 @@ const pluginBody = (req, key) => {
   return req.body[key];
 };
 app.get("/api/instances/:id/plugins", requirePermission("diagnostics.read"), instanceRoute(async req => ({ plugins: await instanceManager.plugins(req.params.id) })));
-app.post("/api/instances/:id/plugins/install", requirePermission("server.manage"), pluginRoute("plugin.installed", req => instanceManager.installPlugin(req.params.id, req.body)));
-app.post("/api/instances/:id/plugins/approve", requirePermission("server.manage"), pluginRoute("plugin.approved", req => instanceManager.approvePlugin(req.params.id, req.body)));
+app.post("/api/instances/:id/plugins/install", requirePermission("server.code"), pluginRoute("plugin.installed", req => instanceManager.installPlugin(req.params.id, req.body)));
+app.post("/api/instances/:id/plugins/approve", requirePermission("server.code"), pluginRoute("plugin.approved", req => instanceManager.approvePlugin(req.params.id, req.body)));
 app.post("/api/instances/:id/plugins/versions", requirePermission("server.manage"), instanceRoute(async req => ({ plugins: await instanceManager.readPluginVersions(req.params.id, req.auth.username) })));
 app.post("/api/instances/:id/plugins/:name/enable", requirePermission("server.manage"), pluginRoute("plugin.enabled", req => instanceManager.setPluginEnabled(req.params.id, req.params.name, true)));
 app.post("/api/instances/:id/plugins/:name/disable", requirePermission("server.manage"), pluginRoute("plugin.disabled", req => instanceManager.setPluginEnabled(req.params.id, req.params.name, false)));
@@ -2622,7 +2656,7 @@ function b3Route(action) {
 }
 app.get("/api/b3/dependencies/matrix", requirePermission("diagnostics.read"), b3Route(async () => ({ matrix: B3_DEPENDENCY_MATRIX, source: { repository: B3_SOURCE.repository, commit: B3_SOURCE.commit, b3Version: B3_SOURCE.b3Version, blockedSql: B3_SOURCE.blockedSql }, auditReport: "docs/EBC-B3-AUDIT.md" })));
 app.get("/api/b3/environment", requirePermission("config.manage"), b3Route(async () => ({ environment: await b3Environment.read() })));
-app.post("/api/b3/environment", requirePermission("config.manage"), b3Route(async req => {
+app.post("/api/b3/environment", requirePermission("server.code"), b3Route(async req => {
   const environment = await b3Environment.save(req.body);
   // New paths: dashboards must not show the previous interpreter/source check.
   b3Service.invalidateDependencies();
@@ -2635,9 +2669,9 @@ app.post("/api/b3/dependencies/check", requirePermission("config.manage"), b3Rou
   audit(result.overall === "BLOCKED" ? "warn" : "info", "b3.dependencies.checked", { actor: req.auth.username, overall: result.overall, blocking: result.blocking, python: result.python?.version || null });
   return { dependencies: result };
 }));
-app.get("/api/instances/:id/b3", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.status(req.params.id) })));
+app.get("/api/instances/:id/b3", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.status(req.params.id, { full: hasPermission(req.auth.role, "config.manage") }) })));
 app.get("/api/instances/:id/b3/dashboard", requirePermission("diagnostics.read"), instanceRoute(async req => ({ b3: await b3Service.dashboard(req.params.id, { fresh: req.query.fresh === "1" }) })));
-app.get("/api/instances/:id/b3/logs", requirePermission("diagnostics.read"), instanceRoute(async req => ({ logs: await b3Service.logs(req.params.id) })));
+app.get("/api/instances/:id/b3/logs", requirePermission("diagnostics.read"), instanceRoute(async req => ({ logs: await b3Service.logs(req.params.id, { full: hasPermission(req.auth.role, "config.manage") }) })));
 // Generated config with credential values redacted.
 app.get("/api/instances/:id/b3/config", requirePermission("config.manage"), instanceRoute(async req => ({ config: await b3Service.config(req.params.id) })));
 // Block 16: B3 <-> CoD4x integration (b3hide + auth). No gateway route exists for it.
@@ -2695,7 +2729,7 @@ app.put(`${b3PluginsBase}/:name/config`, requirePermission("config.manage"), ins
   auditB3Plugin("config_saved", req, req.params.name);
   return { config };
 }));
-app.post(`${b3PluginsBase}/:name/approve`, requirePermission("config.manage"), instanceRoute(async req => {
+app.post(`${b3PluginsBase}/:name/approve`, requirePermission("b3.plugins.code"), instanceRoute(async req => {
   const { sha256 } = b3PluginBody(req, ["sha256"], "B3_PLUGIN_CONFIG_INVALID");
   const plugin = await b3PluginService.approve(req.params.id, req.params.name, sha256);
   auditB3Plugin("approved", req, plugin.name, plugin.sha256);

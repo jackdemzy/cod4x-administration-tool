@@ -180,3 +180,16 @@ test('gateway serves only the whitelist; console lines need diagnostics.read and
   assert.equal(page.headers.get('content-security-policy'), REMOTE_CSP);
   assert.equal((await fetch(`${base}/`, { redirect: 'manual' })).headers.get('location'), '/remote/');
 });
+
+// Security audit 4.18.26, finding A5-3: a local caller can set X-Forwarded-For on
+// every attempt; the per-user brake must still stop unlimited password guessing.
+test('gateway brake per user holds when X-Forwarded-For changes on every attempt (A5-3)', async t => {
+  const { post } = await gateway(t);
+  let last;
+  for (let i = 0; i < 31; i++) last = await post('/remote/api/login', { username: 'viewer', password: 'wrong' }, { 'x-forwarded-for': `203.0.113.${i + 1}` });
+  assert.equal(last.status, 429, 'locked after the per-user limit');
+  const right = await post('/remote/api/login', { username: 'viewer', password: 'correct-horse-battery' }, { 'x-forwarded-for': '198.51.100.7' });
+  assert.equal(right.status, 429, 'a fresh client address does not lift the per-user lock');
+  const other = await post('/remote/api/login', { username: 'admin', password: 'wrong' }, { 'x-forwarded-for': '198.51.100.8' });
+  assert.equal(other.status, 401, 'other users are not affected');
+});

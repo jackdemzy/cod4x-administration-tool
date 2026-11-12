@@ -274,8 +274,10 @@ test('three parallel instances: own port, home, RCON, master token and answers; 
     const instance = store.get(id), child = children.get(states[id].pid), others = IDS.filter(other => other !== id);
     assert.equal(argAfter(child.args, 'net_port'), String(instance.port));
     assert.equal(argAfter(child.args, 'fs_homepath'), instance.homePath);
-    assert.equal(argAfter(child.args, 'rcon_password'), RCON[id]);
-    assert.equal(argAfter(child.args, 'sv_authtoken'), TOKEN[id]);
+    // Security audit 4.18.26 (A2-1): both secrets arrive through the private +exec file.
+    assert.equal(argAfter(child.args, 'rcon_password'), null);
+    assert.equal(child.execedSettings.rcon_password, RCON[id]);
+    assert.equal(child.execedSettings.sv_authtoken, TOKEN[id]);
     const commandLine = child.args.join(' ');
     for (const other of others) {
       assert.ok(!commandLine.includes(RCON[other]) && !commandLine.includes(TOKEN[other]) && !commandLine.includes(store.get(other).homePath), `${id} must not see ${other}`);

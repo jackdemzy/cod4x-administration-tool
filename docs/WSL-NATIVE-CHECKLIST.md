@@ -1,4 +1,4 @@
-# WSL-Checkliste: native Tests (Stand 4.18.25)
+# WSL-Checkliste: native Tests (Stand 4.18.26)
 
 Diese Checkliste enthält alles, was die Cloud-Umgebung **nicht** prüfen kann, weil dafür ein echter CoD4x-Core, ein echter `sshd` oder dein Windows-/Handy-Setup nötig ist. Jeder Punkt hat einen genauen Befehl, die erwartete PASS-Zeile und die Frage, was ein Fehlschlag bedeutet.
 
@@ -34,7 +34,7 @@ export COD4X_BASEGAME="$HOME/cod4-base"
 
 | ☐ | Befehl | Erwartung | Ergebnis |
 |---|---|---|---|
-| ☐ | `node scripts/preflight-4.18.25.mjs` | Exit 0, letzte Zeile beginnt mit `4.18.25 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
+| ☐ | `node scripts/preflight-4.18.26.mjs` | Exit 0, darin `Security audit gate PASS`, letzte Zeile beginnt mit `4.18.26 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
 | ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz 4.18.25 (mit laufendem Docker-Daemon): 832 Tests / 825 PASS / 7 SKIP; ohne Docker-Daemon kommen die Tests gegen echtes Docker als SKIP dazu. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
 
 Notiere `# tests`, `# pass`, `# fail`, `# skipped` und trage sie in `DEVELOPMENT_STATUS.md` („Last run“) ein.
@@ -195,6 +195,17 @@ Von Hand in der App (Remote Linux): beim Host „Docker-Status“ öffnen, bei d
 | `REMOTE_DOCKER_BUILD_FAILED` | Der Server erreicht Docker Hub oder die Debian-Paketquellen nicht, oder die Plattform `linux/386` läuft dort nicht. |
 | `Health … getinfo` bleibt `NO_ANSWER` | Port im Container nicht erreichbar oder der Core bindet nicht an `0.0.0.0`; Ausgabe von `Logs` zurückschicken. |
 | Spieler-Adressen falsch (alle gleich) | Rootless Docker mit Standard-Netzwerktreiber; bekannte Grenze, IP-Bans sind dann unzuverlässig. |
+
+---
+
+## 3d. Sicherheitsaudit (Block 20, 4.18.26)
+
+| ☐ | Punkt | So prüfen | Ergebnis |
+|---|---|---|---|
+| ☐ | Startdatei statt Startargumente (A2-1) | Lokale Instanz mit RCON-Passwort und Master-Token starten (Windows und WSL, echter Core). Konsole zeigt `execing launch-<id>.cfg`, RCON funktioniert, der Master nimmt den Token an, in `main/` liegt danach keine `launch-*.cfg`. Unter Linux zeigt `tr '\0' ' ' < /proc/<pid>/cmdline` keines der beiden Geheimnisse. | |
+| ☐ | Desktop-App (A5-1, A6-1) | Windows-App auf frischem Datenordner starten: Admin anlegen, einloggen, RCON-Konsole öffnen, Config speichern (alles muss gehen). Im Update-Manager „GitHub Release ↗“ klicken: öffnet sich im System-Browser, nicht in einem CONTROL-Fenster. Der otpauth-Link verlässt die App nicht. | |
+| ☐ | Ordnerrechte Python/B3 unter Windows (A3-5) | `icacls <Python-Ordner>` und `icacls <B3-Ordner>`: Schreibrecht nur für Administratoren, SYSTEM und den CONTROL-Benutzer (nicht „Authentifizierte Benutzer“). | |
+| ☐ | Operator ohne Code-Rechte (A1-1, A3-1) | Als Operator einloggen: Core wählen/übernehmen, Plugin installieren und B3-Python setzen werden abgelehnt; Start, Stopp und Konfiguration gehen. | |
 
 ---
 

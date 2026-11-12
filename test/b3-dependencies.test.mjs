@@ -102,7 +102,9 @@ test('static source inspection checks layout, version, audited hashes (CRLF-safe
 test('environment settings persist and the check combines probe and source without starting B3', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-b3-env-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const interpreter = path.join(root, process.platform === 'win32' ? 'python.exe' : 'python2.7');
+  // <prefix>/bin/python2.7: the prefix (here the private temp folder) is checked too, never /tmp itself.
+  const interpreter = path.join(root, 'bin', process.platform === 'win32' ? 'python.exe' : 'python2.7');
+  await fs.mkdir(path.dirname(interpreter));
   await fs.writeFile(interpreter, 'not executed');
   const calls = [];
   const environment = new B3Environment(path.join(root, 'config', 'b3-environment.json'), { execFileAsync: async (file, args) => { calls.push(args.slice(0, 2)); return { stdout: JSON.stringify({ version: [2, 7, 18], bits: 64, modules: { dateutil: { ok: true, version: '2.8' }, pymysql: { ok: true, version: '0.9' } } }) }; } });

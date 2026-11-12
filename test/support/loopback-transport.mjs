@@ -98,6 +98,11 @@ export function createSftpEmulation() {
     // like a real server: "." and ".." are listed, and every entry carries lstat-style attributes
     readdir(where, opts, cb) {
       if (typeof opts === 'function') cb = opts;
+      if (Buffer.isBuffer(where)) {
+        const entry = handleOf(where);
+        const page = entry.directory.splice(0, 100);
+        return page.length ? cb(undefined, page) : cb(Object.assign(new Error('End of file'), { code: 1 }));
+      }
       const list = async () => {
         const names = await fs.readdir(where);
         const entries = [];
@@ -109,6 +114,23 @@ export function createSftpEmulation() {
         return entries;
       };
       call(list(), cb, entries => [entries]);
+    },
+    // opendir + readdir(handle) page by page, then EOF (status 1), like a real server
+    opendir(where, cb) {
+      const pages = (async () => {
+        const names = await fs.readdir(where);
+        const entries = [];
+        for (const filename of ['.', '..', ...names]) {
+          try { entries.push({ filename, longname: filename, attrs: stats(await fs.lstat(`${where}/${filename}`)) }); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+        }
+        return entries;
+      })();
+      call(pages, cb, entries => {
+        const id = nextHandle++, handle = Buffer.alloc(4); handle.writeUInt32BE(id);
+        handles.set(id, { directory: entries, close: async () => {} });
+        return [handle];
+      });
     },
     readlink(file, cb) { call(fs.readlink(file), cb, target => [target]); },
     realpath(file, cb) { call(fs.realpath(file), cb, resolved => [resolved]); },

@@ -31,7 +31,7 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
     const port = reservation.address().port;
     await new Promise(resolve => reservation.close(resolve));
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^COD4X_/i.test(key)));
-    Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root });
+    Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_DESKTOP_CLIENT_TOKEN: 'd'.repeat(64) /* desktop app scenario (security audit A5-1) */ });
     const url = `http://127.0.0.1:${port}`;
     async function startBackend() {
     child = spawn(process.execPath, [fileURLToPath(new URL('../installer-server.mjs', import.meta.url))], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -259,7 +259,7 @@ test('authenticated runtime/instance APIs persist isolated definitions across ba
       assert.ok(!unrelated.headers.get('access-control-allow-methods').split(',').map(value => value.trim()).includes('PUT'), 'Do not broaden PUT to unrelated endpoints');
     }
     const edited = configBefore.json.configuration.entries.map(entry => entry.name === 'sv_hostname' ? { ...entry, value: 'Edited through schema' } : entry);
-    const anonymousConfigWrite = await fetch(`${url}/api/instances/public-01/config`, { method: 'PUT', headers: { Origin: 'null', 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedSha256: configBefore.json.configuration.sha256, entries: edited }) });
+    const anonymousConfigWrite = await fetch(`${url}/api/instances/public-01/config`, { method: 'PUT', headers: { Origin: 'null', 'X-COD4X-Desktop': 'd'.repeat(64), 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedSha256: configBefore.json.configuration.sha256, entries: edited }) });
     assert.equal(anonymousConfigWrite.status, 401);
     assert.equal((await request('/api/instances/public-01/config')).json.configuration.sha256, configBefore.json.configuration.sha256);
     const configPreview = await request('/api/instances/public-01/config/preview', { expectedSha256: configBefore.json.configuration.sha256, entries: edited });

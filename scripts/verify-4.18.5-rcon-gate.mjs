@@ -18,7 +18,8 @@ try {
   await fixture.setRcon("rcon-gate", secret);
   const first = await manager.launch("rcon-gate");
   const core = children.get(first.pid);
-  check("Vault password reaches the core only as short-lived +set argument", core.args.includes(secret) && rconService.status("rcon-gate").provisioning === "PROVISIONED");
+  // 4.18.26 (security audit A2-1): through a private launch file read with +exec, never as an argument.
+  check("Vault password reaches the core only through the short-lived launch file", !core.args.includes(secret) && core.execedSettings?.rcon_password === secret && rconService.status("rcon-gate").provisioning === "PROVISIONED");
 
   const live = await manager.status("rcon-gate");
   check("Live output: qconsole.log is readable", live.consoleLog.status === "available" && live.consoleLog.text.includes("Server: mp_backlot"));
