@@ -86,15 +86,15 @@ test('core change: refused for a wrong file, rolled back on a failed verify, app
 test('a failed rollback blocks launch with RECOVERY_REQUIRED until a manual restore', async t => {
   const { manager, store, instance, restorePoints } = await fixture(t);
   const current = await manager.configEngine.read(instance);
-  const realReplace = store.replaceRecord.bind(store);
-  store.replaceRecord = async () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); };
+  const realRead = restorePoints.read.bind(restorePoints);
+  restorePoints.read = async () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); };
   const entries = current.entries.map(entry => entry.name === 'sv_hostname' ? { ...entry, value: 'Changed' } : entry);
   const realApply = manager.configEngine.apply.bind(manager.configEngine);
   manager.configEngine.apply = async (...args) => { await realApply(...args); throw Object.assign(new Error('CONFIG_VERIFY_FAILED'), { code: 'CONFIG_VERIFY_FAILED' }); };
   const error = await manager.changeConfiguration('alpha', { expectedSha256: current.sha256, entries }).catch(caught => caught);
   assert.equal(error.recoveryRequired, true);
   await assert.rejects(manager.launch('alpha'), { code: 'RECOVERY_REQUIRED' });
-  store.replaceRecord = realReplace;
+  restorePoints.read = realRead;
   const restored = await manager.restoreRestorePoint('alpha', error.restorePointId, {}, { canCode: false });
   assert.deepEqual(restored.restored.sort(), ['config', 'record']);
   assert.equal(await restorePoints.recovery('local:alpha'), null);
