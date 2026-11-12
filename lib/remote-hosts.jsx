@@ -11,7 +11,7 @@ import { InstanceB3Admin } from './instance-b3-admin.jsx';
 //  - a host key is trusted only after the operator ticked "I compared this fingerprint" for that exact value
 //  - a changed host key is a stop message without a trust button
 //  - server error text is never shown, only a fixed message and the code
-const CODE = /^(?:REMOTE|VAULT|CREDENTIAL|INSTANCE)_[A-Z0-9_]+$/;
+const CODE = /^(?:REMOTE|VAULT|CREDENTIAL|INSTANCE|RECOVERY)_[A-Z0-9_]+$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const text = (de, german, english) => (de ? german : english);
 const openSsh = base64 => `SHA256:${String(base64 || '').replace(/=+$/, '')}`;
@@ -46,6 +46,9 @@ const MESSAGES = {
   REMOTE_DOCKER_IMAGE_MISMATCH: ['Der Container läuft nicht mit dem Image, das CONTROL gestartet hat. Er wurde nicht übernommen.', 'The container does not run the image CONTROL started. It was not adopted.'],
   REMOTE_DOCKER_INSPECT_FAILED: ['Docker hat keine verwertbare Antwort gegeben. Es wurde nichts verändert.', 'Docker gave no usable answer. Nothing was changed.'],
   REMOTE_DOCKER_PATH_UNSUPPORTED: ['Ein Pfad mit Komma oder Anführungszeichen kann nicht in einen Container eingebunden werden.', 'A path with a comma or a double quote cannot be mounted into a container.'],
+  // Block 21
+  RECOVERY_REQUIRED: ['Ein Core-Update ist gescheitert und konnte nicht zurückgerollt werden. Bitte „Core zurücksetzen“ ausführen; bis dahin startet der Server nicht.', 'A core update failed and could not be rolled back. Run “Reset core”; until then the server does not start.'],
+  REMOTE_BACKUP_INVALID: ['Die Sicherung oder der aufbewahrte Core (.previous) passt nicht zu einer geprüften Sicherung. Es wurde nichts verändert.', 'The backup or the kept core (.previous) does not match a verified backup. Nothing was changed.'],
   REMOTE_DEPLOYMENT_CHANGE_FAILED: ['Die Betriebsart konnte nicht umgestellt werden. Die Instanz ist unverändert.', 'The deployment could not be changed. The instance is unchanged.'],
 };
 
@@ -143,6 +146,8 @@ export function RemoteInstanceRow({ de, entry, busy, onAction }) {
       <button type="button" disabled={busy} onClick={() => onAction('config', instance)}>Config</button>
       <button type="button" disabled={busy} onClick={() => onAction('backup', instance)}>Backup</button>
       <button type="button" disabled={busy} onClick={() => onAction('backups', instance)}>{text(de, 'Backups', 'Restore list')}</button>
+      <button type="button" disabled={busy || !stopped} onClick={() => onAction('core-rollback', instance)}>{text(de, 'Core zurücksetzen', 'Reset core')}</button>
+      {runtime?.recoveryBlocked && <button type="button" disabled={busy} onClick={() => onAction('recover', instance)}>{text(de, 'Zustand klären (Recover)', 'Recover')}</button>}
       <button type="button" disabled={busy || !stopped} onClick={() => onAction(docker ? 'deployment-native' : 'deployment-docker', instance)}>{docker ? text(de, 'Auf nativ umstellen', 'Switch to native') : text(de, 'Auf Docker umstellen', 'Switch to Docker')}</button>
     </div>
     {docker && <p role="note">{text(de, 'Container: Von Docker veröffentlichte Ports umgehen ufw. Ist der Server öffentlich, schützt ufw diesen Port nicht; nutze die Firewall des Anbieters oder Regeln in der Kette DOCKER-USER. Der Container lauscht nur über IPv4.', 'Container: ports published by Docker bypass ufw. If the server is public, ufw does not protect this port; use the firewall of the provider or rules in the DOCKER-USER chain. The container listens on IPv4 only.')}</p>}
@@ -257,7 +262,12 @@ export function RemoteHostsPanel({ de, request }) {
       await call(`${base}/deployment`, 'POST', { deployment: action.slice('deployment-'.length) });
       setMessage(text(de, 'Betriebsart umgestellt. Der Server ist gestoppt und startet beim nächsten Start in der neuen Betriebsart.', 'Deployment changed. The server is stopped and uses the new deployment at the next start.'));
       setInstances((await call('/api/remote-instances')).instances || []);
-    } else if (['start', 'stop', 'restart'].includes(action)) {
+    } else if (action === 'core-rollback') {
+      if (!window.confirm(text(de, 'Den aufbewahrten vorherigen Core wieder einsetzen? Der Server muss gestoppt sein.', 'Put the kept previous core back? The server must be stopped.'))) return;
+      const { core } = await call(`${base}/core/rollback`, 'POST', {});
+      setMessage(text(de, `Core zurückgesetzt auf Version ${core.version}.`, `Core reset to version ${core.version}.`));
+      setInstances((await call('/api/remote-instances')).instances || []);
+    } else if (['start', 'stop', 'restart', 'recover'].includes(action)) {
       await call(`${base}/${action}`, 'POST', {});
       setInstances((await call('/api/remote-instances')).instances || []);
     } else if (action === 'logs') setOutput({ kind: 'logs', instance, data: (await call(`${base}/logs`)).logs });
@@ -306,7 +316,7 @@ export function RemoteHostsPanel({ de, request }) {
     <ul>{instances.map(entry => <li key={entry.instance.id} style={{ listStyle: 'none' }}><ul><RemoteInstanceRow de={de} entry={entry} busy={busy} onAction={instanceAction} /></ul><RemoteInstanceTools de={de} entry={entry} request={request} /></li>)}</ul>
     {output?.kind === 'logs' && <div><h5>Logs {output.instance.id}</h5><pre>{output.data.stdout}</pre><pre>{output.data.stderr}</pre><pre>{output.data.console}</pre></div>}
     {output?.kind === 'health' && <div><h5>Health {output.instance.id}</h5><pre>{JSON.stringify(output.data, null, 2)}</pre></div>}
-    {output?.kind === 'backups' && <div><h5>Backups {output.instance.id}</h5><ul>{output.data.map(backup => <li key={backup.backupId}><code>{backup.backupId}</code> {backup.invalid ? text(de, '(ungültig)', '(invalid)') : backup.createdAt} <button type="button" disabled={busy || backup.invalid} onClick={() => restore(output.instance, backup.backupId)}>{text(de, 'Wiederherstellen', 'Restore')}</button></li>)}</ul></div>}
+    {output?.kind === 'backups' && <div><h5>Backups {output.instance.id}</h5><ul>{output.data.map(backup => <li key={backup.backupId}><code>{backup.backupId}</code> {backup.invalid ? text(de, '(ungültig)', '(invalid)') : backup.createdAt} {backup.action ? <span>[{backup.action}]</span> : null} <button type="button" disabled={busy || backup.invalid} onClick={() => restore(output.instance, backup.backupId)}>{text(de, 'Wiederherstellen', 'Restore')}</button></li>)}</ul></div>}
     {configEdit && <div><h5>server.cfg {configEdit.instance.id}</h5>
       <textarea rows={14} cols={72} spellCheck={false} value={configEdit.text} onChange={event => setConfigEdit({ ...configEdit, text: event.target.value })} disabled={busy} />
       <div><button type="button" disabled={busy} onClick={saveConfig}>{text(de, 'Speichern (Server muss gestoppt sein)', 'Save (server must be stopped)')}</button></div></div>}

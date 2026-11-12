@@ -6,6 +6,7 @@ import { RemoteHostsPanel } from "./lib/remote-hosts.jsx";
 import { InstanceRconConsole } from "./lib/instance-rcon-console.jsx";
 import { InstanceMasterStatus } from "./lib/instance-master-status.jsx";
 import { InstancePluginManager } from "./lib/instance-plugin-manager.jsx";
+import { RestorePointsPanel, InstanceCoreChange } from "./lib/restore-points-panel.jsx";
 import { B3DependencyPanel } from "./lib/b3-dependency-panel.jsx";
 import { InstanceB3Runtime } from "./lib/instance-b3-runtime.jsx";
 import { InstanceB3Database } from "./lib/instance-b3-database.jsx";
@@ -1270,6 +1271,7 @@ dry_run=${dryRun ? "true" : "false"}`;
       <pre style={{background:C.code,border:`1px solid ${C.border}`,borderRadius:8,padding:14,minHeight:110,color:"#9fc5e8",fontSize:11,fontFamily:"monospace",whiteSpace:"pre-wrap"}}>
         {log.length ? log.join("\n") : (lang==="de"?"Noch kein Installationslauf.":"No installation run yet.")}
       </pre>
+      <RestorePointsPanel de={lang==="de"} basePath="/api/runtime" request={(route, options)=>apiFetch(apiUrl(route),options)} />
     </div>
   </div>;
 }
@@ -1366,6 +1368,8 @@ function ServerInstancesPanel({lang,executablePath,baseGamePath,platform,cod4x})
       <InstanceB3Runtime instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceB3Database instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <InstanceB3Admin instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
+      <RestorePointsPanel de={de} basePath={`/api/instances/${encodeURIComponent(instance.id)}`} allowB3Database request={(route, options)=>apiFetch(apiUrl(route),options)} />
+      <InstanceCoreChange instance={instance} de={de} request={(route, options)=>apiFetch(apiUrl(route),options)} />
       <div style={{display:"flex",gap:7,flexWrap:"wrap",marginTop:8}}>
         <button style={buttonStyle} disabled={busy||active||instance.platform!==hostPlatform} onClick={()=>request(`/api/instances/${instance.id}/start`,"POST")}>Start</button>
         <button style={buttonStyle} disabled={busy||!active} onClick={()=>request(`/api/instances/${instance.id}/stop`,"POST")}>Stop</button>
