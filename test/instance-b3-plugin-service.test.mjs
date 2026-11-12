@@ -192,3 +192,46 @@ test('failed registry commit removes the created files and allows a retry', asyn
   store.setB3Plugins = original;
   assert.equal((await service.createCustom('public-01', { name: 'myplug', from: 'template' })).name, 'myplug');
 });
+
+// Block 21: B3 plugin writes through the restore-point guard of the instance manager.
+async function guardedSetup(t) {
+  const context = await setup(t);
+  const { RestorePointStore } = await import('../lib/restore-points.mjs');
+  const { ServerInstanceManager } = await import('../lib/server-instance-manager.mjs');
+  const restorePoints = new RestorePointStore({ root: path.join(context.root, 'points') });
+  const runtime = { busy: false, state: { status: 'STOPPED' }, async loadRuntimeState() {}, async reconcileRuntimeState() {}, async persistRuntimeState() {} };
+  const manager = new ServerInstanceManager({ store: context.store, runtimeFactory: () => runtime, restorePoints });
+  context.service.guard = (id, action, options) => manager.guardFor(id, action, options);
+  return { ...context, manager, restorePoints };
+}
+
+test('Block 21: a saveCode whose verify fails restores the old code and record', async t => {
+  const { service, b3, store, restorePoints } = await guardedSetup(t);
+  await service.createCustom('public-01', { name: 'myplug', from: 'template' });
+  const file = path.join(b3, 'extplugins', 'myplug.py');
+  const before = await fs.readFile(file, 'utf8');
+  const recordBefore = store.get('public-01').b3Plugins;
+  service.verifyChange = async () => { throw Object.assign(new Error('B3_PLUGIN_INTEGRITY_FAILED'), { code: 'B3_PLUGIN_INTEGRITY_FAILED' }); };
+  await assert.rejects(service.saveCode('public-01', 'myplug', { code: `${before}\n# edit\n`, expectedSha256: sha(before) }), { code: 'B3_PLUGIN_INTEGRITY_FAILED', rolledBack: true });
+  assert.equal(await fs.readFile(file, 'utf8'), before);
+  assert.deepEqual(store.get('public-01').b3Plugins, recordBefore);
+  assert.equal((await restorePoints.list('local:public-01')).length, 2);
+});
+
+test('Block 21: a rolled back createCustom leaves no active code file and no record', async t => {
+  const { service, b3, store } = await guardedSetup(t);
+  service.verifyChange = async () => { throw Object.assign(new Error('B3_PLUGIN_INTEGRITY_FAILED'), { code: 'B3_PLUGIN_INTEGRITY_FAILED' }); };
+  await assert.rejects(service.createCustom('public-01', { name: 'myplug', from: 'template' }), { rolledBack: true });
+  const active = (await fs.readdir(path.join(b3, 'extplugins'))).filter(name => !name.startsWith('.'));
+  assert.deepEqual(active, []);
+  assert.deepEqual(store.get('public-01').b3Plugins, []);
+});
+
+test('Block 21: verifyChange only fails on integrity, missing file or unsafe config of the changed plugin', async t => {
+  const { service } = await guardedSetup(t);
+  const created = await service.createCustom('public-01', { name: 'myplug', from: 'template' });
+  assert.match(created.restorePointId, /Z-[0-9a-f]{8}$/);
+  await service.setEnabled('public-01', 'myplug', true);
+  await service.verifyChange('public-01', 'myplug');
+  await service.verifyChange('public-01', 'other');
+});

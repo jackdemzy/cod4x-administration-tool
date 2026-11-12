@@ -709,6 +709,8 @@ Rollback
 
 Bestehende Backup-/Integrity-Mechanismen sollen weiterverwendet werden.
 
+> Status 4.18.27 (Block 21): a restore point per instance (local, remote and the standard server) before every config change, CoD4x plugin change, B3 plugin change, B3 migration, server update and core change; a failed check rolls the change back from the point, a failed rollback marks the instance `RECOVERY_REQUIRED` and nothing starts until a restore. Manual points and restores; the B3 database only with the confirmation text, code parts only with `server.code`. Local core change and remote core rollback are new. Gate: `scripts/verify-4.18.27-recovery-gate.mjs`. Open: the native checks in `docs/WSL-NATIVE-CHECKLIST.md` (real core, real MySQL, Windows plugin DLLs).
+
 ---
 
 ## Block 22 – End-to-End-Test

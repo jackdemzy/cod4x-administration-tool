@@ -28,7 +28,8 @@ async function start(t) {
   const manager = {
     coreImportRoot: '/data/remote-core-import',
     instances: { get: id => (id === 'srv-1' ? { id } : fail('REMOTE_INSTANCE_NOT_FOUND')) },
-    updateCore: async (id, input) => { calls.push(['updateCore', id, input.corePath]); return { id }; },
+    updateCore: async (id, input) => { calls.push(['updateCore', id, input.corePath]); return { id, restorePointId: '20261112T000000Z-0000abcd' }; },
+    rollbackCore: async id => { calls.push(['rollbackCore', id]); if (id === 'srv-2') fail('RECOVERY_REQUIRED'); return { core: { version: '21.5' }, backupId: '20261112T000000Z-0000abcd' }; },
     install: async input => { calls.push(['install', input]); return { id: input.id, deployment: input.deployment ?? 'native' }; },
     setDeployment: async (id, input) => { calls.push(['setDeployment', id, input]); if (id !== 'srv-1') fail('REMOTE_INSTANCE_NOT_FOUND'); if (input.deployment === 'native') fail('REMOTE_INSTANCE_RUNNING'); return { instance: { id, deployment: input.deployment }, previous: 'native' }; },
     status: async id => ({ instance: { id, deployment: 'docker' }, runtime }),
@@ -144,4 +145,17 @@ test('every Docker code the library can throw has a German and an English messag
     assert.ok(entry, `${code} has no message`);
     assert.notEqual(entry[1], entry[2], code);
   }
+});
+
+test('Block 21: core rollback needs update.execute and an empty body; the update answer names its restore point', async t => {
+  const { call, calls } = await start(t);
+  const updated = await call('admin', '/api/remote-instances/srv-1/update', { corePath: 'cod4x18_dedrun', coreVersion: '21.5', expectedCoreSha256: 'a'.repeat(64) });
+  assert.deepEqual([updated.json.instance, updated.json.restorePointId], [{ id: 'srv-1' }, '20261112T000000Z-0000abcd']);
+  assert.equal((await call('operator', '/api/remote-instances/srv-1/core/rollback', {})).status, 403);
+  assert.equal((await call('admin', '/api/remote-instances/srv-1/core/rollback', { force: true })).json.code, 'REMOTE_ARGUMENT_INVALID');
+  const rolled = await call('admin', '/api/remote-instances/srv-1/core/rollback', {});
+  assert.deepEqual([rolled.status, rolled.json.core.version], [200, '21.5']);
+  const blocked = await call('admin', '/api/remote-instances/srv-2/core/rollback', {});
+  assert.deepEqual([blocked.status, blocked.json.code], [409, 'RECOVERY_REQUIRED']);
+  assert.deepEqual(calls.filter(entry => entry[0] === 'rollbackCore').map(entry => entry[1]), ['srv-1', 'srv-2']);
 });

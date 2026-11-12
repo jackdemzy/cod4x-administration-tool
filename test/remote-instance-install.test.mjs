@@ -7,6 +7,7 @@ import path from 'node:path';
 import { RemoteHostStore } from '../lib/remote-host-store.mjs';
 import { RemoteInstanceStore } from '../lib/remote-instance-store.mjs';
 import { RemoteInstanceManager } from '../lib/remote-instance-manager.mjs';
+import { RestorePointStore } from '../lib/restore-points.mjs';
 import { validateManagedConfigText } from '../lib/instance-config-validator.mjs';
 import { createLoopbackServer, loopbackAvailable } from './support/loopback-transport.mjs';
 
@@ -17,7 +18,7 @@ const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const CORE_BYTES = crypto.randomBytes(40_000);
 const NEW_CORE_BYTES = crypto.randomBytes(41_000);
 
-async function fixture(t, { state = null } = {}) {
+async function fixture(t, { state = null, backups = false } = {}) {
   const loopback = await createLoopbackServer();
   const local = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-remote-install-local-'));
   t.after(async () => { await loopback.cleanup(); await fs.rm(local, { recursive: true, force: true }); });
@@ -48,12 +49,14 @@ async function fixture(t, { state = null } = {}) {
       return { session, uid: process.getuid(), gid: process.getgid() };
     },
   };
-  const manager = new RemoteInstanceManager({ instances, hosts, state, coreImportRoot: local, uploadChunkBytes: 4096, audit: (level, event, details) => audits.push({ level, event, ...details }) });
+  const restorePoints = backups ? new RestorePointStore({ root: path.join(local, 'points') }) : null;
+  const manager = new RemoteInstanceManager({ instances, hosts, state, coreImportRoot: local, uploadChunkBytes: 4096, audit: (level, event, details) => audits.push({ level, event, ...details }),
+    ...(backups ? { backupRoot: path.join(local, 'backups'), restorePoints } : {}) });
   const request = overrides => ({
     id: 'public-01', name: 'Public 01', hostId: 'lab-1', port: 28960, remoteRoot: loopback.path('servers'), basePath: loopback.path('game'),
     corePath, coreVersion: '21.5', expectedCoreSha256: sha(CORE_BYTES), ...overrides,
   });
-  return { loopback, local, corePath, instances, hosts, manager, request, connects, closes, audits, control };
+  return { loopback, local, corePath, instances, hosts, manager, request, connects, closes, audits, control, restorePoints };
 }
 
 const mode = async file => (await fs.stat(file)).mode & 0o777;
@@ -294,4 +297,72 @@ test('without an import directory no core file is read at all', { skip }, async 
   await rejects(manager.install(request()), 'REMOTE_CORE_OUTSIDE_IMPORT');
   assert.deepEqual(connects, []);
   assert.equal(manager.coreImportRoot, null);
+});
+
+// ---- Block 21: core rollback and recovery -------------------------------------------------------------------
+async function updated(t) {
+  const context = await fixture(t, { state: { read: async () => null }, backups: true });
+  await context.manager.install(context.request());
+  const next = path.join(context.local, 'new', 'cod4x18_dedrun'); await fs.mkdir(path.dirname(next)); await fs.writeFile(next, NEW_CORE_BYTES);
+  return { ...context, next, home: context.instances.get('public-01').home };
+}
+
+test('rollbackCore restores the previous core and version', { skip }, async t => {
+  const { manager, instances, next, home } = await updated(t);
+  const result = await manager.updateCore('public-01', { corePath: next, coreVersion: '21.4', expectedCoreSha256: sha(NEW_CORE_BYTES) });
+  assert.match(result.restorePointId, /Z-[0-9a-f]{8}$/);
+  assert.equal((await manager.listBackups('public-01'))[0].action, 'core.update');
+  const rolled = await manager.rollbackCore('public-01');
+  assert.deepEqual([rolled.core.version, rolled.core.sha256], ['21.5', sha(CORE_BYTES)]);
+  assert.deepEqual(await fs.readFile(`${home}/core/cod4x18_dedrun`), CORE_BYTES);
+  assert.deepEqual(await fs.readFile(`${home}/core/cod4x18_dedrun.previous`), NEW_CORE_BYTES);
+  assert.equal(instances.get('public-01').core.sha256, sha(CORE_BYTES));
+  assert.deepEqual((await fs.readdir(`${home}/core`)).sort(), ['cod4x18_dedrun', 'cod4x18_dedrun.previous']);
+});
+
+test('rollbackCore refuses a .previous whose hash differs, and a missing .previous', { skip }, async t => {
+  const { manager, instances, next, home } = await updated(t);
+  await rejects(manager.rollbackCore('public-01'), 'REMOTE_BACKUP_INVALID');
+  await manager.updateCore('public-01', { corePath: next, coreVersion: '21.4', expectedCoreSha256: sha(NEW_CORE_BYTES) });
+  await fs.writeFile(`${home}/core/cod4x18_dedrun.previous`, 'tampered core');
+  await rejects(manager.rollbackCore('public-01'), 'REMOTE_BACKUP_INVALID');
+  assert.deepEqual(await fs.readFile(`${home}/core/cod4x18_dedrun`), NEW_CORE_BYTES);
+  assert.equal(instances.get('public-01').core.version, '21.4');
+});
+
+test('failed in-place rollback marks RECOVERY_REQUIRED, start is refused, rollbackCore recovers', { skip }, async t => {
+  const { manager, instances, next, home, loopback, restorePoints } = await updated(t);
+  const sftp = await loopback.session.sftp();
+  const rename = sftp.rename.bind(sftp);
+  let renames = 0;
+  sftp.rename = (from, to, cb) => (++renames >= 2 && renames <= 3 ? cb(Object.assign(new Error('Failure'), { code: 4 })) : rename(from, to, cb));
+  const error = await manager.updateCore('public-01', { corePath: next, coreVersion: '21.4', expectedCoreSha256: sha(NEW_CORE_BYTES) }).catch(caught => caught);
+  assert.equal(error.code, 'REMOTE_UPDATE_FAILED');
+  assert.equal(error.recoveryRequired, true);
+  sftp.rename = rename;
+  assert.ok(await restorePoints.recovery('remote:public-01'));
+  await rejects(manager.start('public-01'), 'RECOVERY_REQUIRED');
+  await rejects(manager.restart('public-01'), 'RECOVERY_REQUIRED');
+  await assert.rejects(fs.access(`${home}/core/cod4x18_dedrun`));
+  const rolled = await manager.rollbackCore('public-01');
+  assert.equal(rolled.core.sha256, sha(CORE_BYTES));
+  assert.deepEqual(await fs.readFile(`${home}/core/cod4x18_dedrun`), CORE_BYTES);
+  assert.equal(await restorePoints.recovery('remote:public-01'), null);
+  assert.equal(instances.get('public-01').core.version, '21.5');
+});
+
+test('old backup manifests without action still list and restore', { skip }, async t => {
+  const { manager, local } = await updated(t);
+  const { backupId } = await manager.createBackup('public-01');
+  const file = path.join(local, 'backups', 'public-01', backupId, 'manifest.json');
+  const manifest = JSON.parse(await fs.readFile(file, 'utf8'));
+  delete manifest.action; delete manifest.core.previousSha256;
+  await fs.writeFile(file, JSON.stringify(manifest));
+  const [entry] = await manager.listBackups('public-01');
+  assert.deepEqual([entry.backupId, entry.invalid, entry.action], [backupId, false, null]);
+  const restored = await manager.restoreBackup('public-01', backupId);
+  assert.equal(restored.backupId, backupId);
+  manifest.action = 'evil';
+  await fs.writeFile(file, JSON.stringify(manifest));
+  assert.equal((await manager.listBackups('public-01')).find(item => item.backupId === backupId).invalid, true);
 });

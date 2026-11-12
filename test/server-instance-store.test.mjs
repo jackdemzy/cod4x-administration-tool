@@ -147,3 +147,31 @@ test('registry write failure leaves a recoverable directory and no phantom insta
   await assert.rejects(fs.stat(path.join(options.root, input.id)), { code: 'ENOENT' });
   assert.equal((await fs.readdir(path.join(options.root, '.recovery'))).length, 1);
 });
+
+test('Block 21: replaceRecord restores a record of the same home and refuses another home or port', async t => {
+  const { store, input } = await fixture(t);
+  const created = await store.create(input);
+  await store.create({ ...input, id: 'public-02', port: 28961 });
+  const saved = store.get('public-01');
+  await store.setPlugins('public-01', [{ name: 'demo', platform: 'windows', sha256: 'a'.repeat(64), bytes: 200, enabled: false, approvedAt: new Date().toISOString(), source: 'installed', config: {} }]);
+  const restored = await store.replaceRecord('public-01', saved);
+  assert.deepEqual(restored.plugins, saved.plugins);
+  assert.equal(restored.b3PluginsRevision > saved.b3PluginsRevision, true);
+  await assert.rejects(store.replaceRecord('public-01', { ...saved, homePath: path.join(path.dirname(created.homePath), 'other') }), { code: 'INSTANCE_RECORD_INVALID' });
+  await assert.rejects(store.replaceRecord('public-01', { ...saved, id: 'public-02' }), { code: 'INSTANCE_RECORD_INVALID' });
+  await assert.rejects(store.replaceRecord('public-01', { ...saved, port: 28961 }), { code: 'INSTANCE_PORT_CONFLICT' });
+});
+
+test('Block 21: setCore accepts only the platform core file and keeps the record otherwise', async t => {
+  const { root, store, input } = await fixture(t);
+  await store.create(input);
+  const other = path.join(root, 'core2', 'cod4x18_dedrun.exe');
+  await fs.mkdir(path.dirname(other));
+  await fs.writeFile(other, 'second core');
+  const updated = await store.setCore('public-01', { executablePath: other, version: '21.4' });
+  assert.equal(updated.serverCore.executablePath, other);
+  assert.equal(updated.serverCore.version, '21.4');
+  await assert.rejects(store.setCore('public-01', { executablePath: path.join(root, 'core2', 'evil.exe'), version: '21.5' }), { code: 'INSTANCE_CORE_INVALID' });
+  await assert.rejects(store.setCore('public-01', { executablePath: path.join(root, 'missing', 'cod4x18_dedrun.exe'), version: '21.5' }), { code: 'ENOENT' });
+  assert.equal(store.get('public-01').serverCore.executablePath, other);
+});

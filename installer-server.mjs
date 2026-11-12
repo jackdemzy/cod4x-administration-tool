@@ -53,6 +53,9 @@ import { InstanceB3DatabaseService } from "./lib/instance-b3-database-service.mj
 import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
 import { InstanceB3PluginService } from "./lib/instance-b3-plugin-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
+import { RestorePointStore } from "./lib/restore-points.mjs";
+import { installArtifacts, restoreFilesPoint, snapshotFiles, assertSafeChildPath as assertInsideRoot, DEFAULT_RUNTIME_SUBJECT } from "./lib/archive-install.mjs";
+import { guardedChange } from "./lib/restore-guard.mjs";
 import { MonitorStore, monitorRange } from "./lib/monitor-store.mjs";
 import { MonitorCollector } from "./lib/monitor-collector.mjs";
 import { MonitorHost } from "./lib/monitor-host.mjs";
@@ -70,8 +73,6 @@ import { isB3PluginCodePath, isB3PluginTextPath, localOnlyGuard, publicBlockers 
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
-const tar = require("tar");
-const AdmZip = require("adm-zip");
 
 const app = express();
 
@@ -81,6 +82,8 @@ const app = express();
 // service normally starts with a different working directory than the GUI.
 const DATA_ROOT = path.resolve(process.env.COD4X_DATA_ROOT || ".");
 function dataPath(...parts) { return path.resolve(DATA_ROOT, ...parts); }
+// Block 21: restore points of local instances, remote instances and the standard server.
+const restorePoints = new RestorePointStore({ root: dataPath("data", "restore-points") });
 
 // ─── 4.11.3 Authentication & Access Control ──────────────────────────────────
 const AUTH_USER_FILE = path.resolve(process.env.COD4X_AUTH_USER_FILE || dataPath("config", "auth-user.json"));
@@ -337,12 +340,13 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "installation", permission: "install.execute", routes: ["POST /api/installer"] },
   { area: "updates", permission: "update.execute", routes: ["POST /api/fpschallenge/anticheat/download/:version"] },
   { area: "server", permission: "server.manage", routes: ["POST /api/server/start", "POST /api/runtime/start", "POST /api/runtime/stop", "POST /api/runtime/restart", "POST /api/rcon/execute", "POST /api/instances/:id/rcon/connect", "POST /api/instances/:id/rcon/command", "POST /api/admin/test"] },
+  { area: "restore-points", permission: "config.manage", routes: ["GET /api/instances/:id/restore-points", "POST /api/instances/:id/restore-points", "GET /api/instances/:id/restore-points/:pointId/integrity", "POST /api/instances/:id/restore-points/:pointId/restore", "GET /api/runtime/restore-points", "POST /api/runtime/restore-points", "GET /api/runtime/restore-points/:pointId/integrity"] },
   { area: "configuration", permission: "config.manage", routes: ["GET /api/policy", "POST /api/policy/validate", "POST /api/policy/save", "GET /api/config/profiles", "POST /api/config/profiles/save", "POST /api/config/profiles/activate", "POST /api/config/profiles/delete"] },
   { area: "secrets", permission: "secrets.manage", routes: [] },
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
-  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
+  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances/:id/core", "POST /api/runtime/restore-points/:pointId/restore", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   ...REMOTE_LINUX_BINDINGS,
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
@@ -866,55 +870,18 @@ async function verifyArtifact(file, entry) {
   }
 }
 
-async function extractArchive(file, destination) {
-  const lower = file.toLowerCase();
-  if (lower.endsWith(".zip")) {
-    const zip = new AdmZip(file);
-    for (const entry of zip.getEntries()) {
-      const out = assertSafeChildPath(destination, entry.entryName);
-      if (entry.isDirectory) await fs.mkdir(out, { recursive: true });
-      else {
-        await fs.mkdir(path.dirname(out), { recursive: true });
-        await fs.writeFile(out, entry.getData());
-      }
-    }
-    return;
-  }
-
-  if (lower.endsWith(".tar") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
-    await tar.x({
-      file,
-      cwd: destination,
-      strict: true,
-      filter: p => {
-        assertSafeChildPath(destination, p);
-        return true;
-      }
-    });
-    return;
-  }
-
-  // Single binary/file.
-  await fs.copyFile(file, assertSafeChildPath(destination, path.basename(file)));
-}
-
-async function installArtifact(entry, target, log) {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "cod4x-control-"));
-  try {
-    const format = String(entry.format || "zip").toLowerCase();
-    const extension = format === "tar.gz" || format === "tgz" ? ".tar.gz" : format === "tar" ? ".tar" : format === "bin" ? ".bin" : ".zip";
-    const artifact = path.join(tmp, `artifact${extension}`);
-    log.push("Downloading configured artifact…");
-    await downloadTo(allowedArtifact(entry), artifact);
-    log.push("Download complete; verifying SHA-256…");
-    await verifyArtifact(artifact, entry);
-    log.push("SHA-256 OK");
-    await fs.mkdir(target, { recursive: true });
-    await extractArchive(artifact, target);
-    log.push(`Installed into ${target}`);
-  } finally {
-    await fs.rm(tmp, { recursive: true, force: true });
-  }
+// Block 21: downloads and checks one artifact into a private directory; installArtifacts then writes
+// all of them into the target through a restore point (lib/archive-install.mjs).
+async function downloadArtifact(entry, directory, index, log) {
+  const format = String(entry.format || "zip").toLowerCase();
+  const extension = format === "tar.gz" || format === "tgz" ? ".tar.gz" : format === "tar" ? ".tar" : format === "bin" ? ".bin" : ".zip";
+  const artifact = path.join(directory, `artifact-${index}${extension}`);
+  log.push("Downloading configured artifact…");
+  await downloadTo(allowedArtifact(entry), artifact);
+  log.push("Download complete; verifying SHA-256…");
+  await verifyArtifact(artifact, entry);
+  log.push("SHA-256 OK");
+  return artifact;
 }
 
 app.get("/api/auth/status", (_req, res) => {
@@ -1917,20 +1884,12 @@ app.post("/api/installer", requirePermission("install.execute"), async (req, res
       return res.json({ ok: true, dryRun: true, log });
     }
 
-    await fs.mkdir(profile.target, { recursive: true });
-
-    const cod4xEntry = DOWNLOADS.cod4x[profile.cod4x];
-    await installArtifact(cod4xEntry, profile.target, log);
-
-    if (profile.fps !== "custom") {
-      const fpsEntry = DOWNLOADS.fps[profile.fps];
-      await installArtifact(fpsEntry, profile.target, log);
-    }
-
+    const entries = [DOWNLOADS.cod4x[profile.cod4x]];
+    if (profile.fps !== "custom") entries.push(DOWNLOADS.fps[profile.fps]);
     if (profile.mod && profile.mod !== "vanilla") {
       const modEntry = DOWNLOADS.mods[profile.mod];
       if (!modEntry) throw new Error(`No allowlisted artifact for mod: ${profile.mod}`);
-      await installArtifact(modEntry, profile.target, log);
+      entries.push(modEntry);
     }
 
     const manifest = {
@@ -1941,14 +1900,24 @@ app.post("/api/installer", requirePermission("install.execute"), async (req, res
       antiCheat: profile.anticheat || "none",
       antiCheatMode: profile.acMode || "balanced",
     };
-    await fs.writeFile(
-      assertSafeChildPath(profile.target, "cod4x-control-manifest.json"),
-      JSON.stringify(manifest, null, 2),
-      "utf8"
-    );
+    // All artifacts are downloaded and checked before the first write; the install itself runs through
+    // a restore point of the files it overwrites and is rolled back when a written file does not verify.
+    const downloads = await fs.mkdtemp(path.join(os.tmpdir(), "cod4x-control-"));
+    let installed;
+    try {
+      const artifacts = [];
+      for (const [index, entry] of entries.entries()) artifacts.push(await downloadArtifact(entry, downloads, index, log));
+      installed = await withRuntimeConfiguration(() => installArtifacts({
+        artifacts, target: profile.target, store: restorePoints, actor: req.auth?.username || null, audit,
+        extraFiles: { "cod4x-control-manifest.json": Buffer.from(JSON.stringify(manifest, null, 2), "utf8") },
+      }));
+    } finally {
+      await fs.rm(downloads, { recursive: true, force: true });
+    }
+    log.push(`Installed into ${profile.target}`);
     log.push("Manifest written.");
-    audit("info", "installer.prepare.completed", { dryRun: false, cod4x: profile.cod4x, fps: profile.fps, target: profile.target });
-    res.json({ ok: true, dryRun: false, log, manifest });
+    audit("info", "installer.prepare.completed", { dryRun: false, cod4x: profile.cod4x, fps: profile.fps, target: profile.target, restorePointId: installed.restorePointId });
+    res.json({ ok: true, dryRun: false, log, manifest, restorePointId: installed.restorePointId });
   } catch (err) {
     log.push(`ERROR: ${err.message}`);
     audit("error", "installer.prepare.failed", { error: err.message, target: profile?.target });
@@ -1959,10 +1928,22 @@ app.post("/api/installer", requirePermission("install.execute"), async (req, res
 // ─── 4.17.2 Runtime Discovery / Existing-Core Adoption ─────────────────────
 app.get("/api/runtime/search",requirePermission("diagnostics.read"),async(_req,res)=>{const correlationId=crypto.randomUUID();try{const candidates=await searchRuntimeCores();audit("info","runtime.core.search",{correlationId,count:candidates.length});res.json({ok:true,correlationId,candidates});}catch(err){audit("warn","runtime.core.search.failed",{correlationId,error:err.message});res.status(500).json({ok:false,correlationId,error:err.message});}});
 app.get("/api/runtime/preflight",requirePermission("diagnostics.read"),async(req,res)=>{try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform}),core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);res.json({ok:core.verified&&baseGame.valid,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
-app.post("/api/runtime/config",requirePermission("server.code"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),executablePath=normalizeRuntimeExecutablePath(req.body?.executablePath||defaultRuntime.state.executablePath||"",platform);if(!policyState.security.allowedCod4xVersions.includes(cod4x))throw new Error(`Unsupported CoD4x version: ${cod4x}`);if(!(await pathExists(executablePath)))throw new Error(`${serverCoreDefinition(platform).executable} wurde am ausgewählten Server-Core-Pfad nicht gefunden.`);const baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.body?.baseGamePath,defaultRuntime.state));if(!baseGame.valid){const err=new Error(baseGame.reasons.map(item=>item.message).join("; "));err.code="BASEGAME_INVALID";throw err;}defaultRuntime.state.baseGamePath=baseGame.baseGamePath;defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=null;defaultRuntime.state.runtimeRoot=null;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();runtimeEvent("runtime.configuration.saved",{correlationId,target:requested,platform,cod4x,executablePath,executable:defaultRuntime.state.executable});await persistRuntimeState();res.json({ok:true,correlationId,runtime:defaultRuntime.state});});}catch(err){audit("warn","runtime.configuration.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
+// Puts the runtime record of a restore point back (only the configuration fields; process fields such
+// as status and pid stay as they are).
+const RUNTIME_RECORD_FIELDS=["target","platform","resolvedTarget","runtimeRoot","executablePath","executable","cod4x","baseGamePath","updatedAt"];
+// required=false: the change never reached the disk (its own write failed), so the file still holds the
+// old record and a failing write here leaves nothing to recover.
+async function restoreDefaultRuntimeRecord(record,{required=true}={}){if(!record||typeof record!=="object")throw Object.assign(new Error("RESTORE_POINT_INVALID"),{code:"RESTORE_POINT_INVALID"});for(const field of RUNTIME_RECORD_FIELDS)defaultRuntime.state[field]=record[field]??null;try{await persistRuntimeState();}catch(error){if(required)throw error;}}
+app.post("/api/runtime/config",requirePermission("server.code"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),executablePath=normalizeRuntimeExecutablePath(req.body?.executablePath||defaultRuntime.state.executablePath||"",platform);if(!policyState.security.allowedCod4xVersions.includes(cod4x))throw new Error(`Unsupported CoD4x version: ${cod4x}`);if(!(await pathExists(executablePath)))throw new Error(`${serverCoreDefinition(platform).executable} wurde am ausgewählten Server-Core-Pfad nicht gefunden.`);const baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.body?.baseGamePath,defaultRuntime.state));if(!baseGame.valid){const err=new Error(baseGame.reasons.map(item=>item.message).join("; "));err.code="BASEGAME_INVALID";throw err;}// Block 21: the core change of the standard server runs through a restore point of its runtime record.
+let persisted=false;const{restorePointId}=await guardedChange({store:restorePoints,subject:DEFAULT_RUNTIME_SUBJECT,action:"core.change",actor:req.auth?.username||null,audit,
+capture:async()=>({data:{record:structuredClone(defaultRuntime.state)},parts:["record"]}),
+change:async()=>{defaultRuntime.state.baseGamePath=baseGame.baseGamePath;defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=null;defaultRuntime.state.runtimeRoot=null;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();await persistRuntimeState();persisted=true;},
+verify:async()=>{if(!(await pathExists(defaultRuntime.state.executablePath))||!policyState.security.allowedCod4xVersions.includes(defaultRuntime.state.cod4x)){const err=new Error("Server-Core-Änderung konnte nicht bestätigt werden.");err.code="RUNTIME_CORE_VERIFY_FAILED";throw err;}},
+rollback:async point=>{await restoreDefaultRuntimeRecord(point.manifest.data.record,{required:persisted});}});
+runtimeEvent("runtime.configuration.saved",{correlationId,target:requested,platform,cod4x,executablePath,executable:defaultRuntime.state.executable,restorePointId});res.json({ok:true,correlationId,runtime:defaultRuntime.state,restorePointId});});}catch(err){audit("warn","runtime.configuration.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
 app.get("/api/runtime/status",requirePermission("diagnostics.read"),async(_req,res)=>{try{await reconcileRuntimeState();res.json({ok:true,runtime:defaultRuntime.state,hostPlatform:process.platform,supportedServerPlatforms:Object.keys(SERVER_CORE_DEFINITIONS),nativeExecutable:defaultRuntime.state.executable,candidateRoots:runtimeCandidateRoots()});}catch(err){res.status(500).json({ok:false,error:err.message});}});
 app.post("/api/runtime/adopt",requirePermission("server.code"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:req.body?.executablePath||defaultRuntime.state.executablePath||"",platform}),result=await adoptExistingRuntimeExecutable({executablePath,cod4x,fpsPromod:req.body?.fpsPromod||"custom",platform});defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=resolved.target;defaultRuntime.state.runtimeRoot=resolved.root;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();await persistRuntimeState();const core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);audit("info","runtime.core.adopted",{correlationId,target:resolved.target,executablePath,cod4x,sha256:result.manifest.executableSha256,verification:"operator-adopted"});res.status(201).json({ok:true,correlationId,requested,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,core,runtime:defaultRuntime.state});});}catch(err){audit("warn","runtime.core.adoption.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
-app.post("/api/runtime/start",requirePermission("server.manage"),requireCodeWhen(runtimeBringsCode),async(req,res)=>{const correlationId=crypto.randomUUID();try{const runtime=await startRuntime({relative:req.body?.path||defaultRuntime.state.target||"./server",executablePath:req.body?.executablePath||defaultRuntime.state.executablePath||"",baseGamePath:req.body?.baseGamePath||"",expectedCod4x:String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),args:req.body?.args||[],platform:req.body?.platform||defaultRuntime.state.platform||"windows"});audit("info","runtime.started",{correlationId,pid:runtime.pid,target:runtime.target,executablePath:runtime.executablePath,cod4x:runtime.cod4x});res.status(201).json({ok:true,correlationId,runtime});}catch(err){audit("warn","runtime.start.blocked",{correlationId,error:err.message,code:err.code||"RUNTIME_START_FAILED",runtimeTarget:err.runtimeTarget||null});res.status(400).json({ok:false,error:err.message,correlationId,runtime:defaultRuntime.state});}});
+app.post("/api/runtime/start",requirePermission("server.manage"),requireCodeWhen(runtimeBringsCode),refuseDefaultRuntimeRecovery,async(req,res)=>{const correlationId=crypto.randomUUID();try{const runtime=await startRuntime({relative:req.body?.path||defaultRuntime.state.target||"./server",executablePath:req.body?.executablePath||defaultRuntime.state.executablePath||"",baseGamePath:req.body?.baseGamePath||"",expectedCod4x:String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),args:req.body?.args||[],platform:req.body?.platform||defaultRuntime.state.platform||"windows"});audit("info","runtime.started",{correlationId,pid:runtime.pid,target:runtime.target,executablePath:runtime.executablePath,cod4x:runtime.cod4x});res.status(201).json({ok:true,correlationId,runtime});}catch(err){audit("warn","runtime.start.blocked",{correlationId,error:err.message,code:err.code||"RUNTIME_START_FAILED",runtimeTarget:err.runtimeTarget||null});res.status(400).json({ok:false,error:err.message,correlationId,runtime:defaultRuntime.state});}});
 
 app.post("/api/runtime/stop", requirePermission("server.manage"), async (_req, res) => {
   const correlationId = crypto.randomUUID();
@@ -1976,7 +1957,7 @@ app.post("/api/runtime/stop", requirePermission("server.manage"), async (_req, r
   }
 });
 
-app.post("/api/runtime/restart", requirePermission("server.manage"), requireCodeWhen(runtimeBringsCode), async (req, res) => {
+app.post("/api/runtime/restart", requirePermission("server.manage"), requireCodeWhen(runtimeBringsCode), refuseDefaultRuntimeRecovery, async (req, res) => {
   const correlationId = crypto.randomUUID();
   try {
     const runtime = await restartRuntime({
@@ -1997,7 +1978,7 @@ app.post("/api/runtime/restart", requirePermission("server.manage"), requireCode
 
 // Compatibility endpoint: the legacy server-start route now uses the 4.18.0
 // runtime manager so there is only one authoritative process-control path.
-app.post("/api/server/start", requirePermission("server.manage"), requireCodeWhen(runtimeBringsCode), async (req, res) => {
+app.post("/api/server/start", requirePermission("server.manage"), requireCodeWhen(runtimeBringsCode), refuseDefaultRuntimeRecovery, async (req, res) => {
   const correlationId = crypto.randomUUID();
   try {
     const runtime = await startRuntime({
@@ -2458,12 +2439,17 @@ async function b3ServerStatus(id) {
 // Block 15: B3 in-game administration on B3's own database (masked unless config.manage).
 const b3AdminService = new InstanceB3AdminService({ store: instanceStore, rcon: { findOnline: id => rconService.findOnline(id), kick: (id, target, actor) => rconService.kick(id, target, actor) }, database: { read: id => b3DatabaseService.read(id), query: (...args) => b3DatabaseService.query(...args), withStartGuard: (id, action) => b3DatabaseService.withStartGuard(id, action) },
   environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit("info", entry.event, entry) });
-const b3DatabaseService = new InstanceB3DatabaseService({ store: instanceStore, credentials: credentialService, environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, entry) });
+// Block 21: the migration point, the recovery mark and the recovery check go through the instance manager.
+const b3DatabasePoints = { assertNoRecovery: id => instanceManager.assertNoRecovery(id), capture: (...args) => instanceManager.databasePoints().capture(...args), markRecovery: (...args) => instanceManager.databasePoints().markRecovery(...args) };
+const b3DatabaseService = new InstanceB3DatabaseService({ store: instanceStore, credentials: credentialService, environment: b3EnvironmentForRuntime, b3IsRunning: id => b3Service.isRunning(id), onEvent: entry => audit(/failed/.test(entry.event) || entry.code ? "warn" : "info", entry.event, entry), points: b3DatabasePoints });
 // Block 16b: B3 plugins per instance; the B3 start re-verifies them and records the revision.
-const b3PluginService = new InstanceB3PluginService({ store: instanceStore, environment: b3EnvironmentForRuntime });
-const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, plugins: b3PluginService, onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
+const b3PluginService = new InstanceB3PluginService({ store: instanceStore, environment: b3EnvironmentForRuntime, exclusive: (id, action) => instanceManager.exclusive(id, action), guard: (id, action, options) => instanceManager.guardFor(id, action, options) });
+const b3Service = new InstanceB3Service({ store: instanceStore, environment: b3EnvironmentForRuntime, serverStatus: b3ServerStatus, database: b3DatabaseService, credentials: credentialService, plugins: b3PluginService, recoveryCheck: id => instanceManager.assertNoRecovery(id), onEvent: entry => audit(/crashed|lost|failed/.test(entry.event) ? "warn" : "info", entry.event, entry) });
 instanceManager = new ServerInstanceManager({
   store: instanceStore,
+  restorePoints,
+  b3Database: b3DatabaseService,
+  audit,
   credentialService,
   rconService,
   masterService,
@@ -2497,7 +2483,7 @@ const remoteHostService = new RemoteHostService({ store: remoteHostStore, creden
 // service as locally, with a client that runs the exchange on the server and the rmt_ vault entries.
 const remoteSessionPool = new RemoteSessionPool({ connect: hostId => remoteHostService.connect(hostId) });
 let remoteRconService = null;
-const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInstanceStore, hosts: remoteHostService, audit, state: new RemoteStateStore({ root: dataPath("remote") }), backupRoot: dataPath("remote-backups"), coreImportRoot: REMOTE_CORE_IMPORT_ROOT,
+const remoteInstanceManager = new RemoteInstanceManager({ instances: remoteInstanceStore, hosts: remoteHostService, audit, state: new RemoteStateStore({ root: dataPath("remote") }), backupRoot: dataPath("remote-backups"), coreImportRoot: REMOTE_CORE_IMPORT_ROOT, restorePoints,
   credentials: remoteCredentials, onProvisioned: (id, runId, { rcon }) => remoteRconService?.recordProvisioning(id, runId, rcon ? "PROVISIONED" : "NOT_CONFIGURED") });
 const remoteRuntimeFor = id => ({ state: {}, async reconcileRuntimeState() { this.state = (await remoteInstanceManager.status(id)).runtime; } });
 remoteRconService = new InstanceRconService({ resolveInstance: id => remoteShadowStore.get(id), runtimeFor: remoteRuntimeFor, credentialService: remoteCredentials, audit: (level, event, details) => audit(level, event, { ...details, remote: true }),
@@ -2531,10 +2517,10 @@ function instanceRoute(action, status = 200) {
       res.status(status).json({ ok: true, correlationId, ...result });
     } catch (error) {
       audit("warn", "instance.operation.blocked", { correlationId, method: req.method, route: req.route.path, actor: req.auth.username, instanceId: req.params.id || null, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message });
-      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY", "B3_PLUGIN_CONFLICT"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : 400;
+      const code = error.code === "INSTANCE_NOT_FOUND" ? 404 : error.code === "INSTANCE_REGISTRY_UNAVAILABLE" ? 503 : ["CONFIG_CONFLICT", "CONFIG_OPERATION_BUSY", "INSTANCE_OPERATION_BUSY", "INSTANCE_RUNTIME_BUSY", "MASTER_VERIFY_BUSY", "INSTANCE_NETWORK_CONFIG_PINNED", "PLUGIN_EXISTS", "B3_RUNTIME_BUSY", "B3_ALREADY_RUNNING", "B3_RUNNING", "B3_DATABASE_BUSY", "B3_INTEGRATION_BUSY", "B3_PLUGIN_CONFLICT", "RECOVERY_REQUIRED"].includes(error.code) ? 409 : ["INSTANCE_NETWORK_CONFIRMATION_REQUIRED", "EBC_CONFIRMATION_REQUIRED", "RESTORE_POINT_CONFIRMATION_REQUIRED"].includes(error.code) ? 428 : error.code === "RESTORE_POINT_CODE_PERMISSION" ? 403 : error.code === "RESTORE_POINT_NOT_FOUND" ? 404 : 400;
       // Start blockers carry only their code and plugin name, so the UI can say which plugin blocks.
       const blockers = publicBlockers(error);
-      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message, ...(Number.isInteger(error.line) ? { line: error.line } : {}), ...(blockers ? { blockers } : {}) });
+      res.status(code).json({ ok: false, correlationId, code: error.code || "INSTANCE_OPERATION_FAILED", error: error.message, ...(Number.isInteger(error.line) ? { line: error.line } : {}), ...(blockers ? { blockers } : {}), ...(typeof error.safetyPointId === "string" ? { safetyPointId: error.safetyPointId, rolledBack: error.rolledBack === true, recoveryRequired: error.recoveryRequired === true } : {}) });
     }
   };
 }
@@ -2627,6 +2613,96 @@ const pluginBody = (req, key) => {
   return req.body[key];
 };
 app.get("/api/instances/:id/plugins", requirePermission("diagnostics.read"), instanceRoute(async req => ({ plugins: await instanceManager.plugins(req.params.id) })));
+// ─── Block 21 (4.18.27): restore points ─────────────────────────────────────────
+// Bodies have exact key sets; answers never carry file contents.
+function restoreBody(req, allowed) {
+  const body = req.body ?? {};
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => !allowed.includes(key))) throw Object.assign(new Error("RESTORE_POINT_REQUEST_INVALID"), { code: "RESTORE_POINT_REQUEST_INVALID" });
+  if (body.includeB3Database !== undefined && typeof body.includeB3Database !== "boolean") throw Object.assign(new Error("RESTORE_POINT_REQUEST_INVALID"), { code: "RESTORE_POINT_REQUEST_INVALID" });
+  if (body.confirmation !== undefined && typeof body.confirmation !== "string") throw Object.assign(new Error("RESTORE_POINT_REQUEST_INVALID"), { code: "RESTORE_POINT_REQUEST_INVALID" });
+  return body;
+}
+app.get("/api/instances/:id/restore-points", requirePermission("config.manage"), instanceRoute(async req => instanceManager.listRestorePoints(req.params.id)));
+app.post("/api/instances/:id/restore-points", requirePermission("config.manage"), instanceRoute(async req => {
+  const { includeB3Database = false } = restoreBody(req, ["includeB3Database"]);
+  return instanceManager.createRestorePoint(req.params.id, { actor: req.auth.username, includeB3Database });
+}, 201));
+app.get("/api/instances/:id/restore-points/:pointId/integrity", requirePermission("config.manage"), instanceRoute(async req => instanceManager.restorePointIntegrity(req.params.id, req.params.pointId)));
+app.post("/api/instances/:id/restore-points/:pointId/restore", requirePermission("config.manage"), instanceRoute(async req => {
+  const { includeB3Database = false, confirmation } = restoreBody(req, ["includeB3Database", "confirmation"]);
+  // Unknown errors (e.g. a file system error with a path in its text) leave as RESTORE_POINT_FAILED.
+  return instanceManager.restoreRestorePoint(req.params.id, req.params.pointId, { includeB3Database, confirmation }, { actor: req.auth.username, canCode: hasPermission(req.auth.role, "server.code") }).catch(error => {
+    if (typeof error.code === "string" && /^(RESTORE_POINT_|RECOVERY_|INSTANCE_|B3_)/.test(error.code)) throw error;
+    throw Object.assign(new Error("RESTORE_POINT_FAILED"), { code: "RESTORE_POINT_FAILED", safetyPointId: error.safetyPointId, rolledBack: error.rolledBack, recoveryRequired: error.recoveryRequired });
+  });
+}));
+app.post("/api/instances/:id/core", requirePermission("server.code"), instanceRoute(async req => instanceManager.changeCore(req.params.id, req.body, req.auth.username)));
+
+// Standard server: points of the runtime record (core and paths) and of installer runs (files).
+async function refuseDefaultRuntimeRecovery(_req, res, next) {
+  try { if (!(await restorePoints.recovery(DEFAULT_RUNTIME_SUBJECT))) return next(); }
+  catch { /* unreadable state counts as marked */ }
+  res.status(409).json({ ok: false, code: "RECOVERY_REQUIRED", error: "RECOVERY_REQUIRED" });
+}
+function runtimePointRoute(action, status = 200) {
+  return async (req, res) => {
+    const correlationId = crypto.randomUUID();
+    try { res.status(status).json({ ok: true, correlationId, ...(await action(req)) }); }
+    catch (error) {
+      const code = typeof error.code === "string" && /^(RESTORE_POINT_|RECOVERY_|RUNTIME_)/.test(error.code) ? error.code : "RESTORE_POINT_FAILED";
+      audit("warn", "restore_point.runtime.blocked", { correlationId, route: req.route.path, actor: req.auth.username, code });
+      res.status(code === "RESTORE_POINT_NOT_FOUND" ? 404 : code === "RUNTIME_CONFIGURATION_BUSY" ? 409 : 400).json({ ok: false, correlationId, code, error: code });
+    }
+  };
+}
+app.get("/api/runtime/restore-points", requirePermission("config.manage"), runtimePointRoute(async () => ({ points: await restorePoints.list(DEFAULT_RUNTIME_SUBJECT), recovery: await restorePoints.recovery(DEFAULT_RUNTIME_SUBJECT) })));
+app.post("/api/runtime/restore-points", requirePermission("config.manage"), runtimePointRoute(async req => {
+  restoreBody(req, []);
+  const { pointId, manifest } = await restorePoints.capture(DEFAULT_RUNTIME_SUBJECT, { action: "manual", actor: req.auth.username, manual: true, data: { record: structuredClone(defaultRuntime.state) }, parts: ["record"] });
+  audit("info", "restore_point.created", { subject: DEFAULT_RUNTIME_SUBJECT, action: "manual", restorePointId: pointId });
+  return { pointId, parts: manifest.parts, totalBytes: manifest.totalBytes };
+}, 201));
+app.get("/api/runtime/restore-points/:pointId/integrity", requirePermission("config.manage"), runtimePointRoute(async req => {
+  try { const { manifest } = await restorePoints.read(DEFAULT_RUNTIME_SUBJECT, req.params.pointId); return { pointId: req.params.pointId, valid: true, files: manifest.files.length, totalBytes: manifest.totalBytes }; }
+  catch (error) { if (error.code === "RESTORE_POINT_INVALID") return { pointId: req.params.pointId, valid: false }; throw error; }
+}));
+// A runtime record from a point passes the same rules as /api/runtime/config before it is used.
+function checkedRuntimeRecord(record) {
+  const invalid = () => { throw Object.assign(new Error("RESTORE_POINT_INVALID"), { code: "RESTORE_POINT_INVALID" }); };
+  if (!record || typeof record !== "object") invalid();
+  try {
+    const platform = normalizeServerPlatform(record.platform || "windows");
+    if (record.cod4x != null && !policyState.security.allowedCod4xVersions.includes(String(record.cod4x))) invalid();
+    if (record.target != null) normalizeRuntimePath(record.target);
+    if (record.executablePath) normalizeRuntimeExecutablePath(record.executablePath, platform);
+  } catch (error) { if (error.code === "RESTORE_POINT_INVALID") throw error; invalid(); }
+  return record;
+}
+// Restoring puts code back (core path, installed files): server.code. The standard server must be stopped.
+app.post("/api/runtime/restore-points/:pointId/restore", requirePermission("server.code"), runtimePointRoute(async req => {
+  restoreBody(req, []);
+  return withRuntimeConfiguration(async () => {
+    const point = await restorePoints.read(DEFAULT_RUNTIME_SUBJECT, req.params.pointId);
+    const { manifest } = point;
+    const files = manifest.parts.includes("files");
+    let target = null;
+    if (files) {
+      const recorded = manifest.refs?.files?.target;
+      if (typeof recorded !== "string") throw Object.assign(new Error("RESTORE_POINT_INVALID"), { code: "RESTORE_POINT_INVALID" });
+      try { target = assertInsideRoot(INSTALL_ROOT, path.relative(INSTALL_ROOT, recorded)); } catch { throw Object.assign(new Error("RESTORE_POINT_INVALID"), { code: "RESTORE_POINT_INVALID" }); }
+      if (target === path.resolve(INSTALL_ROOT)) throw Object.assign(new Error("RESTORE_POINT_INVALID"), { code: "RESTORE_POINT_INVALID" });
+    }
+    const record = manifest.parts.includes("record") ? checkedRuntimeRecord(manifest.data.record) : null;
+    const safety = await restorePoints.capture(DEFAULT_RUNTIME_SUBJECT, { action: "restore.safety", actor: req.auth.username, ...(files ? await snapshotFiles(target, point) : {}), data: { record: structuredClone(defaultRuntime.state) } });
+    const restored = [];
+    if (files) { await restoreFilesPoint(target, point); restored.push("files"); }
+    if (record) { await restoreDefaultRuntimeRecord(record); restored.push("record"); }
+    await restorePoints.clearRecovery(DEFAULT_RUNTIME_SUBJECT);
+    audit("info", "restore_point.restored", { subject: DEFAULT_RUNTIME_SUBJECT, restorePointId: req.params.pointId, safetyPointId: safety.pointId, parts: restored, actor: req.auth.username });
+    return { pointId: req.params.pointId, safetyPointId: safety.pointId, restored, skipped: [] };
+  });
+}));
+
 app.post("/api/instances/:id/plugins/install", requirePermission("server.code"), pluginRoute("plugin.installed", req => instanceManager.installPlugin(req.params.id, req.body)));
 app.post("/api/instances/:id/plugins/approve", requirePermission("server.code"), pluginRoute("plugin.approved", req => instanceManager.approvePlugin(req.params.id, req.body)));
 app.post("/api/instances/:id/plugins/versions", requirePermission("server.manage"), instanceRoute(async req => ({ plugins: await instanceManager.readPluginVersions(req.params.id, req.auth.username) })));
