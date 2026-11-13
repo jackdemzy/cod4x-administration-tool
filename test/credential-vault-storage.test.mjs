@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CredentialVaultStorage } from '../lib/credential-vault-storage.mjs';
+import { CredentialVaultStorage, VAULT_BACKUP_KEEP } from '../lib/credential-vault-storage.mjs';
 
 const password = 'Disposable storage test passphrase!';
 
@@ -125,3 +125,37 @@ test('Linux rejects permissive vault directories and files', { skip: process.pla
   await fs.chmod(file, 0o600); await fs.chmod(directory, 0o755);
   await assert.rejects(vault.unlock(password), { code: 'VAULT_FILE_INVALID' });
 }));
+
+// Security audit 4.18.26 (A2-5): only the newest VAULT_BACKUP_KEEP backups are kept.
+test('vault backups are pruned to the newest ones', () => fixture(async (root, vault) => {
+  await vault.initialize(Buffer.from('secret-0'), password);
+  await vault.unlock(password);
+  let sha256 = (await vault.snapshot()).sha256;
+  const ids = [];
+  for (let i = 1; i <= VAULT_BACKUP_KEEP + 3; i++) {
+    const applied = await vault.update(Buffer.from(`secret-${i}`), sha256);
+    sha256 = applied.sha256; ids.push(applied.backupId);
+  }
+  const left = (await fs.readdir(path.join(root, 'credential-vault'))).filter(name => name.startsWith('backup-'));
+  assert.equal(left.length, VAULT_BACKUP_KEEP);
+  for (const id of ids.slice(-VAULT_BACKUP_KEEP)) assert.ok(left.includes(`backup-${id}.json`), id);
+}));
+
+// Security audit 4.18.26 (A2-4): an optional idle timeout locks an unused vault.
+test('idle lock: the vault locks itself after the idle time, use restarts the clock', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-vault-'));
+  try {
+    let locks = 0;
+    const vault = new CredentialVaultStorage(root, { idleLockMs: 80, onLock: () => { locks++; } });
+    await vault.initialize(Buffer.from('idle-secret'), password);
+    await vault.unlock(password);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    vault.readUnlocked();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(vault.locked, false, 'use restarted the clock');
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.equal(vault.locked, true);
+    assert.ok(locks >= 1);
+    assert.throws(() => new CredentialVaultStorage(root, { idleLockMs: -1 }), { code: 'VAULT_FILE_INVALID' });
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

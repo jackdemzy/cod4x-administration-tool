@@ -2412,7 +2412,10 @@ const resolveSshSubject = sshSubjectResolver({ hosts: remoteHostStore, dataRoot:
 // Block 18b: the local side of each remote instance (rmt_<id> in the vault, own data directory).
 const remoteShadowStore = createShadowStore({ instances: remoteInstanceStore, dataRoot: DATA_ROOT });
 const resolveRemoteSubject = remoteSubjectResolver(remoteShadowStore);
-const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : isRemoteSubject(id) ? resolveRemoteSubject(id) : instanceStore.get(id)) });
+// Security audit 4.18.26 (A2-4): COD4X_VAULT_IDLE_LOCK_MINUTES (1..1440) locks an unused
+// unlocked vault; unset or 0 keeps the previous behaviour (locked only on request).
+const VAULT_IDLE_LOCK_MINUTES = (value => (Number.isInteger(value) && value >= 1 && value <= 1440 ? value : 0))(Number(process.env.COD4X_VAULT_IDLE_LOCK_MINUTES || 0));
+const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, idleLockMs: VAULT_IDLE_LOCK_MINUTES * 60e3, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : isRemoteSubject(id) ? resolveRemoteSubject(id) : instanceStore.get(id)) });
 const remoteCredentials = prefixedCredentials(credentialService);
 let instanceManager = null;
 // RCON audit events carry instance, actor, normalized command and codes only, never the password.
