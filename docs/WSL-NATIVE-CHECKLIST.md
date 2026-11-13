@@ -243,6 +243,34 @@ Bedeutung eines Fehlschlags: Der CI-Lauf nutzt einen Test-Core. Was nur hier rot
 
 ---
 
+## 3g. Release / Installer unter Windows (Block 23, 4.18.30)
+
+Auf Rafikis Windows-PC (Node 24 LTS), im Quellordner. Das CI hat Setup, Portable und AppImage schon gebaut
+und geprüft (Workflow „Release“); hier geht es um das, was nur ein echter Windows-Desktop zeigt.
+
+```powershell
+.\build.cmd
+node scripts\release-verify.mjs --check dist-installer
+```
+
+| ☐ | Schritt | Erwartet | Ergebnis |
+|---|---|---|---|
+| ☐ | `build.cmd` | `BUILD ERFOLGREICH`, in `dist-installer\` liegen Setup, Portable, `SHA256SUMS`, `release-manifest.json` | |
+| ☐ | `release-verify --check` | `PASS SHA-256 of every file` | |
+| ☐ | Setup interaktiv in einen eigenen Ordner installieren | Desktop- und Startmenü-Verknüpfung vorhanden | |
+| ☐ | Unsigniert | SmartScreen „Der Computer wurde durch Windows geschützt“ → „Weitere Informationen“ → „Trotzdem ausführen“ | |
+| ☐ | Erststart | Fenster öffnet, Ersteinrichtung des Admins, Login, Tresor anlegen | |
+| ☐ | Core Discovery | echten `cod4x18_dedrun.exe` wählen/übernehmen, Preflight „verifiziert“, BaseGame gültig | |
+| ☐ | Server Start | Server anlegen, starten, in der Serverliste sichtbar; Client verbindet | |
+| ☐ | Portable | Portable-EXE aus einem anderen Ordner (z. B. USB) starten; Daten landen im Benutzerprofil, nicht neben der EXE | |
+| ☐ | Deinstallation | Programm, Verknüpfungen und App-Daten (`%APPDATA%\COD4X CONTROL`) sind weg | |
+| ☐ | optional Linux-Desktop | `chmod +x COD4X-CONTROL-*.AppImage`, starten, Erststart; ohne Schlüsselbund ist „Login merken“ bewusst aus | |
+
+Bedeutung eines Fehlschlags: Das CI prüft den Windows-Installer nur still (Installation, Backend-Erststart,
+Deinstallation). Fenster, Verknüpfungen, SmartScreen, echter Core und Portable-Start sind nur hier prüfbar.
+
+---
+
 ## 4. Manuelle Punkte (kein Skript möglich)
 
 | ☐ | Punkt | So prüfen | Ergebnis |

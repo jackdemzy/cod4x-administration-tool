@@ -1,0 +1,140 @@
+name: Release
+
+# Block 23 (4.18.30): builds the release artifacts with scripts/release.mjs (preflight, full test
+# suite, Vite, electron-builder, SHA-256 and artifact verification) and runs the installer gate
+# against them. Windows: NSIS installer + portable exe; Linux: AppImage.
+# A tag v<version> also creates a DRAFT GitHub release with the files; publishing stays manual.
+# Pull requests that touch the packaging run the same build and gate, without a release.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - electron-main.cjs
+      - electron-preload.cjs
+      - installer-server.mjs
+      - lib/**
+      - src/**
+      - scripts/preflight-4.18.30.mjs
+      - build.ps1
+      - scripts/release*.mjs
+      - scripts/verify-4.18.30-installer-gate.mjs
+      - test/installer-*.test.mjs
+      - test/support/e2e-backend.mjs
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Release build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+    env:
+      # electron-builder downloads the Electron it packages; the npm package's binary is not needed.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      # No signing certificate: never pick up a code-signing identity by accident.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      # Same long-name TEMP as ci.yml (instance path checks fail closed on 8.3 short paths).
+      - name: Use long-path TEMP
+        shell: bash
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # The packaged Electron binary needs these libraries even when it runs as Node.
+      - name: Install Linux libraries
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libnss3 libgbm1 libasound2t64 gcc
+
+      - name: Tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$version" || { echo "Tag $GITHUB_REF_NAME does not match package version $version"; exit 1; }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Release pipeline
+        run: npm run release:${{ matrix.platform }}
+
+      - name: Installer gate
+        shell: bash
+        env:
+          COD4X_RELEASE_DIR: ${{ github.workspace }}/dist-installer
+        run: node scripts/verify-4.18.30-installer-gate.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            dist-installer/*.exe
+            dist-installer/*.AppImage
+            dist-installer/SHA256SUMS
+            dist-installer/release-manifest.json
+
+  draft-release:
+    name: Draft GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Check and combine SHA-256 sums
+        working-directory: artifacts
+        run: |
+          (cd release-win && sha256sum -c SHA256SUMS)
+          (cd release-linux && sha256sum -c SHA256SUMS)
+          mkdir ../upload
+          cat release-win/SHA256SUMS release-linux/SHA256SUMS > ../upload/SHA256SUMS
+          cp release-win/release-manifest.json ../upload/release-manifest-win.json
+          cp release-linux/release-manifest.json ../upload/release-manifest-linux.json
+          cp release-win/*.exe release-linux/*.AppImage ../upload/
+          (cd ../upload && sha256sum -c SHA256SUMS)
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # A re-run after the draft exists replaces its files; a published release is never touched.
+        run: |
+          if state="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            test "$state" = "true" || { echo "Release $GITHUB_REF_NAME is already published; not changing it."; exit 1; }
+            gh release upload "$GITHUB_REF_NAME" upload/* --repo "$GITHUB_REPOSITORY" --clobber
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" upload/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "COD4X CONTROL ${GITHUB_REF_NAME#v}" \
+            --notes "Draft built by the Release workflow from $GITHUB_SHA. Verify downloads with sha256sum -c SHA256SUMS. Not code-signed (Windows SmartScreen warns)."

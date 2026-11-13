@@ -812,6 +812,8 @@ Portable Windows
 Linux Package / Deployment
 ```
 
+> Status 4.18.30 (Block 23): `scripts/release.mjs` runs the pipeline above; artifacts are the NSIS installer, the portable Windows exe and a Linux AppImage with `SHA256SUMS` and `release-manifest.json` (`scripts/release-verify.mjs`). The gate `scripts/verify-4.18.30-installer-gate.mjs` installs the build: Linux with first run, core discovery and server start (E2E test core), Windows with silent install, first run and uninstall; the workflow `Release` runs both. Windows core discovery and server start with the real core are manual (`docs/WSL-NATIVE-CHECKLIST.md` 3g).
+
 ---
 
 # Geplante Versionsfolge
