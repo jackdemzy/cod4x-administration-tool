@@ -71,6 +71,7 @@ import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 import { isB3PluginCodePath, isB3PluginTextPath, localOnlyGuard, publicBlockers } from "./lib/b3-plugin-routes.mjs";
 import { isCredentialPath } from "./lib/credential-request.mjs";
+import { rateLimit } from "express-rate-limit";
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -417,6 +418,20 @@ app.use(localOnlyGuard(isCredentialRequest));
 app.use(localOnlyGuard(req => isB3PluginCodePath(req.path)));
 // Block 16b: B3 plugin config and code may be up to 256 KB of text; JSON escaping can grow it.
 const isB3PluginTextRequest = req => isB3PluginTextPath(req.path);
+// Issue #49 (CodeQL js/missing-rate-limiting): every changing request to the admin API is
+// rate-limited (many touch the file system or start processes); reads are not. The login keeps its
+// own brake. COD4X_WRITE_RATE_LIMIT (1..10000 per minute, default 300) sets the limit.
+const WRITE_RATE_LIMIT = (value => (Number.isInteger(value) && value >= 1 && value <= 10000 ? value : 300))(Number(process.env.COD4X_WRITE_RATE_LIMIT || 300));
+app.use("/api", rateLimit({
+  windowMs: 60_000, limit: WRITE_RATE_LIMIT, standardHeaders: "draft-8", legacyHeaders: false,
+  skip: req => ["GET", "HEAD", "OPTIONS"].includes(req.method),
+  handler: (req, res, _next, options) => {
+    // one audit entry per client and window, so a flood does not flood the audit log too
+    if (req.rateLimit?.used === req.rateLimit?.limit + 1) audit("warn", "api.rate_limited", { method: req.method, path: req.path });
+    res.setHeader("Retry-After", String(Math.ceil(options.windowMs / 1000)));
+    res.status(429).json({ ok: false, code: "RATE_LIMITED", error: "Zu viele Anfragen. Bitte kurz warten." });
+  },
+}));
 const jsonBody = express.json({ limit: "64kb" }), b3PluginJsonBody = express.json({ limit: "2mb" });
 app.use((req, res, next) => (isB3PluginTextRequest(req) ? b3PluginJsonBody : jsonBody)(req, res, next));
 // Plugin bodies can hold tokens: a malformed or oversized body gets a fixed

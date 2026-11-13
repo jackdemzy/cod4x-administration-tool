@@ -21,11 +21,11 @@ const freePort = async () => {
 // A5-5 rotation and test entries need user.manage, rotated files fall under retention;
 // A2-3 the audit folder is 0700 and the file 0600 from the start;
 // A5-8 no permission is offered that no route requires.
-test('audit log: rights, retention and file modes on the real backend', { timeout: 90000 }, async t => {
+async function startBackend(t, extraEnv = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-audit-http-'));
   const port = await freePort();
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^COD4X_/i.test(key)));
-  Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_MONITOR: 'off' });
+  Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_MONITOR: 'off', ...extraEnv });
   const child = spawn(process.execPath, [fileURLToPath(new URL('../installer-server.mjs', import.meta.url))], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let diagnostics = '';
   for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { diagnostics = (diagnostics + chunk.toString()).slice(-8000); });
@@ -42,6 +42,11 @@ test('audit log: rights, retention and file modes on the real backend', { timeou
     const response = await fetch(`${url}${route}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(5000) });
     return { status: response.status, json: await response.json().catch(() => null), headers: response.headers };
   };
+  return { root, call };
+}
+
+test('audit log: rights, retention and file modes on the real backend', { timeout: 90000 }, async t => {
+  const { root, call } = await startBackend(t);
   const password = `${crypto.randomBytes(16).toString('hex')}Aa9!`;
   const admin = (await call(null, '/api/auth/init', { username: 'auditAdmin', password })).json.token;
   assert.equal((await call(admin, '/api/users', { username: 'reader', password, role: 'auditor' })).status, 201);
@@ -72,4 +77,19 @@ test('audit log: rights, retention and file modes on the real backend', { timeou
   // A5-8: secrets.manage is gone; no permission without a route.
   const roles = await call(admin, '/api/rbac/roles');
   assert.ok(!roles.json.permissions.some(permission => permission.id === 'secrets.manage'));
+});
+
+// Issue #49 (CodeQL js/missing-rate-limiting): changing requests to the admin API are rate-limited;
+// reads stay free. COD4X_WRITE_RATE_LIMIT sets the requests per minute.
+test('admin API: changing requests above the limit get 429, reads do not', { timeout: 60000 }, async t => {
+  const { call } = await startBackend(t, { COD4X_WRITE_RATE_LIMIT: '5' });
+  const password = `${crypto.randomBytes(16).toString('hex')}Aa9!`;
+  const admin = (await call(null, '/api/auth/init', { username: 'limitAdmin', password })).json.token;
+  const statuses = [];
+  for (let i = 0; i < 6; i++) statuses.push((await call(admin, '/api/audit/test', {})).status);
+  assert.deepEqual(statuses, [200, 200, 200, 200, 429, 429]);
+  const limited = await call(admin, '/api/audit/test', {});
+  assert.equal(limited.json.code, 'RATE_LIMITED');
+  assert.ok(Number(limited.headers.get('retry-after')) > 0);
+  assert.equal((await call(admin, '/api/audit')).status, 200, 'reads are not limited');
 });
