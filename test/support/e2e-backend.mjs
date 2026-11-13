@@ -21,19 +21,21 @@ const freeTcpPort = async () => {
   return port;
 };
 
-export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {} } = {}) {
+// server: { command, args, env } runs another backend build, e.g. the one packaged in a release
+// (Block 23 installer gate: the Electron binary with ELECTRON_RUN_AS_NODE and app.asar's script).
+export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {}, server = null } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   const port = await freeTcpPort();
   const url = `http://127.0.0.1:${port}`;
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^COD4X_/i.test(key)));
-  Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_DESKTOP_CLIENT_TOKEN: crypto.randomBytes(32).toString('hex'), ...extraEnv });
+  Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_DESKTOP_CLIENT_TOKEN: crypto.randomBytes(32).toString('hex'), ...extraEnv, ...(server?.env || {}) });
   const credentials = { username: 'e2eAdmin', password: `${crypto.randomBytes(16).toString('hex')}Aa9!` };
   const vaultPassphrase = `E2E vault ${crypto.randomBytes(12).toString('hex')}!`;
   const state = { child: null, closed: null, diagnostics: '', token: null, corePids: new Set() };
 
   async function start() {
     state.diagnostics = '';
-    state.child = spawn(process.execPath, [SERVER], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    state.child = spawn(server?.command || process.execPath, server?.args || [SERVER], { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     for (const stream of [state.child.stdout, state.child.stderr]) stream.on('data', chunk => { state.diagnostics = (state.diagnostics + chunk.toString()).slice(-8000); });
     state.child.once('error', () => {});
     state.closed = new Promise(resolve => state.child.once('close', resolve));
