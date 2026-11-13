@@ -38,9 +38,12 @@ if (args.includes('--dry-run')) {
   process.exit(0);
 }
 
+// The installer tests belong after the build (installer gate); before it they would test old artifacts.
+const { COD4X_RELEASE_DIR, ...inherited } = process.env;
+const env = { ...inherited, CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY || 'false' };
 for (const [index, [name, command, stepArgs]] of steps.entries()) {
   console.log(`\n=== [${index + 1}/${steps.length}] ${name} ===`);
-  const run = spawnSync(command, stepArgs, { stdio: 'inherit', shell: false, env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY || 'false' } });
+  const run = spawnSync(command, stepArgs, { stdio: 'inherit', shell: false, env });
   if (run.status !== 0) {
     console.error(`\nRelease FAIL at step ${index + 1} (${name}), exit ${run.status ?? run.signal ?? run.error?.message}`);
     process.exit(run.status || 1);

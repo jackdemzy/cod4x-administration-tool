@@ -53,5 +53,5 @@ test('Windows NSIS: silent install, first run, silent uninstall', { skip, timeou
   // Uninstall: the NSIS uninstaller copies itself to TEMP and returns at once, so wait for it.
   const removed = spawnSync(path.join(target, UNINSTALLER), ['/S'], { timeout: 300000 });
   assert.equal(removed.status, 0, `uninstall exit ${removed.status} ${removed.error?.message || ''}`);
-  assert.ok(await waitFor(() => !existsSync(exe) && !existsSync(path.join(target, UNINSTALLER)), 120000), 'program files still present after uninstall');
+  assert.ok(await waitFor(() => !existsSync(target), 120000), `install folder still present after uninstall: ${existsSync(target) ? readdirSync(target).join(', ') : ''}`);
 });

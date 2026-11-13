@@ -43,7 +43,7 @@ test('app.asar policy requires the app files and refuses secrets, tests and buil
   const without = asarPolicy(REQUIRED_ENTRIES.filter(entry => entry !== '/dist/index.html'), '4.18.30', pkgJson('4.18.30'));
   assert.equal(without.ok, false);
   assert.deepEqual(without.missing, ['/dist/index.html']);
-  const bad = ['/config/users.json', '/.env', '/.env.local', '/test/a.test.mjs', '/docs/RELEASE.md', '/node_modules/electron/index.js', '/node_modules/vite/package.json', '/data/x', '/server.key', '/credential-vault/v.json'];
+  const bad = ['/config/users.json', '/.env', '/.env.local', '/test/a.test.mjs', '/docs/RELEASE.md', '/node_modules/electron/index.js', '/node_modules/vite/package.json', '/data/x', '/server.key', '/credential-vault/v.json', '/node_modules/ssh2/test/fixtures/id_rsa', '/node_modules/ssh2/test/fixtures/id_rsa.ppk', '/cert.pfx', '/.npmrc', '/.git/config'];
   assert.deepEqual(asarPolicy([...REQUIRED_ENTRIES, ...bad], '4.18.30', pkgJson('4.18.30')).forbidden, bad);
   assert.equal(asarPolicy([...REQUIRED_ENTRIES, '/config/policy.json', '/node_modules/electron-to-chromium/package.json'], '4.18.30', pkgJson('4.18.30')).ok, true);
   assert.equal(asarPolicy(REQUIRED_ENTRIES, '4.18.30', pkgJson('4.18.29')).versionOk, false);

@@ -91,7 +91,13 @@ export const FORBIDDEN_ENTRIES = [
   /(^|\/)\.env(\.|$)/,
   /^\/config\/(users|auth-user)\.json$/,
   /^\/(data|credential-vault|backups|servers|installations|monitor|logs|test|docs|scripts|src)(\/|$)/,
-  /\.(pem|key)$/i,
+  // Private keys and certificates, with or without the usual extension (ssh2 ships test keys such as
+  // id_rsa and id_rsa.ppk; they must never reach the package). A dependency that really needs such a
+  // file has to be allowed here explicitly, with a reason.
+  /\.(pem|key|ppk|p12|pfx)$/i,
+  /(^|\/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/,
+  /(^|\/)\.npmrc$/,
+  /(^|\/)\.git(\/|$)/,
   /(^|\/)remembered-login\.json$/,
   /^\/node_modules\/(electron|electron-builder|app-builder-lib|vite|@vitejs|esbuild)(\/|$)/,
 ];

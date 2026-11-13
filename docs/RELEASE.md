@@ -54,7 +54,8 @@ Get-FileHash .\COD4X-CONTROL-Setup-4.18.30-x64.exe -Algorithm SHA256
 3. Tag setzen: `git tag v4.18.30 && git push origin v4.18.30`.
 4. Der Workflow „Release“ baut beide Plattformen, führt das Installer-Gate aus und legt einen
    **Entwurf** des GitHub-Releases mit allen Dateien und der gemeinsamen `SHA256SUMS` an.
-   Stimmt der Tag nicht mit der Version überein, bricht er ab.
+   Stimmt der Tag nicht mit der Version überein, bricht er ab. Ein erneuter Lauf ersetzt die Dateien
+   eines vorhandenen Entwurfs; ein schon veröffentlichtes Release ändert er nicht.
 5. Entwurf auf GitHub prüfen und selbst veröffentlichen.
 
 ## Code-Signing

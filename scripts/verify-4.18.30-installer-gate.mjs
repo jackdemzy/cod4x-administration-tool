@@ -17,4 +17,6 @@ process.stderr.write(run.stderr || '');
 const count = name => Number((new RegExp(`^# ${name} (\\d+)$`, 'm').exec(run.stdout || '') || [])[1] ?? NaN);
 if (run.status !== 0 || count('fail') !== 0) { console.error('4.18.30 installer gate FAIL'); process.exit(run.status || 1); }
 if (!(count('pass') > 0) || count('skipped') !== 0) { console.error('4.18.30 installer gate FAIL: the installer test was skipped although COD4X_RELEASE_DIR is set'); process.exit(1); }
-console.log('4.18.30 Installer Installation + First Run + Core Discovery + Server Start gate PASS');
+console.log(process.platform === 'win32'
+  ? '4.18.30 installer gate PASS on Windows: Installation + First Run + Uninstall (Core Discovery and Server Start with a real core are manual, docs/WSL-NATIVE-CHECKLIST.md 3g)'
+  : '4.18.30 Installer Installation + First Run + Core Discovery + Server Start gate PASS');
