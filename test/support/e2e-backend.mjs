@@ -94,6 +94,7 @@ export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {} } = {
   state.token = initialized.json.token;
   const vault = await request('/api/credentials/vault/initialize', { passphrase: vaultPassphrase });
   assert.equal(vault.status, 201, `vault init failed: ${JSON.stringify(vault.json)}`);
+  if (vault.json.vault?.locked !== false) await unlockVault();
   return { root, url, request, assertAlive, restart, diagnostics: () => state.diagnostics, pid: () => state.child.pid };
 }
 
