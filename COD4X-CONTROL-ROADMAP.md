@@ -776,6 +776,8 @@ Plugin fehlt
 
 Keiner dieser Fehler darf CONTROL selbst mitreißen.
 
+> Status 4.18.28 (Block 22): the flow, three servers on consecutive ports and the ten intentional failures run against the real backend over HTTP (`test/e2e-*.test.mjs`, gate `scripts/verify-4.18.28-e2e-gate.mjs`, native test core in CI). With the real core: `scripts/verify-4.18.28-e2e-native.mjs`; real client join and the Windows run are manual steps in `docs/WSL-NATIVE-CHECKLIST.md`.
+
 ---
 
 ## Block 23 – Release / Installer
