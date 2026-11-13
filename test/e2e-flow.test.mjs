@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import dgram from 'node:dgram';
 import path from 'node:path';
 import { buildE2eCore, e2eCoreAvailable } from './support/e2e-core.mjs';
-import { e2eBackend, baseGameFixture, consecutiveUdpPorts } from './support/e2e-backend.mjs';
+import { e2eBackend, baseGameFixture, consecutiveUdpPorts, udpAsk, until, ok } from './support/e2e-backend.mjs';
 
 // Block 22 (E2E): the roadmap flow against the real backend over HTTP:
 // Install -> Detect Core -> BaseGame -> Create Server -> Config -> Start -> Map -> RCON ->
@@ -11,21 +10,7 @@ import { e2eBackend, baseGameFixture, consecutiveUdpPorts } from './support/e2e-
 // CONTROL itself must still answer. The core is the native E2E test core (not cod4x18_dedrun);
 // the run with the real core is scripts/verify-4.18.28-e2e-native.mjs.
 const skip = await e2eCoreAvailable();
-const OOB = Buffer.from([0xff, 0xff, 0xff, 0xff]);
 const RCON_PASSWORD = 'E2eFlowRcon2026';
-
-export async function udpAsk(port, text, timeoutMs = 1000) {
-  const socket = dgram.createSocket('udp4');
-  try {
-    return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'TIMEOUT' })), timeoutMs);
-      socket.once('message', message => { clearTimeout(timer); resolve(message.subarray(4).toString('latin1')); });
-      socket.send(Buffer.concat([OOB, Buffer.from(text, 'latin1')]), port, '127.0.0.1');
-    });
-  } finally { socket.close(); }
-}
-export const until = async (predicate, ms = 5000) => { for (const end = Date.now() + ms; Date.now() < end; await new Promise(resolve => setTimeout(resolve, 100))) if (await predicate().catch(() => false)) return true; return false; };
-const ok = (response, what) => assert.ok(response.status >= 200 && response.status < 300, `${what}: HTTP ${response.status} ${JSON.stringify(response.json)}`);
 
 test('E2E flow: install to restart through the real backend, CONTROL answers after every step', { skip: skip || false, timeout: 120000 }, async t => {
   const backend = await e2eBackend(t, { prefix: 'cod4x-e2e-flow-' });

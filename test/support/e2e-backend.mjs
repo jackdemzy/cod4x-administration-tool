@@ -125,3 +125,42 @@ export async function consecutiveUdpPorts(count) {
   }
   throw new Error('no free consecutive UDP ports');
 }
+
+const OOB = Buffer.from([0xff, 0xff, 0xff, 0xff]);
+// One connectionless packet to 127.0.0.1:<port>, the answer without its OOB prefix.
+export async function udpAsk(port, text, timeoutMs = 1000) {
+  const dgram = await import('node:dgram');
+  const socket = dgram.createSocket('udp4');
+  try {
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'TIMEOUT' })), timeoutMs);
+      socket.once('message', message => { clearTimeout(timer); resolve(message.subarray(4).toString('latin1')); });
+      socket.send(Buffer.concat([OOB, Buffer.from(text, 'latin1')]), port, '127.0.0.1');
+    });
+  } finally { socket.close(); }
+}
+export const until = async (predicate, ms = 5000) => { for (const end = Date.now() + ms; Date.now() < end; await delay(100)) if (await predicate().catch(() => false)) return true; return false; };
+export const answers = async (port, ms = 5000) => until(async () => /infoResponse/.test(await udpAsk(port, 'getinfo e2e', 300)), ms);
+export const silent = async (port, ms = 5000) => until(async () => { try { await udpAsk(port, 'getinfo e2e', 200); return false; } catch { return true; } }, ms);
+export const ok = (response, what) => assert.ok(response.status >= 200 && response.status < 300, `${what}: HTTP ${response.status} ${JSON.stringify(response.json)}`);
+
+// Create an instance over HTTP with its own hostname and RCON password (Create Server + Config).
+export async function createInstance({ request }, { id, port, core, baseGame, hostname, rcon }) {
+  const created = await request('/api/instances', { id, name: id, platform: 'linux', serverCore: { executablePath: core, version: '21.2' }, basePath: baseGame, port });
+  assert.equal(created.status, 201, `create ${id}: ${JSON.stringify(created.json)}`);
+  const current = await request(`/api/instances/${id}/config`);
+  ok(current, `read config ${id}`);
+  const entries = current.json.configuration.entries.filter(entry => entry.name !== 'sv_hostname').concat([{ command: 'set', name: 'sv_hostname', value: hostname }]);
+  ok(await request(`/api/instances/${id}/config`, { entries, expectedSha256: current.json.configuration.sha256 }, 'PUT'), `apply config ${id}`);
+  if (rcon) {
+    const credentials = await request(`/api/instances/${id}/credentials`);
+    ok(await request(`/api/instances/${id}/credentials/rcon`, { expectedSha256: credentials.json.credentials.sha256, value: rcon }), `set rcon ${id}`);
+  }
+  return created.json.instance;
+}
+
+// Install step: the operator adopts the core (no download), which records its SHA-256 manifest
+// so the Verified-Core gate accepts exactly this file.
+export async function adoptCore({ request, root }, { core, baseGame }) {
+  ok(await request('/api/runtime/adopt', { path: path.join(root, 'legacy-home'), executablePath: core, baseGamePath: baseGame, cod4x: '21.2', platform: 'linux' }), 'adopt core');
+}
