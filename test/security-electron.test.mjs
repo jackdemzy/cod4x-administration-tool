@@ -41,3 +41,43 @@ test('A6-1: electron-main wires the policy into every window, the header hook an
   assert.match(main, /desktopHeaderAllowed\(details,/);
   assert.ok(!/ipcMain\.handle\(/.test(main.replace(/function handle\([\s\S]*?\n\}/, '')), 'every IPC handler goes through the sender check');
 });
+
+test('A6-3: only clipboard writes of the app page in the main window are granted', () => {
+  assert.equal(policy.permissionAllowed({ permission: 'clipboard-sanitized-write', webContentsId: 7, url: app }, 7, index), true);
+  for (const permission of ['notifications', 'media', 'geolocation', 'openExternal', 'clipboard-read', 'fullscreen', 'hid', 'serial', 'usb']) assert.equal(policy.permissionAllowed({ permission, webContentsId: 7, url: app }, 7, index), false, permission);
+  assert.equal(policy.permissionAllowed({ permission: 'clipboard-sanitized-write', webContentsId: 8, url: app }, 7, index), false, 'another window');
+  assert.equal(policy.permissionAllowed({ permission: 'clipboard-sanitized-write', webContentsId: 7, url: 'https://evil.example/' }, 7, index), false, 'another page');
+});
+
+test('A6-3, A6-4: electron-main wires the permission handlers and the remembered-login rules', async () => {
+  const main = await fs.readFile(new URL('../electron-main.cjs', import.meta.url), 'utf8');
+  assert.match(main, /setPermissionRequestHandler\(/);
+  assert.match(main, /setPermissionCheckHandler\(/);
+  assert.match(main, /permissionAllowed\(/);
+  assert.match(main, /mode:\s*0o600/);
+  assert.match(main, /rememberedLoginBackendAllowed\(process\.platform/);
+});
+
+test('A6-4: no remembered login with the fixed-key backend on Linux', () => {
+  assert.equal(policy.rememberedLoginBackendAllowed('linux', 'basic_text'), false);
+  assert.equal(policy.rememberedLoginBackendAllowed('linux', 'unknown'), false);
+  assert.equal(policy.rememberedLoginBackendAllowed('linux', undefined), false);
+  assert.equal(policy.rememberedLoginBackendAllowed('linux', 'gnome_libsecret'), true);
+  assert.equal(policy.rememberedLoginBackendAllowed('win32', undefined), true);
+});
+
+test('A6-2: the built desktop page carries a strict CSP', async () => {
+  const { DESKTOP_CSP, withDesktopCsp } = await import('../lib/desktop-csp.mjs');
+  for (const directive of ["default-src 'none'", "script-src 'self'", 'connect-src http://127.0.0.1:8787 https://api.github.com', "object-src 'none'"]) assert.ok(DESKTOP_CSP.includes(directive), directive);
+  assert.ok(!/unsafe-inline|unsafe-eval/.test(DESKTOP_CSP));
+  const html = withDesktopCsp('<!doctype html><html><head><title>x</title></head></html>');
+  assert.ok(html.includes('<head><meta http-equiv="Content-Security-Policy"'));
+  assert.throws(() => withDesktopCsp(html), /CSP_INJECTION_FAILED/);
+  assert.match(await fs.readFile(new URL('../vite.config.js', import.meta.url), 'utf8'), /withDesktopCsp/);
+});
+
+test('A6-5: the advisories document lists every production dependency', async () => {
+  const pkg = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const doc = await fs.readFile(new URL('../docs/SECURITY-ADVISORIES.md', import.meta.url), 'utf8');
+  for (const name of Object.keys(pkg.dependencies)) assert.ok(doc.includes(`\`${name}\``), name);
+});

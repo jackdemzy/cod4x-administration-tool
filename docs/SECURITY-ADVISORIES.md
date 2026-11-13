@@ -28,7 +28,7 @@ electron-builder 26.15.3
 ```
 
 - The application code (`lib/`, `src/`, `installer-server.mjs`, `electron-main.cjs`, `electron-preload.cjs`, `scripts/`) imports none of these packages.
-- The only production dependencies are `adm-zip`, `express`, `react`, `react-dom` and `tar`. `npm ls http-cache-semantics sprintf-js --omit=dev` is empty.
+- The only production dependencies are `adm-zip`, `express`, `react`, `react-dom`, `ssh2` (since 4.18.23, remote Linux over SSH) and `tar`. `npm ls http-cache-semantics sprintf-js --omit=dev` is empty.
 - electron-builder does not package devDependencies into the installer. `build.files` contains only `dist/**`, the Electron entry files, `installer-server.mjs`, `lib/**` and `package.json`.
 
 ## 1. GHSA-ch52-4w7c-c8xp – `http-cache-semantics` ≤ 4.2.0 (high)
@@ -73,3 +73,8 @@ As of 4.18.19, `npm audit` lists 6 entries; all of them inherit this one advisor
 - `npm audit fix` would downgrade `electron-builder` to 24.13.3, which is not an option.
 
 **Decision:** no dependency change for now. The patched version 11.0.1 is a new major version published on 2026-10-27, and `electron-builder` 26.18.0 itself still requires `minimatch` ^10.2.5. Forcing 11.x through `overrides` would change the installer build without closing a reachable path. **Re-assess** when `electron-builder` moves to `minimatch` ≥ 11.0.1 (then update normally and run the preflight) or by 2026-11-19 at the latest.
+
+## Update 2026-11-13: production dependency `ssh2`, minimatch re-check (4.18.29)
+
+- **`ssh2` 1.17.0** is a production dependency since 4.18.23 (remote Linux servers over SSH, roadmap block 18). It ships with the app. `npm audit --omit=dev` reports 0 vulnerabilities on 2026-11-13. It was missing from this document (security audit 4.18.26, finding A6-5).
+- **minimatch (issue #21):** re-checked on 2026-11-13. `electron-builder` `latest` (26.18.0), `v26` (26.18.1) and `next` (27.0.0-alpha.14) all still pull `app-builder-lib` with `minimatch` ^10.2.5. The decision above stands until `electron-builder` moves to `minimatch` ≥ 11.0.1, or until 2026-11-19.
