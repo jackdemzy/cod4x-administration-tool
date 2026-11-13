@@ -149,7 +149,11 @@ export async function udpAsk(port, text, timeoutMs = 1000) {
 }
 export const until = async (predicate, ms = 5000) => { for (const end = Date.now() + ms; Date.now() < end; await delay(100)) if (await predicate().catch(() => false)) return true; return false; };
 export const answers = async (port, ms = 5000) => until(async () => /infoResponse/.test(await udpAsk(port, 'getinfo e2e', 300)), ms);
-export const silent = async (port, ms = 5000) => until(async () => { try { await udpAsk(port, 'getinfo e2e', 200); return false; } catch { return true; } }, ms);
+// Silence must hold: three probes in a row without an answer (about 600 ms), not a single lost packet.
+export const silent = async (port, ms = 5000) => until(async () => {
+  for (let probe = 0; probe < 3; probe++) { try { await udpAsk(port, 'getinfo e2e', 200); return false; } catch {} }
+  return true;
+}, ms);
 export const ok = (response, what) => assert.ok(response.status >= 200 && response.status < 300, `${what}: HTTP ${response.status} ${JSON.stringify(response.json)}`);
 
 // Create an instance over HTTP with its own hostname and RCON password (Create Server + Config).
