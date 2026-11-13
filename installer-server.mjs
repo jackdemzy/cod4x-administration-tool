@@ -70,6 +70,7 @@ import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecov
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 import { isB3PluginCodePath, isB3PluginTextPath, localOnlyGuard, publicBlockers } from "./lib/b3-plugin-routes.mjs";
+import { isCredentialPath } from "./lib/credential-request.mjs";
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -406,7 +407,7 @@ app.use((req, res, next) => {
 });
 // Credential transport is local-only until an authenticated TLS deployment is
 // explicitly implemented. Never cache or reflect secret request bodies.
-const isCredentialRequest = req => req.path.startsWith("/api/credentials/") || /^\/api\/instances\/[^/]+\/credentials(?:\/|$)/.test(req.path) || /^\/api\/remote-hosts\/[^/]+\/credentials(?:\/|$)/.test(req.path);
+const isCredentialRequest = req => isCredentialPath(req.path);
 app.use((req, res, next) => {
   if (!isCredentialRequest(req)) return next();
   res.setHeader("Cache-Control", "no-store");
