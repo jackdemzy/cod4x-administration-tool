@@ -25,7 +25,7 @@ test('runContainerCommand is one fixed line', () => {
   assert.equal(runContainerCommand(base), [
     'docker run --detach --name cod4x-public-01',
     "--label cod4x.control.instance=public-01 --label cod4x.control.run=0b1c2d3e-4f50-4a61-8b72-9c8d0e1f2a3b",
-    '--read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g',
+    '--read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g --cpus 2',
     '--log-driver local --log-opt max-size=10m --log-opt max-file=3',
     '--restart no --network bridge --user 1000:1000 --workdir /cod4/base',
     "--mount 'type=bind,source=/srv/cod4,target=/cod4/base,readonly'",
@@ -63,6 +63,9 @@ test('hostile values are refused with a named code', () => {
   for (const home of ['/srv/a,b', '/srv/a"b']) bad({ home }, 'REMOTE_DOCKER_PATH_UNSUPPORTED');
   for (const home of ['/srv/a\nb', '/srv/../etc', 'srv/x', '/srv//x']) bad({ home }, 'REMOTE_PATH_INVALID');
   bad({ basePath: '/srv/a,b' }, 'REMOTE_DOCKER_PATH_UNSUPPORTED');
+  // Security audit 4.18.26 (A4-7): the daemon mounts as root; system folders are never mounted.
+  for (const home of ['/etc', '/etc/cod4', '/run/user/1000/x', '/var/run/docker', '/proc/1', '/sys/x', '/dev/x', '/boot', '/root/x', '/usr/lib', '/var/lib/docker/volumes', '/bin', '/lib64/x']) bad({ home }, 'REMOTE_DOCKER_PATH_UNSUPPORTED');
+  for (const basePath of ['/etc', '/run']) bad({ basePath }, 'REMOTE_DOCKER_PATH_UNSUPPORTED');
   bad({ args: 'x' }, 'REMOTE_ARGUMENT_INVALID');
   bad({ args: [5] }, 'REMOTE_ARGUMENT_INVALID');
   bad({ args: Array(300).fill('x') }, 'REMOTE_ARGUMENT_INVALID');

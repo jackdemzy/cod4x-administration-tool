@@ -96,3 +96,26 @@ test('closeAll closes every session and later uses connect again', async () => {
   assert.equal(log.connects.length, 3);
   pool.closeAll();
 });
+
+// Security audit 4.18.26 (A4-6): a host's session can be dropped at once (key changed or removed).
+test('drop closes the pooled session of one host; the next use logs in again', async t => {
+  const { log, connect } = fakeHosts();
+  const pool = new RemoteSessionPool({ connect, idleMs: 60_000 });
+  t.after(() => pool.closeAll());
+  await pool.use('lab-1', async () => {});
+  await pool.use('lab-2', async () => {});
+  pool.drop('lab-1');
+  assert.deepEqual(log.closes, ['lab-1#1']);
+  pool.drop('unknown');
+  await pool.use('lab-1', async () => {});
+  assert.deepEqual(log.connects, ['lab-1', 'lab-2', 'lab-1']);
+});
+
+test('the server drops pooled SSH sessions on vault lock and on SSH key changes', async () => {
+  const fs = await import('node:fs/promises');
+  const server = await fs.readFile(new URL('../installer-server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /onLock: \(\) => \{ try \{ remoteSessionPool\.closeAll\(\); \} catch \{\} \}/);
+  assert.match(server, /registerRemoteLinuxRoutes\(\{[^)]*sessionPool: remoteSessionPool/);
+  const routes = await fs.readFile(new URL('../lib/remote-linux-routes.mjs', import.meta.url), 'utf8');
+  assert.equal((routes.match(/sessionPool\?\.drop\(req\.params\.id\)/g) || []).length, 2);
+});

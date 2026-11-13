@@ -366,3 +366,17 @@ test('old backup manifests without action still list and restore', { skip }, asy
   await fs.writeFile(file, JSON.stringify(manifest));
   assert.equal((await manager.listBackups('public-01')).find(item => item.backupId === backupId).invalid, true);
 });
+
+// Security audit 4.18.26 (A4-4): the instance root belongs to the SSH user and nobody else may
+// write in it (a sticky, world-writable folder such as /tmp is accepted).
+test('an instance root that others may write in is refused; a sticky one is accepted', { skip }, async t => {
+  const { manager, request, loopback } = await fixture(t);
+  await fs.chmod(loopback.path('servers'), 0o775);
+  await rejects(manager.install(request()), 'REMOTE_ROOT_UNSAFE');
+  await fs.chmod(loopback.path('servers'), 0o757);
+  await rejects(manager.install(request()), 'REMOTE_ROOT_UNSAFE');
+  await fs.chmod(loopback.path('servers'), 0o1777);
+  const installed = await manager.install(request());
+  assert.ok(installed);
+  await fs.chmod(loopback.path('servers'), 0o755);
+});

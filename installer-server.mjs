@@ -2410,7 +2410,8 @@ const resolveRemoteSubject = remoteSubjectResolver(remoteShadowStore);
 // Security audit 4.18.26 (A2-4): COD4X_VAULT_IDLE_LOCK_MINUTES (1..1440) locks an unused
 // unlocked vault; unset or 0 keeps the previous behaviour (locked only on request).
 const VAULT_IDLE_LOCK_MINUTES = (value => (Number.isInteger(value) && value >= 1 && value <= 1440 ? value : 0))(Number(process.env.COD4X_VAULT_IDLE_LOCK_MINUTES || 0));
-const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, idleLockMs: VAULT_IDLE_LOCK_MINUTES * 60e3, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : isRemoteSubject(id) ? resolveRemoteSubject(id) : instanceStore.get(id)) });
+// A4-6: a locked vault also ends every pooled SSH session (the pool is created further down).
+const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, idleLockMs: VAULT_IDLE_LOCK_MINUTES * 60e3, onLock: () => { try { remoteSessionPool.closeAll(); } catch {} }, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : isRemoteSubject(id) ? resolveRemoteSubject(id) : instanceStore.get(id)) });
 const remoteCredentials = prefixedCredentials(credentialService);
 let instanceManager = null;
 // RCON audit events carry instance, actor, normalized command and codes only, never the password.
@@ -2497,7 +2498,7 @@ const remoteB3AdminService = new InstanceB3AdminService({ store: remoteShadowSto
   rcon: { findOnline: id => remoteRconService.findOnline(id), kick: (id, target, actor) => remoteRconService.kick(id, target, actor) },
   database: { read: id => remoteB3DatabaseService.read(id), query: (...args) => remoteB3DatabaseService.query(...args), withStartGuard: (id, action) => remoteB3DatabaseService.withStartGuard(id, action) },
   environment: { read: async () => ({ ...(await b3EnvironmentForRuntime.read() || {}), b3Path: null }) }, b3IsRunning: async () => false, onEvent: entry => audit("info", entry.event, { ...entry, remote: true }) });
-registerRemoteLinuxRoutes({ app, requirePermission, audit, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService, rcon: remoteRconService, hasPermission,
+registerRemoteLinuxRoutes({ app, requirePermission, audit, sessionPool: remoteSessionPool, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService, rcon: remoteRconService, hasPermission,
   remoteCredentials, b3: { database: remoteB3DatabaseService, admin: remoteB3AdminService } });
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
   const relative = path.relative(await resolveRealFuturePath(instanceRoot), await resolveRealFuturePath(filesystemHomePath));
