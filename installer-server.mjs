@@ -2009,66 +2009,9 @@ app.post("/api/server/start", requirePermission("server.manage"), requireCodeWhe
   }
 });
 
-// ─── 4.11.7 Test Client ─────────────────────────────────────────────────────
-// A small browser-based second client for verifying concurrent authentication
-// sessions against the same local backend. It creates a real auth session and
-// stores only its own bearer token in the browser localStorage.
-app.get("/session-test", (_req, res) => {
-  res.status(200).type("html").send(`<!doctype html>
-<html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>COD4X CONTROL — Session Test Client</title>
-<style>
-:root{color-scheme:dark}body{margin:0;background:#09090f;color:#dde3f0;font:14px "Segoe UI",system-ui,sans-serif}
-main{max-width:620px;margin:8vh auto;padding:24px;background:#10121a;border:1px solid #1f2333;border-radius:8px}
-h1{font-size:18px;margin:0 0 5px;color:#f59e0b;font-family:monospace;letter-spacing:.08em}
-.sub{color:#52596f;font-size:11px;margin-bottom:22px}label{display:block;color:#52596f;font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin:12px 0 5px}
-input{width:100%;box-sizing:border-box;background:#0b0d16;color:#dde3f0;border:1px solid #1f2333;border-radius:5px;padding:10px}
-button{margin-top:14px;background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid #f59e0b66;border-radius:5px;padding:9px 13px;cursor:pointer}
-button:hover{background:rgba(245,158,11,.2)}.status{margin-top:16px;padding:10px;border-radius:5px;background:#0b0d16;border:1px solid #1f2333;white-space:pre-wrap;font-family:monospace;font-size:11px}
-.ok{color:#22c55e}.err{color:#ef4444}.hint{margin-top:18px;color:#52596f;font-size:11px;line-height:1.6}
-</style></head>
-<body><main>
-<h1>COD4X CONTROL</h1><div class="sub">4.11.7 — SESSION TEST CLIENT · SECOND BROWSER SESSION</div>
-<label>Benutzername</label><input id="username" autocomplete="username" placeholder="opp1">
-<label>Passwort</label><input id="password" type="password" autocomplete="current-password">
-<div><button id="login">Als zweiter Client anmelden</button> <button id="logout">Test-Session abmelden</button></div>
-<div id="status" class="status">Keine Browser-Test-Session aktiv.</div>
-<div class="hint">Diese Seite verwendet denselben lokalen COD4X-CONTROL-Backend-Prozess wie die Electron-App. Die Browser-Session ist separat und erscheint nach erfolgreichem Login im Session Management der Haupt-App.</div>
-</main>
-<script>
-const tokenKey="cod4x.session-test.token";
-const statusEl=document.getElementById("status");
-function show(text,cls=""){statusEl.textContent=text;statusEl.className="status "+cls;}
-async function api(path,options={}){
- const headers={...(options.headers||{})}; const token=localStorage.getItem(tokenKey);
- if(token) headers.Authorization="Bearer "+token;
- const r=await fetch(path,{...options,headers}); const d=await r.json().catch(()=>({}));
- if(!r.ok) throw new Error(d.error||("HTTP "+r.status)); return d;
-}
-async function refresh(){
- const token=localStorage.getItem(tokenKey); if(!token){show("Keine Browser-Test-Session aktiv.");return;}
- try{const d=await api("/api/auth/me");show("Browser-Test-Session aktiv\\nBenutzer: "+d.user.username+"\\nRolle: "+d.user.role,"ok");}
- catch(e){localStorage.removeItem(tokenKey);show("Session nicht mehr gültig: "+e.message,"err");}
-}
-document.getElementById("login").onclick=async()=>{
- try{
-  const username=document.getElementById("username").value.trim();
-  const password=document.getElementById("password").value;
-  const d=await api("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
-  localStorage.setItem(tokenKey,d.token); document.getElementById("password").value="";
-  show("Browser-Test-Session aktiv\\nBenutzer: "+d.user.username+"\\nRolle: "+d.user.role+"\\nSession-ID: "+d.sessionId,"ok");
- }catch(e){show(e.message,"err");}
-};
-document.getElementById("logout").onclick=async()=>{
- try{await api("/api/auth/logout",{method:"POST"});}catch{}
- localStorage.removeItem(tokenKey);show("Browser-Test-Session abgemeldet.");
-};
-refresh();
-</script></body></html>`);
-});
+// 4.11.7 had a browser test client at /session-test here. Release review 4.18.30 (R-4): removed
+// from the release (an unauthenticated page with an inline script that kept a bearer token in
+// localStorage); a second session is tested through the API directly (test/security-admin-api.test.mjs).
 
 
 // ─── 4.16.5–4.16.8 Production Backup / Integrity-Gated Restore ──────────────
@@ -2209,6 +2152,30 @@ function validateBackupPayload(payload) {
   }
 }
 
+// R-1: the restored user set must keep an enabled administrator, or nobody could log in to fix it.
+function backupUsersHaveAdmin(text) {
+  try {
+    const rows = JSON.parse(text)?.users;
+    return Array.isArray(rows) && rows.some(row => row?.disabled !== true && normalizeAuthUser(row)?.role === "admin");
+  } catch { return false; }
+}
+// R-2: loads the restored accounts and ends every local and remote session of an account that
+// changed or is gone, as PATCH /api/users does for each narrowing change.
+async function applyRestoredUsers() {
+  const fingerprint = user => user ? JSON.stringify([user.role, user.passwordHash, user.disabled === true, user.remoteAccess === true, user.remoteActions === true, user.totp?.secret || null, user.recovery || []]) : null;
+  const before = new Map([...authUsers].map(([name, user]) => [name, fingerprint(user)]));
+  await loadAuthUsers();
+  const changed = [...new Set([...before.keys(), ...authUsers.keys()])].filter(name => before.get(name) !== fingerprint(authUsers.get(name)));
+  let ended = 0;
+  for (const name of changed) {
+    for (const [token, session] of authSessions) if (session.username.toLowerCase() === name) { authSessions.delete(token); ended++; }
+    ended += remoteSessions.revokeUser(name) || 0;
+    const user = authUsers.get(name);
+    if (!user || user.disabled || user.remoteAccess !== true) await alertNotifier.removeUser(name).catch(() => 0);
+  }
+  return ended;
+}
+
 app.get("/api/backups", requirePermission("config.manage"), async (_req, res) => {
   try {
     const registry = await loadBackupRegistry();
@@ -2266,6 +2233,22 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
       audit("warn", "backup.restore.blocked", {id:record.meta.id, correlationId, reason:"sha256_mismatch_or_missing", expected, actual});
       return res.status(409).json({ok:false,error:"Restore blocked: SHA-256 integrity verification failed.",correlationId,expected,actual});
     }
+    // Release review 4.18.30 (R-1): the user accounts in a backup (roles, password hashes, second
+    // factors, disabled flags) are user.manage data. Restoring different ones needs that right, and
+    // the restored set must keep an enabled administrator.
+    const usersPayload = record.raw.payload.users;
+    const currentUsers = await fs.readFile(AUTH_USERS_FILE, "utf8").catch(err => { if (err.code === "ENOENT") return null; throw err; });
+    const usersChange = usersPayload !== null && usersPayload !== currentUsers;
+    if (usersChange) {
+      if (!hasPermission(req.auth.role, "user.manage")) {
+        audit("warn", "backup.restore.blocked", {id:record.meta.id, correlationId, reason:"users_need_user_manage", actor:req.auth.username});
+        return res.status(403).json({ok:false,code:"BACKUP_RESTORE_USERS_FORBIDDEN",error:"Dieses Backup enthält andere Benutzerkonten; nur ein Administrator darf es wiederherstellen.",permission:"user.manage",correlationId});
+      }
+      if (!backupUsersHaveAdmin(usersPayload)) {
+        audit("warn", "backup.restore.blocked", {id:record.meta.id, correlationId, reason:"no_enabled_admin", actor:req.auth.username});
+        return res.status(409).json({ok:false,code:"BACKUP_RESTORE_NO_ADMIN",error:"Restore blocked: the backup holds no enabled administrator.",correlationId});
+      }
+    }
     // Pre-restore safety snapshot is created only after the requested backup passes integrity.
     const safetyPayload = await backupPayloadFromFiles();
     const safetySha = hashBackupPayload(safetyPayload);
@@ -2284,15 +2267,21 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
         if (value === null) continue;
         const dir = path.dirname(item.file); await fs.mkdir(dir,{recursive:true});
         const tmp = `${item.file}.restore-${process.pid}-${crypto.randomUUID()}`;
-        await fs.writeFile(tmp, value, "utf8"); temps.push({tmp,target:item.file});
+        // R-3: users.json holds password hashes and TOTP secrets; all three files stay owner-only.
+        await fs.writeFile(tmp, value, { encoding: "utf8", mode: 0o600 }); temps.push({tmp,target:item.file});
       }
-      for (const item of temps) await fs.rename(item.tmp,item.target);
+      for (const item of temps) { await fs.rename(item.tmp,item.target); await fs.chmod(item.target, 0o600).catch(() => {}); }
     } catch (e) {
       for (const item of temps) { try { await fs.unlink(item.tmp); } catch {} }
       throw e;
     }
-    audit("info", "backup.restored", {id:record.meta.id, correlationId, sha256:actual, safetySnapshotId:safetyId});
-    res.json({ok:true,restored:record.meta.id,correlationId,sha256:actual,safetySnapshotId:safetyId});
+    // R-2: the restored files take effect now, not at the next start (and are not overwritten
+    // by the next save from the old in-memory state).
+    await loadPolicy();
+    await loadProfiles();
+    const sessionsEnded = usersChange ? await applyRestoredUsers() : 0;
+    audit("info", "backup.restored", {id:record.meta.id, correlationId, sha256:actual, safetySnapshotId:safetyId, actor:req.auth.username, usersRestored:usersChange, sessionsEnded});
+    res.json({ok:true,restored:record.meta.id,correlationId,sha256:actual,safetySnapshotId:safetyId,usersRestored:usersChange,sessionsEnded});
   } catch (e) {
     audit("error", "backup.restore.failed", {id:req.params.id, correlationId, error:e.message});
     res.status(500).json({ok:false,error:e.message,correlationId});
