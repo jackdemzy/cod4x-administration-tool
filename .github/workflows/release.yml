@@ -5,9 +5,20 @@ name: Release
 # against them. Windows: NSIS installer + portable exe; Linux: AppImage.
 # A tag v<version> also creates a DRAFT GitHub release with the files; publishing stays manual.
 # Pull requests that touch the packaging run the same build and gate, without a release.
+#
+# Code signing (Windows, optional): with the secret SIGNPATH_API_TOKEN and the repository variable
+# SIGNPATH_ORGANIZATION_ID set, a tag build (or a manual run with "sign") sends the app folder and then
+# the installers to SignPath (each request needs a manual approval there) and fails unless every exe
+# carries an Authenticode signature that Windows accepts. Without them it builds unsigned, as before.
+# Setup: docs/CODE-SIGNING.md; artifact configurations: .signpath/artifact-configurations/.
 
 on:
   workflow_dispatch:
+    inputs:
+      sign:
+        description: Sign the Windows exe files with SignPath (needs the SignPath secret and variables)
+        type: boolean
+        default: false
   push:
     tags: ['v*']
   pull_request:
@@ -23,6 +34,7 @@ on:
       - build.ps1
       - scripts/release*.mjs
       - scripts/verify-4.18.30-installer-gate.mjs
+      - .signpath/**
       - test/installer-*.test.mjs
       - test/support/e2e-backend.mjs
       - .github/workflows/release.yml
@@ -38,7 +50,8 @@ jobs:
   build:
     name: Release build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 75
+    # A signing run waits for up to two manual approvals in SignPath (2 h each), so it gets more time.
+    timeout-minutes: ${{ (matrix.platform == 'win' && (startsWith(github.ref, 'refs/tags/') || inputs.sign == true)) && 330 || 75 }}
     strategy:
       fail-fast: false
       matrix:
@@ -47,11 +60,18 @@ jobs:
             platform: win
           - os: ubuntu-latest
             platform: linux
+    permissions:
+      contents: read
+      # SignPath downloads the unsigned GitHub artifact of this run.
+      actions: read
     env:
       # electron-builder downloads the Electron it packages; the npm package's binary is not needed.
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      # No signing certificate: never pick up a code-signing identity by accident.
+      # electron-builder never signs by itself: no local code-signing identity is picked up by accident.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # 'true' only on Windows, with SignPath configured, for a tag or a manual run with "sign".
+      # Pull requests (also from forks, which get no secrets) always build unsigned.
+      SIGN_WINDOWS: ${{ matrix.platform == 'win' && secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' && (startsWith(github.ref, 'refs/tags/') || inputs.sign == true) }}
     steps:
       # Same long-name TEMP as ci.yml (instance path checks fail closed on 8.3 short paths).
       - name: Use long-path TEMP
@@ -83,7 +103,95 @@ jobs:
         run: npm ci
 
       - name: Release pipeline
+        if: matrix.platform == 'linux'
         run: npm run release:${{ matrix.platform }}
+
+      # Windows in two stages, so that the app exe is signed before the installers pack it.
+      - name: Release pipeline, stage 1 (checks, full suite, app folder)
+        if: matrix.platform == 'win'
+        run: node scripts/release.mjs --platform win --stage unpacked
+
+      - name: Upload unsigned app folder for signing
+        id: unsigned-app
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-win-unpacked
+          path: dist-installer/win-unpacked/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign app exe (SignPath)
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'cod4x-administration-tool' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: win-unpacked
+          github-artifact-id: ${{ steps.unsigned-app.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signed-win-unpacked
+
+      - name: Use signed app folder
+        if: env.SIGN_WINDOWS == 'true'
+        shell: pwsh
+        run: |
+          $exe = Join-Path 'signed-win-unpacked' 'COD4X CONTROL.exe'
+          $sig = Get-AuthenticodeSignature -LiteralPath $exe
+          if ($sig.Status -ne 'Valid') { throw "$exe signature: $($sig.Status) $($sig.StatusMessage)" }
+          Write-Host "Signed by: $($sig.SignerCertificate.Subject)"
+          Remove-Item -Recurse -Force dist-installer/win-unpacked
+          Move-Item signed-win-unpacked dist-installer/win-unpacked
+
+      - name: Release pipeline, stage 2 (setup + portable from the app folder)
+        if: matrix.platform == 'win'
+        run: node scripts/release.mjs --platform win --stage installers
+
+      - name: Upload unsigned installers for signing
+        id: unsigned-installers
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-win-installers
+          path: dist-installer/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign setup and portable (SignPath)
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'cod4x-administration-tool' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: win-installers
+          github-artifact-id: ${{ steps.unsigned-installers.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signed-win-installers
+
+      - name: Use signed installers
+        if: env.SIGN_WINDOWS == 'true'
+        shell: pwsh
+        run: |
+          $signed = @(Get-ChildItem signed-win-installers -Filter *.exe)
+          if ($signed.Count -ne 2) { throw "expected 2 signed exe files, got $($signed.Count)" }
+          foreach ($file in $signed) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $file.FullName
+            if ($sig.Status -ne 'Valid') { throw "$($file.Name) signature: $($sig.Status) $($sig.StatusMessage)" }
+            Copy-Item -Force $file.FullName dist-installer/
+          }
+
+      - name: SHA-256 + artifact verification
+        if: matrix.platform == 'win'
+        shell: bash
+        run: |
+          if [ "$SIGN_WINDOWS" = "true" ]; then npm run release:verify -- --platform win --require-signed
+          else npm run release:verify -- --platform win; fi
 
       - name: Installer gate
         shell: bash
@@ -108,6 +216,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # Same condition as SIGN_WINDOWS in the build job (on a tag): the build has failed unless signed.
+      SIGNED: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -135,6 +246,8 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" upload/* --repo "$GITHUB_REPOSITORY" --clobber
             exit 0
           fi
+          if [ "$SIGNED" = "true" ]; then signing="Windows exe files are code-signed (Authenticode, SignPath)."
+          else signing="Not code-signed (Windows SmartScreen warns)."; fi
           gh release create "$GITHUB_REF_NAME" upload/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "COD4X CONTROL ${GITHUB_REF_NAME#v}" \
-            --notes "Draft built by the Release workflow from $GITHUB_SHA. Verify downloads with sha256sum -c SHA256SUMS. Not code-signed (Windows SmartScreen warns)."
+            --notes "Draft built by the Release workflow from $GITHUB_SHA. Verify downloads with sha256sum -c SHA256SUMS. $signing"

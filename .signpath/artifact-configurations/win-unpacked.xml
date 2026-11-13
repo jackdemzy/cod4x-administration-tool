@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "win-unpacked" (slug must match release.yml).
+     Input: the GitHub artifact unsigned-win-unpacked (zip of dist-installer/win-unpacked/).
+     Signs only the app exe built from this repository; Electron's DLLs and all other files
+     are passed through unchanged. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="COD4X CONTROL.exe" product-name="COD4X CONTROL">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

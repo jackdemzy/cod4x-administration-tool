@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "win-installers" (slug must match release.yml).
+     Input: the GitHub artifact unsigned-win-installers (zip of dist-installer/*.exe), built by
+     electron-builder from the already signed app folder. Signs the NSIS setup and the portable exe. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file-set>
+      <include path="COD4X-CONTROL-Setup-*-x64.exe" />
+      <include path="COD4X-CONTROL-Portable-*-x64.exe" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

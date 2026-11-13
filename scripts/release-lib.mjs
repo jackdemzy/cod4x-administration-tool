@@ -110,3 +110,33 @@ export function asarPolicy(entries, version, packageJsonText) {
   try { versionOk = JSON.parse(packageJsonText).version === version; } catch {}
   return { ok: !missing.length && !forbidden.length && versionOk, missing, forbidden, versionOk };
 }
+
+// Code signing (Windows): is there an Authenticode signature in a PE file? Reads only the headers:
+// the certificate table is data directory 4 of the optional header (PE32 and PE32+). This says
+// "signed or not"; whether the signature is valid and trusted is checked on Windows with
+// Get-AuthenticodeSignature in the Release workflow.
+export const WINDOWS_APP_EXE = 'COD4X CONTROL.exe';
+
+export function authenticodeInfo(header, fileSize) {
+  const none = { pe: false, signed: false };
+  if (!Buffer.isBuffer(header) || header.length < 0x40 || header.readUInt16LE(0) !== 0x5a4d) return none;
+  const pe = header.readUInt32LE(0x3c);
+  if (pe + 26 > header.length || header.readUInt32LE(pe) !== 0x00004550) return none;
+  const optional = pe + 24;
+  const magic = header.readUInt16LE(optional);
+  const directories = magic === 0x20b ? optional + 112 : magic === 0x10b ? optional + 96 : -1;
+  if (directories < 0 || directories + 40 > header.length) return none;
+  if (header.readUInt32LE(directories - 4) < 5) return { pe: true, signed: false };
+  const offset = header.readUInt32LE(directories + 32);
+  const size = header.readUInt32LE(directories + 36);
+  return { pe: true, signed: offset > 0 && size >= 8 && offset + size <= fileSize, offset, size };
+}
+
+export function authenticodeOfFile(file) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const header = Buffer.alloc(4096);
+    const read = fs.readSync(fd, header, 0, header.length, 0);
+    return authenticodeInfo(header.subarray(0, read), fs.fstatSync(fd).size);
+  } finally { fs.closeSync(fd); }
+}

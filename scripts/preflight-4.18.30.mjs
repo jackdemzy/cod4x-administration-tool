@@ -23,9 +23,9 @@ if (regression.status !== 0) {
   console.error("4.18.30 runtime regression checks FAIL");
   process.exit(regression.status || 1);
 }
-// Block 23 (4.18.30): release configuration, artifact verification, pipeline order and Release
+// Block 23 (4.18.30): release configuration, artifact verification, pipeline order, code signing and Release
 // workflow; the installer gate itself needs a release build (COD4X_RELEASE_DIR) and says SKIP without.
-const release = spawnSync(process.execPath, ["--test", "test/release-config.test.mjs", "test/release-verify.test.mjs", "test/release-pipeline.test.mjs", "test/release-workflow.test.mjs"], { encoding: "utf8" });
+const release = spawnSync(process.execPath, ["--test", "test/release-config.test.mjs", "test/release-verify.test.mjs", "test/release-pipeline.test.mjs", "test/release-workflow.test.mjs", "test/release-signing.test.mjs"], { encoding: "utf8" });
 process.stdout.write(release.stdout || "");
 process.stderr.write(release.stderr || "");
 if (release.status !== 0) {

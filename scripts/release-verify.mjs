@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { PLATFORMS, asarPolicy, checkSums, formatSums, manifest, matchArtifacts, sha256File, unpackedDir } from './release-lib.mjs';
+import { PLATFORMS, WINDOWS_APP_EXE, asarPolicy, authenticodeOfFile, checkSums, formatSums, manifest, matchArtifacts, sha256File, unpackedDir } from './release-lib.mjs';
 
 // Block 23 (4.18.30): artifact verification of a release build.
 //   node scripts/release-verify.mjs --platform win|linux [--dir dist-installer]
 //     checks the expected artifacts and the packaged app.asar, then writes SHA256SUMS and
 //     release-manifest.json next to the artifacts.
+//     --require-signed (win): every exe and the packaged app exe must carry an Authenticode signature.
 //   node scripts/release-verify.mjs --check <folder>
 //     only recomputes the hashes listed in <folder>/SHA256SUMS (for downloaded releases).
 const args = process.argv.slice(2);
@@ -27,6 +28,7 @@ if (args.includes('--check')) {
 
 const platform = option('--platform');
 if (!PLATFORMS.includes(platform)) fail(`--platform must be one of ${PLATFORMS.join(', ')}`, 2);
+if (args.includes('--require-signed') && platform !== 'win') fail('--require-signed applies to --platform win only', 2);
 const dir = path.resolve(option('--dir') || 'dist-installer');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 const version = pkg.version;
@@ -39,6 +41,19 @@ for (const name of files) {
   const { size } = fs.statSync(path.join(dir, name));
   if (size < 1024 * 1024) fail(`${name} is only ${size} bytes`);
   console.log(`PASS artifact ${name} (${size} bytes)`);
+}
+
+// Code signing: report the state of every Windows exe; with --require-signed an unsigned one fails.
+if (platform === 'win') {
+  const requireSigned = args.includes('--require-signed');
+  const exes = [...files.map(name => path.join(dir, name)), path.join(dir, unpackedDir(platform), WINDOWS_APP_EXE)];
+  for (const exe of exes) {
+    if (!fs.existsSync(exe)) fail(`${exe} not found`);
+    const { pe, signed } = authenticodeOfFile(exe);
+    if (!pe) fail(`${path.basename(exe)} is not a PE file`);
+    if (!signed && requireSigned) fail(`${path.basename(exe)} has no Authenticode signature`);
+    console.log(`${signed ? 'PASS' : 'INFO'} ${path.basename(exe)}: ${signed ? 'Authenticode signature present' : 'not signed'}`);
+  }
 }
 
 const archive = path.join(dir, unpackedDir(platform), 'resources', 'app.asar');
