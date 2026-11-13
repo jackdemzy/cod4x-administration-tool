@@ -54,7 +54,7 @@ import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
 import { InstanceB3PluginService } from "./lib/instance-b3-plugin-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
 import { RestorePointStore } from "./lib/restore-points.mjs";
-import { installArtifacts, restoreFilesPoint, snapshotFiles, assertSafeChildPath as assertInsideRoot, DEFAULT_RUNTIME_SUBJECT } from "./lib/archive-install.mjs";
+import { installArtifacts, artifactUrl, restoreFilesPoint, snapshotFiles, assertSafeChildPath as assertInsideRoot, DEFAULT_RUNTIME_SUBJECT } from "./lib/archive-install.mjs";
 import { guardedChange } from "./lib/restore-guard.mjs";
 import { MonitorStore, monitorRange } from "./lib/monitor-store.mjs";
 import { MonitorCollector } from "./lib/monitor-collector.mjs";
@@ -70,6 +70,8 @@ import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecov
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
 import { isB3PluginCodePath, isB3PluginTextPath, localOnlyGuard, publicBlockers } from "./lib/b3-plugin-routes.mjs";
+import { isCredentialPath } from "./lib/credential-request.mjs";
+import { rateLimit } from "express-rate-limit";
 
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
@@ -269,7 +271,6 @@ const RBAC_PERMISSIONS = [
   { id: "update.execute", label: "Updates ausführen", description: "Verbindliche Update-Ausführung autorisieren." },
   { id: "server.manage", label: "Serververwaltung", description: "Serverinstanzen und Betriebssteuerung verwalten." },
   { id: "config.manage", label: "Konfiguration", description: "Serverkonfiguration und Profile verwalten." },
-  { id: "secrets.manage", label: "Secrets", description: "Credential Vault und Secrets verwalten." },
   { id: "diagnostics.read", label: "Diagnostics", description: "Diagnose- und Health-Daten lesen." },
   { id: "audit.read", label: "Audit", description: "Audit-Trail und persistente Audit-Daten lesen." },
   { id: "user.manage", label: "Benutzerverwaltung", description: "Benutzer, Rollen und Benutzer-Sessions verwalten." },
@@ -342,14 +343,15 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "server", permission: "server.manage", routes: ["POST /api/server/start", "POST /api/runtime/start", "POST /api/runtime/stop", "POST /api/runtime/restart", "POST /api/rcon/execute", "POST /api/instances/:id/rcon/connect", "POST /api/instances/:id/rcon/command", "POST /api/admin/test"] },
   { area: "restore-points", permission: "config.manage", routes: ["GET /api/instances/:id/restore-points", "POST /api/instances/:id/restore-points", "GET /api/instances/:id/restore-points/:pointId/integrity", "POST /api/instances/:id/restore-points/:pointId/restore", "GET /api/runtime/restore-points", "POST /api/runtime/restore-points", "GET /api/runtime/restore-points/:pointId/integrity"] },
   { area: "configuration", permission: "config.manage", routes: ["GET /api/policy", "POST /api/policy/validate", "POST /api/policy/save", "GET /api/config/profiles", "POST /api/config/profiles/save", "POST /api/config/profiles/activate", "POST /api/config/profiles/delete"] },
-  { area: "secrets", permission: "secrets.manage", routes: [] },
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
   { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances/:id/core", "POST /api/runtime/restore-points/:pointId/restore", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   ...REMOTE_LINUX_BINDINGS,
-  { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
+  { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "GET /api/audit/persistent", "POST /api/audit/persist", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
+  // Security audit 4.18.26 (A5-5): writing to the audit log is not a read right.
+  { area: "audit-admin", permission: "user.manage", routes: ["POST /api/audit/test", "POST /api/audit/rotate"] },
 ]);
 
 function authorizationBindingChecks() {
@@ -359,7 +361,6 @@ function authorizationBindingChecks() {
     { id: "updates", label: "Update binding", pass: hasPermission("admin", "update.execute") },
     { id: "server", label: "Server management binding", pass: hasPermission("admin", "server.manage") },
     { id: "config", label: "Configuration binding", pass: hasPermission("admin", "config.manage") },
-    { id: "secrets", label: "Secrets permission available", pass: hasPermission("admin", "secrets.manage") },
     { id: "diagnostics", label: "Diagnostics binding", pass: hasPermission("admin", "diagnostics.read") },
     { id: "audit", label: "Audit binding", pass: hasPermission("admin", "audit.read") },
     { id: "denied", label: "Denied role produces 403", pass: !hasPermission("viewer", "server.manage") },
@@ -406,7 +407,7 @@ app.use((req, res, next) => {
 });
 // Credential transport is local-only until an authenticated TLS deployment is
 // explicitly implemented. Never cache or reflect secret request bodies.
-const isCredentialRequest = req => req.path.startsWith("/api/credentials/") || /^\/api\/instances\/[^/]+\/credentials(?:\/|$)/.test(req.path) || /^\/api\/remote-hosts\/[^/]+\/credentials(?:\/|$)/.test(req.path);
+const isCredentialRequest = req => isCredentialPath(req.path);
 app.use((req, res, next) => {
   if (!isCredentialRequest(req)) return next();
   res.setHeader("Cache-Control", "no-store");
@@ -417,6 +418,20 @@ app.use(localOnlyGuard(isCredentialRequest));
 app.use(localOnlyGuard(req => isB3PluginCodePath(req.path)));
 // Block 16b: B3 plugin config and code may be up to 256 KB of text; JSON escaping can grow it.
 const isB3PluginTextRequest = req => isB3PluginTextPath(req.path);
+// Issue #49 (CodeQL js/missing-rate-limiting): every changing request to the admin API is
+// rate-limited (many touch the file system or start processes); reads are not. The login keeps its
+// own brake. COD4X_WRITE_RATE_LIMIT (1..10000 per minute, default 300) sets the limit.
+const WRITE_RATE_LIMIT = (value => (Number.isInteger(value) && value >= 1 && value <= 10000 ? value : 300))(Number(process.env.COD4X_WRITE_RATE_LIMIT || 300));
+app.use("/api", rateLimit({
+  windowMs: 60_000, limit: WRITE_RATE_LIMIT, standardHeaders: "draft-8", legacyHeaders: false,
+  skip: req => ["GET", "HEAD", "OPTIONS"].includes(req.method),
+  handler: (req, res, _next, options) => {
+    // one audit entry per client and window, so a flood does not flood the audit log too
+    if (req.rateLimit?.used === req.rateLimit?.limit + 1) audit("warn", "api.rate_limited", { method: req.method, path: req.path });
+    res.setHeader("Retry-After", String(Math.ceil(options.windowMs / 1000)));
+    res.status(429).json({ ok: false, code: "RATE_LIMITED", error: "Zu viele Anfragen. Bitte kurz warten." });
+  },
+}));
 const jsonBody = express.json({ limit: "64kb" }), b3PluginJsonBody = express.json({ limit: "2mb" });
 app.use((req, res, next) => (isB3PluginTextRequest(req) ? b3PluginJsonBody : jsonBody)(req, res, next));
 // Plugin bodies can hold tokens: a malformed or oversized body gets a fixed
@@ -849,12 +864,7 @@ async function sha256(file) {
   return hash.digest("hex");
 }
 
-function allowedArtifact(entry) {
-  if (!entry?.url) throw new Error("Artifact URL is not configured on the server");
-  const u = new URL(entry.url);
-  if (!["https:", "http:"].includes(u.protocol)) throw new Error("Only HTTP(S) artifacts are allowed");
-  return u;
-}
+const allowedArtifact = artifactUrl; // https only (security audit 4.18.26, A1-7)
 
 async function downloadTo(url, target) {
   const response = await fetch(url, { redirect: "error" });
@@ -1511,13 +1521,15 @@ function isSafeAuditPath(candidate) {
 
 function rotatedAuditFiles(entries) {
   return entries
-    .filter(name => /^audit-\d{8}-\d{6}-\d{3}\.ndjson$/.test(name))
+    .filter(name => /^audit-\d{8}-\d{6}[.-]\d{3}(?:-\d{2,})?\.ndjson$/.test(name))
     .sort()
     .reverse();
 }
 
 async function enforceAuditPermissions() {
   if (process.platform === "win32") return;
+  // Security audit 4.18.26 (A2-3): also tightens a folder created by an older version.
+  try { await fs.chmod(AUDIT_DIR, 0o700); } catch {}
   try { await fs.chmod(AUDIT_FILE, 0o600); } catch {}
 }
 
@@ -1526,7 +1538,7 @@ async function rotateAuditLog(reason = "size") {
     throw new Error("Audit log path escapes configured audit root");
   }
   try {
-    await fs.mkdir(AUDIT_DIR, { recursive: true });
+    await fs.mkdir(AUDIT_DIR, { recursive: true, mode: 0o700 });
     let stat;
     try { stat = await fs.stat(AUDIT_FILE); } catch (err) {
       if (err.code === "ENOENT") return { rotated: false, reason: "missing" };
@@ -1572,14 +1584,14 @@ function persistAuditEntry(entry) {
       if (!isSafeAuditPath(AUDIT_DIR) || !isSafeAuditPath(AUDIT_FILE)) {
         throw new Error("Audit log path escapes configured audit root");
       }
-      await fs.mkdir(AUDIT_DIR, { recursive: true });
+      await fs.mkdir(AUDIT_DIR, { recursive: true, mode: 0o700 });
       let currentBytes = 0;
       try { currentBytes = (await fs.stat(AUDIT_FILE)).size; }
       catch (err) { if (err.code !== "ENOENT") throw err; }
       if (currentBytes > 0 && currentBytes + Buffer.byteLength(line, "utf8") > AUDIT_MAX_BYTES()) {
         await rotateAuditLog("size");
       }
-      await fs.appendFile(AUDIT_FILE, line, { encoding: "utf8", flag: "a" });
+      await fs.appendFile(AUDIT_FILE, line, { encoding: "utf8", flag: "a", mode: 0o600 });
       await enforceAuditPermissions();
       auditIoState = { ok: true, error: "" };
     })
@@ -1666,7 +1678,7 @@ app.get("/api/audit", requirePermission("audit.read"), (req, res) => {
   res.json({ ok: true, bounded: true, maxEvents: AUDIT_MAX_EVENTS(), events });
 });
 
-app.post("/api/audit/test", requirePermission("audit.read"), (_req, res) => {
+app.post("/api/audit/test", requirePermission("user.manage"), (_req, res) => {
   const entry = audit("info", "audit.test", { source: "manual" });
   res.json({ ok: true, entry });
 });
@@ -1694,7 +1706,7 @@ app.post("/api/audit/persist", requirePermission("audit.read"), async (_req, res
   }
 });
 
-app.post("/api/audit/rotate", requirePermission("audit.read"), async (_req, res) => {
+app.post("/api/audit/rotate", requirePermission("user.manage"), async (_req, res) => {
   try {
     await auditWriteQueue;
     const result = await rotateAuditLog("manual");
@@ -2410,7 +2422,11 @@ const resolveSshSubject = sshSubjectResolver({ hosts: remoteHostStore, dataRoot:
 // Block 18b: the local side of each remote instance (rmt_<id> in the vault, own data directory).
 const remoteShadowStore = createShadowStore({ instances: remoteInstanceStore, dataRoot: DATA_ROOT });
 const resolveRemoteSubject = remoteSubjectResolver(remoteShadowStore);
-const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : isRemoteSubject(id) ? resolveRemoteSubject(id) : instanceStore.get(id)) });
+// Security audit 4.18.26 (A2-4): COD4X_VAULT_IDLE_LOCK_MINUTES (1..1440) locks an unused
+// unlocked vault; unset or 0 keeps the previous behaviour (locked only on request).
+const VAULT_IDLE_LOCK_MINUTES = (value => (Number.isInteger(value) && value >= 1 && value <= 1440 ? value : 0))(Number(process.env.COD4X_VAULT_IDLE_LOCK_MINUTES || 0));
+// A4-6: a locked vault also ends every pooled SSH session (the pool is created further down).
+const credentialService = new InstanceCredentialService({ dataRoot: DATA_ROOT, idleLockMs: VAULT_IDLE_LOCK_MINUTES * 60e3, onLock: () => { try { remoteSessionPool.closeAll(); } catch {} }, resolveInstance: id => (id.startsWith("ssh_") ? resolveSshSubject(id) : isRemoteSubject(id) ? resolveRemoteSubject(id) : instanceStore.get(id)) });
 const remoteCredentials = prefixedCredentials(credentialService);
 let instanceManager = null;
 // RCON audit events carry instance, actor, normalized command and codes only, never the password.
@@ -2497,7 +2513,7 @@ const remoteB3AdminService = new InstanceB3AdminService({ store: remoteShadowSto
   rcon: { findOnline: id => remoteRconService.findOnline(id), kick: (id, target, actor) => remoteRconService.kick(id, target, actor) },
   database: { read: id => remoteB3DatabaseService.read(id), query: (...args) => remoteB3DatabaseService.query(...args), withStartGuard: (id, action) => remoteB3DatabaseService.withStartGuard(id, action) },
   environment: { read: async () => ({ ...(await b3EnvironmentForRuntime.read() || {}), b3Path: null }) }, b3IsRunning: async () => false, onEvent: entry => audit("info", entry.event, { ...entry, remote: true }) });
-registerRemoteLinuxRoutes({ app, requirePermission, audit, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService, rcon: remoteRconService, hasPermission,
+registerRemoteLinuxRoutes({ app, requirePermission, audit, sessionPool: remoteSessionPool, hostService: remoteHostService, hostStore: remoteHostStore, manager: remoteInstanceManager, credentials: credentialService, rcon: remoteRconService, hasPermission,
   remoteCredentials, b3: { database: remoteB3DatabaseService, admin: remoteB3AdminService } });
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
   const relative = path.relative(await resolveRealFuturePath(instanceRoot), await resolveRealFuturePath(filesystemHomePath));
@@ -3083,4 +3099,9 @@ await applyRemoteGateway();
 
 app.listen(PORT, HOST, () => {
   console.log(`COD4X CONTROL installer API listening on :${PORT}`);
+  // Security audit 4.18.26 (A1-3): CONTROL does not need root; the core start already refuses it.
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    console.warn("[security] COD4X CONTROL runs as root. Run it as a normal user; server starts are refused as root.");
+    audit("warn", "control.running_as_root", { uid: 0 });
+  }
 });

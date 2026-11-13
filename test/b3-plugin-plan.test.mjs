@@ -15,6 +15,7 @@ const MODULES = [
   ['discord', 'extplugins', 'file', false, [], ['requests']],
   ['geolocation', 'plugins', 'package', false, [], []],
   ['geowelcome', 'plugins', 'package', false, ['geolocation'], []],
+  ['pluginmanager', 'plugins', 'package', false, [], []],
 ];
 
 async function setup(t) {
@@ -102,4 +103,18 @@ test('changed custom code is an integrity failure', async t => {
   await fs.appendFile(path.join(b3, 'extplugins', 'myplug.py'), '# edited outside CONTROL\n');
   assert.deepEqual((await service.plan(ID, dependencies())).blockers, [{ code: 'B3_PLUGIN_INTEGRITY_FAILED', plugin: 'myplug' }]);
   assert.equal(store.get(ID).b3Plugins.length, 1);
+});
+
+// Security audit 4.18.26 (A3-7): pluginmanager lets a B3 admin load modules in game
+// that CONTROL never hashed, so it can neither be enabled nor started.
+test('pluginmanager is refused: not listed as available, not enabled, blocks the start', async t => {
+  const { store, service, shipped, dependencies } = await setup(t);
+  await assert.rejects(service.setEnabled(ID, 'pluginmanager', true), { code: 'B3_PLUGIN_REFUSED' });
+  const row = (await service.list(ID)).plugins.find(item => item.name === 'pluginmanager');
+  assert.equal(row.state, 'UNAVAILABLE');
+  assert.equal(row.reason, 'B3_PLUGIN_REFUSED');
+  await store.setB3Plugins(ID, [shipped('pluginmanager')]);
+  const result = await service.plan(ID, dependencies());
+  assert.deepEqual(result.blockers, [{ code: 'B3_PLUGIN_REFUSED', plugin: 'pluginmanager' }]);
+  assert.deepEqual(result.plugins, []);
 });

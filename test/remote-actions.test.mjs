@@ -49,7 +49,7 @@ test('action guard: step-up window, restart needs its own code, limits and coold
   throwsCode(() => guard.check('s3', 'say', 'a'), 'REMOTE_STEP_UP_REQUIRED');
 });
 
-async function gateway(t, { proxy = false, allowed = true } = {}) {
+async function gateway(t, { proxy = false, allowed = true, userThrottle, writeLimit } = {}) {
   const users = {
     op: { username: 'op', role: 'operator', remoteAccess: true, totpEnabled: true },
     view: { username: 'view', role: 'viewer', remoteAccess: true, totpEnabled: true },
@@ -70,7 +70,7 @@ async function gateway(t, { proxy = false, allowed = true } = {}) {
     login: async ({ username, password }) => password === 'correct-horse-battery' ? users[username] || null : null,
     verifySecondFactor, hasPermission: (role, permission) => (matrix[role] || []).includes(permission),
     monitor: { overview: async () => ({ instances: [] }), history: async () => ({}), events: async () => ({ events: [] }) },
-    sessions: new RemoteSessions(), throttle: new LoginThrottle(), policy: () => policy, staticDir: dir,
+    sessions: new RemoteSessions(), throttle: new LoginThrottle(), ...(userThrottle ? { userThrottle } : {}), ...(writeLimit ? { writeLimit } : {}), policy: () => policy, staticDir: dir,
     audit: (level, event, details) => audits.push({ level, event, ...details }),
     actions: {
       allowed: () => allowed,
@@ -159,4 +159,39 @@ test('gateway actions: refused without server.manage or the switches; behind the
   assert.equal((await off.request('/remote/api/instances/a/restart', { code: off.code() }, opOff)).json.code, 'REMOTE_ACTIONS_DISABLED');
   assert.equal((await off.request('/remote/api/instances/a/players', null, opOff)).status, 403);
   assert.equal(plain.calls.length + off.calls.length, 0);
+});
+
+// Security audit 4.18.26 (A5-7): failed step-up codes count in the per-user brake, so
+// a stolen session cannot guess the six digits; the lock also covers the action route.
+test('gateway actions: failed step-up codes lock the user', async t => {
+  const { request, login, code, audits } = await gateway(t, { userThrottle: new LoginThrottle({ maxFailures: 3 }) });
+  const op = await login('op');
+  for (let i = 0; i < 2; i++) assert.equal((await request('/remote/api/actions/step-up', { code: '100000' }, op)).status, 401);
+  assert.equal((await request('/remote/api/actions/step-up', { code: 'abc' }, op)).status, 401, 'a malformed code counts too');
+  const locked = await request('/remote/api/actions/step-up', { code: code() }, op);
+  assert.equal(locked.status, 429);
+  assert.equal(locked.json.code, 'REMOTE_STEP_UP_LOCKED');
+  assert.ok(Number(locked.retryAfter) > 0);
+  assert.equal((await request('/remote/api/instances/a/say', { text: 'hi', code: code() }, op)).json.code, 'REMOTE_STEP_UP_LOCKED');
+  assert.ok(audits.some(entry => entry.event === 'remote.action.step_up_locked'));
+});
+
+test('gateway actions: a good step-up code clears earlier failures', async t => {
+  const { request, login, code } = await gateway(t, { userThrottle: new LoginThrottle({ maxFailures: 3 }) });
+  const op = await login('op');
+  for (let i = 0; i < 2; i++) assert.equal((await request('/remote/api/actions/step-up', { code: '100000' }, op)).status, 401);
+  assert.equal((await request('/remote/api/actions/step-up', { code: code() }, op)).status, 200);
+  for (let i = 0; i < 2; i++) assert.equal((await request('/remote/api/actions/step-up', { code: '100000' }, op)).status, 401);
+  assert.equal((await request('/remote/api/actions/step-up', { code: code() }, op)).status, 200);
+});
+
+// Issue #49: changing gateway requests above the limit get 429; reads stay free.
+test('gateway: changing requests above the write limit get 429', async t => {
+  const { request, login } = await gateway(t, { writeLimit: 3 });
+  const op = await login('op'); // 1
+  for (let i = 0; i < 2; i++) assert.equal((await request('/remote/api/actions/step-up', { code: '100000' }, op)).status, 401);
+  const limited = await request('/remote/api/actions/step-up', { code: '100000' }, op);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.json.code, 'REMOTE_RATE_LIMITED');
+  assert.equal((await request('/remote/api/actions', null, op)).status, 200, 'reads are not limited');
 });

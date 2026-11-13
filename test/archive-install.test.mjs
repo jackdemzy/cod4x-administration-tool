@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { installArtifacts, listArchiveEntries, restoreFilesPoint, DEFAULT_RUNTIME_SUBJECT } from '../lib/archive-install.mjs';
+import { installArtifacts, listArchiveEntries, restoreFilesPoint, artifactUrl, DEFAULT_RUNTIME_SUBJECT } from '../lib/archive-install.mjs';
 import { RestorePointStore } from '../lib/restore-points.mjs';
 
 const require = createRequire(import.meta.url);
@@ -125,4 +125,45 @@ test('listArchiveEntries returns names, directories and hashes', async t => {
   assert.deepEqual(entries.map(entry => entry.name), ['cod4x18_dedrun', 'main', 'main/server.cfg', 'mods', 'mods/pml', 'mods/pml/z_pml.iwd']);
   assert.match(entries[0].sha256, /^[0-9a-f]{64}$/);
   assert.equal(entries[1].directory, true);
+});
+
+// Security audit 4.18.26 (A1-3): setuid/setgid bits never reach the target, owners are not kept.
+test('setuid and setgid bits from a tar are stripped', { skip: process.platform === 'win32' }, async t => {
+  const { root, target, store, source } = await fixture(t);
+  await fs.chmod(path.join(source, 'cod4x18_dedrun'), 0o6755);
+  const archive = await tarOf(source, path.join(root, 'suid.tar.gz'));
+  await installArtifacts({ artifacts: [archive], target, store });
+  assert.equal((await fs.stat(path.join(target, 'cod4x18_dedrun'))).mode & 0o7000, 0);
+  assert.equal(await fs.readFile(path.join(target, 'cod4x18_dedrun'), 'utf8'), 'new core');
+});
+
+// Security audit 4.18.26 (A1-6): size caps per entry and in total, zip and tar.
+for (const [label, make] of [['zip', (source, root) => zipOf(source, path.join(root, 'big.zip'))], ['tar.gz', (source, root) => tarOf(source, path.join(root, 'big.tar.gz'))]]) {
+  test(`${label}: an entry or a total above the cap is refused before any write`, async t => {
+    const { root, target, store, source } = await fixture(t);
+    const archive = await make(source, root);
+    const before = await snapshot(target);
+    await assert.rejects(installArtifacts({ artifacts: [archive], target, store, limits: { maxEntryBytes: 4, maxTotalBytes: 1 << 20 } }), { code: 'INSTALL_ARCHIVE_TOO_LARGE' });
+    await assert.rejects(installArtifacts({ artifacts: [archive], target, store, limits: { maxEntryBytes: 1 << 20, maxTotalBytes: 10 } }), { code: 'INSTALL_ARCHIVE_TOO_LARGE' });
+    assert.deepEqual(await snapshot(target), before);
+  });
+}
+
+// Security audit 4.18.26 (A1-7): a later (FPS or mod) archive may not replace the core.
+test('a later archive that carries a core executable is refused', async t => {
+  const { root, target, store, source } = await fixture(t);
+  const core = zipOf(source, path.join(root, 'core.zip'));
+  const modSource = path.join(root, 'mod');
+  await fs.mkdir(path.join(modSource, 'bin'), { recursive: true });
+  await fs.writeFile(path.join(modSource, 'bin', 'COD4X18_DEDRUN.exe'), 'evil core');
+  const mod = zipOf(modSource, path.join(root, 'mod.zip'));
+  const before = await snapshot(target);
+  await assert.rejects(installArtifacts({ artifacts: [core, mod], target, store }), { code: 'INSTALL_CORE_OVERWRITE' });
+  assert.deepEqual(await snapshot(target), before);
+});
+
+test('artifact downloads accept https only', () => {
+  assert.equal(artifactUrl({ url: 'https://example.org/core.zip' }).href, 'https://example.org/core.zip');
+  for (const url of ['http://example.org/core.zip', 'ftp://example.org/x', 'file:///etc/passwd']) assert.throws(() => artifactUrl({ url }), /Only HTTPS artifacts are allowed/, url);
+  assert.throws(() => artifactUrl({ url: '' }), /not configured/);
 });

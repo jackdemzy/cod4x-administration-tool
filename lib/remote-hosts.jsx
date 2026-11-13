@@ -23,6 +23,7 @@ const MESSAGES = {
   REMOTE_CONNECT_FAILED: ['Keine Verbindung zum Server.', 'Could not connect to the server.'],
   REMOTE_TIMEOUT: ['Zeitüberschreitung.', 'Timed out.'],
   REMOTE_ROOT_BLOCKED: ['Verbindungen als root sind gesperrt.', 'Connections as root are blocked.'],
+  REMOTE_ROOT_UNSAFE: ['Der Instanz-Ordner gehört nicht dem SSH-Benutzer oder andere dürfen darin schreiben.', 'The instance folder is not owned by the SSH user or others may write in it.'],
   VAULT_LOCKED: ['Der Zugangsdaten-Tresor ist gesperrt. Bitte zuerst entsperren.', 'The credential vault is locked. Unlock it first.'],
   REMOTE_RCON_UNSUPPORTED: ['RCON ist für Remote-Server nicht verfügbar.', 'RCON is not available for remote servers.'],
   REMOTE_B3_UNSUPPORTED: ['B3 ist für Remote-Server nicht verfügbar.', 'B3 is not available for remote servers.'],

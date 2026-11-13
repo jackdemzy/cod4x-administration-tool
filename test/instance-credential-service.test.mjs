@@ -242,3 +242,18 @@ test('I5: the per-instance credential digest follows only that instance and carr
   service.lock();
   assert.equal((await service.instanceStatus('server-a')).digest, null);
 }));
+
+// Security audit 4.18.26 (A4-6): every vault lock is announced, so pooled SSH sessions end with it.
+test('the onLock hook runs on every lock', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-credential-service-'));
+  try {
+    let locks = 0;
+    const service = new InstanceCredentialService({ dataRoot: root, resolveInstance: () => { throw new Error('unused'); }, onLock: () => { locks++; } });
+    await service.initialize(passphrase);
+    await service.unlock(passphrase);
+    const before = locks;
+    service.lock();
+    assert.equal(locks, before + 1);
+    assert.throws(() => new InstanceCredentialService({ dataRoot: root, resolveInstance: () => {}, onLock: 'x' }), { code: 'CREDENTIAL_INVALID' });
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

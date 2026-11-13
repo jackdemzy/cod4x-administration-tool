@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRemoteFixture, alive, until } from './support/remote-fixture.mjs';
 import { loopbackAvailable } from './support/loopback-transport.mjs';
@@ -439,4 +440,56 @@ test('a core that ends shortly after it was seen alive is a failed start, not RU
   await rejects(f.manager.start('public-01'), 'REMOTE_START_FAILED');
   const saved = await f.state.read('public-01');
   assert.deepEqual([saved.status, saved.exitReason, saved.pid], ['FAILED', 'EXITED_ON_START', null]);
+});
+
+// Security audit 4.18.26 (A4-5): hostname and map from the host's answer are bounded and
+// carry no control characters.
+test('health: hostname and map from getinfo are bounded and free of control characters', { skip }, async t => {
+  const fake = await startFakeCod4xServer({ hostname: `Evil\u0001\u001b[2J${'x'.repeat(200)}`, mapname: 'mp_\u0007crash' });
+  t.after(() => fake.close());
+  const f = await createRemoteFixture(t);
+  await f.install('public-01', { port: fake.port });
+  await f.manager.start('public-01');
+  const health = await f.manager.health('public-01');
+  assert.equal(health.getinfo, 'OK');
+  assert.equal(health.map, 'mp_crash');
+  assert.ok(health.hostname.startsWith('Evil[2Jx'));
+  assert.ok(health.hostname.length <= 64);
+  assert.ok(!/[\u0000-\u001f\u007f]/.test(health.hostname + health.map));
+});
+
+// Security audit 4.18.26 (A4-3): health() skips a busy instance; status() never overwrites a
+// state that a lifecycle operation wrote after status() read it.
+test('health skips a busy instance without connecting', { skip }, async t => {
+  const f = await createRemoteFixture(t);
+  await f.install('public-01');
+  let release;
+  f.control.gate = new Promise(resolve => { release = resolve; });
+  const first = f.manager.start('public-01');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const before = f.connects.length;
+  assert.deepEqual(await f.manager.health('public-01'), { process: 'UNKNOWN', getinfo: 'SKIPPED', busy: true });
+  assert.equal(f.connects.length, before);
+  release(); f.control.gate = null;
+  assert.equal((await first).runtime.status, 'RUNNING');
+});
+
+test('status does not overwrite a state written after it was read', { skip }, async t => {
+  const f = await createRemoteFixture(t);
+  await f.install('public-01');
+  const { runtime } = await f.manager.start('public-01');
+  process.kill(runtime.pid, 'SIGKILL');
+  assert.ok(await until(() => !alive(runtime.pid)));
+  const state = f.manager.state, realRead = state.read.bind(state);
+  const newer = { ...runtime, status: 'STARTING', runId: crypto.randomUUID(), pid: null, createdAt: null };
+  let calls = 0;
+  state.read = async id => {
+    const value = await realRead(id);
+    if (++calls === 1) await state.write(id, newer); // a lifecycle write lands between the read and the reconcile
+    return value;
+  };
+  await f.manager.status('public-01');
+  state.read = realRead;
+  const stored = await realRead('public-01');
+  assert.deepEqual([stored.status, stored.runId], ['STARTING', newer.runId]);
 });

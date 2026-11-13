@@ -58,44 +58,44 @@ Checked without a finding: renderer isolation (`contextIsolation: true`, `nodeIn
 |----|-------|----------|-------|--------|----------|
 | A1-1 | An operator (`server.manage`) could make CONTROL run code of their choice: any executable as core (config, adopt, new instance, clone), plugins from any folder, free start arguments such as `+loadPlugin` | A2 | High | fixed | `test/security-runtime-code.test.mjs` |
 | A1-2 | A manifest file next to the core counted as proof of a verified core, and a Linux core or its folder could be writable by other users (swap after the hash check); group write is accepted only for the user's private group (umask 002) | A4 | High | fixed | `test/security-runtime-code.test.mjs` |
-| A1-3 | CONTROL itself is not refused as root/administrator; tar extraction as root keeps owners and setuid bits | A4 | Low | issue #40 |  |
-| A1-4 | Windows legacy runtime checks the PID without its creation time before stopping | A4 | Low | issue #40 |  |
+| A1-3 | CONTROL itself is not refused as root/administrator; tar extraction as root keeps owners and setuid bits | A4 | Low | fixed | `test/archive-install.test.mjs` (4.18.29) |
+| A1-4 | Windows legacy runtime checks the PID without its creation time before stopping | A4 | Low | fixed | `test/windows-runtime-process-guard.test.mjs` (4.18.29) |
 | A1-5 | Linux stop: race between the identity check and the signal (PID reuse) | A4 | Low | issue #40 |  |
-| A1-6 | Zip extraction follows symlinks already in the target and has no size limit | A5 | Low | issue #40 |  |
-| A1-7 | Artifact downloads allow `http:` (the SHA-256 pin still protects the content) and mod archives may overwrite core files in the target | A5 | Low | issue #40 |  |
+| A1-6 | Zip extraction follows symlinks already in the target and has no size limit | A5 | Low | fixed | `test/archive-install.test.mjs` (4.18.29) |
+| A1-7 | Artifact downloads allow `http:` (the SHA-256 pin still protects the content) and mod archives may overwrite core files in the target | A5 | Low | fixed | `test/archive-install.test.mjs` (4.18.29) |
 | A2-1 | RCON password and master token in the local core's command line, readable by every local user on Linux (`/proc/<pid>/cmdline`) | A4 | High | fixed | `test/security-local-launch-secrets.test.mjs` |
 | A2-2 | Instance homes 0755 and the B3 game log 0644: typed `!auth` passwords readable by local users who can reach the data folder | A4 | Medium | fixed | `test/security-instance-permissions.test.mjs` |
-| A2-3 | `audit.ndjson` is created 0644 and only then set to 0600; the audit folder is created without a mode | A4 | Low | issue #41 |  |
-| A2-4 | An unlocked vault stays unlocked until someone locks it (no idle lock) | A4 | Low | issue #41 |  |
-| A2-5 | Vault backups `backup-<uuid>.json` are never pruned | A4 | Low | issue #41 |  |
+| A2-3 | `audit.ndjson` is created 0644 and only then set to 0600; the audit folder is created without a mode | A4 | Low | fixed | `test/audit-http.test.mjs` (4.18.29) |
+| A2-4 | An unlocked vault stays unlocked until someone locks it (no idle lock) | A4 | Low | fixed | `test/credential-vault-storage.test.mjs` (4.18.29) |
+| A2-5 | Vault backups `backup-<uuid>.json` are never pruned | A4 | Low | fixed | `test/credential-vault-storage.test.mjs` (4.18.29) |
 | A3-1 | An operator (`config.manage`) chose the Python interpreter and the B3 folder, which CONTROL runs and hands the RCON and database passwords | A2 | High | fixed | `test/security-b3.test.mjs` |
 | A3-2 | A plugin setting (chat log, status file, ban list) could point B3 at any file, e.g. a shell start file that then receives player chat (also through ConfigParser `%(option)s` interpolation, found by `/security-review`, and through an XML entity, found by the final review) | A2 | High | fixed | `test/security-b3.test.mjs` |
 | A3-3 | An operator could trust plugin code that differs from the catalog | A2 | Medium | fixed | `test/security-b3.test.mjs` |
 | A3-4 | The B3 log showed full player IPs and GUIDs to read-only roles | A2 | Medium | fixed | `test/security-b3.test.mjs` |
 | A3-5 | Python and the B3 folders could be writable by other local users (code runs as the CONTROL user with the RCON and database passwords) | A4 | Medium | fixed | `test/security-b3.test.mjs` |
 | A3-6 | Plugin XML may contain a DOCTYPE with an internal subset (entity expansion can hang B3) | A2 | Low | fixed | `test/security-b3.test.mjs` |
-| A3-7 | With the `pluginmanager` plugin, a B3 admin can load modules in game that CONTROL never hashed | A2 | Low | issue #42 |  |
-| A3-8 | `POST /api/instances/:id/b3/integration/auth-password` is not covered by the credential guard (`no-store`) | A2 | Low | issue #42 |  |
+| A3-7 | With the `pluginmanager` plugin, a B3 admin can load modules in game that CONTROL never hashed | A2 | Low | fixed | `test/b3-plugin-plan.test.mjs` (4.18.29) |
+| A3-8 | `POST /api/instances/:id/b3/integration/auth-password` is not covered by the credential guard (`no-store`) | A2 | Low | fixed | `test/credential-request.test.mjs` (4.18.29) |
 | A4-1 | A compromised host could exhaust CONTROL's memory with a directory listing that never ends (SFTP `readdir` without a limit) | A6 | Medium | fixed | `test/security-remote-host.test.mjs` |
 | A4-2 | SFTP requests had no timeout: a host that never answers held the remote overview for every host, leaked sessions and kept the instance busy | A6 | Medium | fixed | `test/security-remote-host.test.mjs` |
-| A4-3 | `status()`, `statusAll()` and `health()` write the remote state outside the lock; `health()` ignores the busy flag | A2 | Low | issue #43 |  |
-| A4-4 | The remote root is not checked for owner or group/world write access | A6 | Low | issue #43 |  |
-| A4-5 | `hostname` and `map` from the host's getinfo reply reach the UI without a length limit or control-character filter | A6 | Low | issue #43 |  |
-| A4-6 | The SSH session pool keeps a logged-in session up to 60 s after the vault is locked or the key removed | A4 | Low | issue #43 |  |
-| A4-7 | Docker mounts are made by the daemon as root (parent traversal checks do not apply) and the container has no CPU limit | A2 | Low | issue #43 |  |
+| A4-3 | `status()`, `statusAll()` and `health()` write the remote state outside the lock; `health()` ignores the busy flag | A2 | Low | fixed | `test/remote-instance-runtime.test.mjs` (4.18.29) |
+| A4-4 | The remote root is not checked for owner or group/world write access | A6 | Low | fixed | `test/remote-instance-install.test.mjs` (4.18.29) |
+| A4-5 | `hostname` and `map` from the host's getinfo reply reach the UI without a length limit or control-character filter | A6 | Low | fixed | `test/remote-instance-runtime.test.mjs` (4.18.29) |
+| A4-6 | The SSH session pool keeps a logged-in session up to 60 s after the vault is locked or the key removed | A4 | Low | fixed | `test/remote-session-pool.test.mjs`, `test/instance-credential-service.test.mjs` (4.18.29) |
+| A4-7 | Docker mounts are made by the daemon as root (parent traversal checks do not apply) and the container has no CPU limit | A2 | Low | fixed | `test/docker-commands.test.mjs` (4.18.29) |
 | A5-1 | A hostile web page could create the first administrator before setup (CORS `*`, no Origin check on `/api/auth/init`) | A3 | Medium | fixed | `test/security-admin-api.test.mjs` |
 | A5-2 | A hostile web page could lock the local login and learn whether a user is disabled | A3 | Medium | fixed | `test/security-admin-api.test.mjs` |
 | A5-3 | Login brake bypass: X-Forwarded-For from a local caller at the gateway, rotating 127.x source addresses on 8787 | A4 | Medium | fixed | `test/remote.test.mjs`, `test/security-admin-api.test.mjs` |
 | A5-4 | A disabled user kept local admin API sessions for up to 12 hours | A2 | Medium | fixed | `test/security-admin-api.test.mjs` |
-| A5-5 | Read-only roles (`audit.read`) can rotate the audit log and write test entries; rotated files never match the retention pattern | A2 | Low | issue #44 |  |
-| A5-6 | `/api/remote-instances/:id/credentials` is not covered by the credential guard (local-only, `no-store`, fixed JSON parse error) | A2 | Low | issue #44 |  |
-| A5-7 | Failed step-up codes on the gateway are not throttled | A2 | Low | issue #44 |  |
-| A5-8 | The `secrets.manage` permission is shown but no route requires it; vault and credential routes use `config.manage` | A2 | Low | issue #44 |  |
+| A5-5 | Read-only roles (`audit.read`) can rotate the audit log and write test entries; rotated files never match the retention pattern | A2 | Low | fixed | `test/audit-http.test.mjs` (4.18.29) |
+| A5-6 | `/api/remote-instances/:id/credentials` is not covered by the credential guard (local-only, `no-store`, fixed JSON parse error) | A2 | Low | fixed | `test/credential-request.test.mjs` (4.18.29) |
+| A5-7 | Failed step-up codes on the gateway are not throttled | A2 | Low | fixed | `test/remote-actions.test.mjs` (4.18.29) |
+| A5-8 | The `secrets.manage` permission is shown but no route requires it; vault and credential routes use `config.manage` | A2 | Low | fixed | `test/audit-http.test.mjs` (4.18.29) |
 | A6-1 | A link opened a new Electron window that could browse anywhere; the desktop header (A5-1) went with requests from any window or frame, so a hostile page there passed the backend's Origin check (and the IPC handlers did not check the sender) | A3 | Medium | fixed | `test/security-electron.test.mjs` |
-| A6-2 | No Content-Security-Policy in `index.html` | A3 | Low | issue #45 |  |
-| A6-3 | No permission request handler: Electron grants web permissions by default | A3 | Low | issue #45 |  |
-| A6-4 | `remembered-login.json` is written with the default file mode; on Linux without a keyring safeStorage falls back to weak protection | A4 | Low | issue #45 |  |
-| A6-5 | `docs/SECURITY-ADVISORIES.md` does not list the production dependency `ssh2` | A5 | Low | issue #45 |  |
+| A6-2 | No Content-Security-Policy in `index.html` | A3 | Low | fixed | `test/security-electron.test.mjs` (4.18.29) |
+| A6-3 | No permission request handler: Electron grants web permissions by default | A3 | Low | fixed | `test/security-electron.test.mjs` (4.18.29) |
+| A6-4 | `remembered-login.json` is written with the default file mode; on Linux without a keyring safeStorage falls back to weak protection | A4 | Low | fixed | `test/security-electron.test.mjs` (4.18.29) |
+| A6-5 | `docs/SECURITY-ADVISORIES.md` does not list the production dependency `ssh2` | A5 | Low | fixed | `test/security-electron.test.mjs` (4.18.29) |
 
 ## Rejected findings
 

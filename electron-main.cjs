@@ -12,7 +12,7 @@ const HOST='127.0.0.1';
 const DESKTOP_CLIENT_TOKEN=crypto.randomBytes(32).toString('hex');
 // Security audit 4.18.26 (A6-1): windows show only the app page, links open in the system
 // browser, the desktop header and the IPC handlers serve only the main window's app page.
-const {isAppPage,externalUrlAllowed,desktopHeaderAllowed}=require('./lib/electron-navigation-policy.cjs');
+const {isAppPage,externalUrlAllowed,desktopHeaderAllowed,permissionAllowed,rememberedLoginBackendAllowed}=require('./lib/electron-navigation-policy.cjs');
 const APP_INDEX=path.join(__dirname,'dist','index.html');
 let mainWebContentsId=null;
 function handle(channel, listener){
@@ -56,24 +56,34 @@ const REMEMBERED_LOGIN_FILE = () => path.join(app.getPath('userData'), 'remember
 
 // 4.18.17: asynchronous safeStorage API (the synchronous one is deprecated in
 // Electron 45). Values written by the old API decrypt unchanged.
+// Security audit 4.18.26 (A6-4): not with the fixed-key fallback on Linux.
 async function rememberedLoginAvailable(){
-  try { return Boolean(await safeStorage.isAsyncEncryptionAvailable()); } catch { return false; }
+  try {
+    const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend?.() : undefined;
+    if (!rememberedLoginBackendAllowed(process.platform, backend)) return false;
+    return Boolean(await safeStorage.isAsyncEncryptionAvailable());
+  } catch { return false; }
 }
 
 async function writeRememberedLogin(username, password){
   const fs = require('fs/promises');
   const file = REMEMBERED_LOGIN_FILE();
   const tmp = `${file}.tmp-${process.pid}`;
-  await fs.mkdir(path.dirname(file), {recursive:true});
+  await fs.mkdir(path.dirname(file), {recursive:true, mode:0o700});
   const encrypted = (await safeStorage.encryptStringAsync(password)).toString('base64');
-  await fs.writeFile(tmp, JSON.stringify({version:1, username, password:encrypted}) + '\n', {encoding:'utf8'});
+  await fs.writeFile(tmp, JSON.stringify({version:1, username, password:encrypted}) + '\n', {encoding:'utf8', mode:0o600});
   await fs.rename(tmp, file);
 }
 
 async function readRememberedLogin(){
-  if (!(await rememberedLoginAvailable())) return {available:false, credentials:null};
+  if (!(await rememberedLoginAvailable())) {
+    // A login stored under weak protection by an older version is removed (A6-4).
+    await require('fs/promises').rm(REMEMBERED_LOGIN_FILE(), {force:true}).catch(() => {});
+    return {available:false, credentials:null};
+  }
   try {
     const fs = require('fs/promises');
+    if (process.platform !== 'win32') await fs.chmod(REMEMBERED_LOGIN_FILE(), 0o600).catch(() => {});
     const raw = JSON.parse(await fs.readFile(REMEMBERED_LOGIN_FILE(), 'utf8'));
     if (!raw || raw.version !== 1 || typeof raw.username !== 'string' || typeof raw.password !== 'string') {
       return {available:true, credentials:null};
@@ -139,6 +149,11 @@ async function createWindow(){
   if(!ok){ dialog.showErrorBox('COD4X CONTROL','Das lokale Installer-Backend konnte nicht gestartet werden.'); app.quit(); return; }
   win.loadFile(APP_INDEX);
 }
-app.whenReady().then(async()=>{startBackend();await createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
+// Security audit 4.18.26 (A6-3): refuse every web permission except what permissionAllowed grants.
+function restrictPermissions(session){
+  session.setPermissionRequestHandler((contents,permission,callback)=>callback(permissionAllowed({permission,webContentsId:contents?.id,url:contents?.getURL?.()},mainWebContentsId,APP_INDEX)));
+  session.setPermissionCheckHandler((contents,permission)=>permissionAllowed({permission,webContentsId:contents?.id,url:contents?.getURL?.()},mainWebContentsId,APP_INDEX));
+}
+app.whenReady().then(async()=>{restrictPermissions(require('electron').session.defaultSession);startBackend();await createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
 app.on('before-quit',()=>{app.isQuitting=true;if(server)server.kill();});
 app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});

@@ -20,6 +20,8 @@ const MESSAGES = {
   PUSH_DENIED: 'Benachrichtigungen sind für diese Seite blockiert. In den Browser-Einstellungen erlauben.',
   REMOTE_STEP_UP_REQUIRED: 'Bitte einen frischen Code aus der Authenticator-App eingeben.',
   REMOTE_STEP_UP_INVALID: 'Code ungültig oder schon benutzt. Wiederherstellungscodes gelten hier nicht.',
+  REMOTE_STEP_UP_LOCKED: 'Zu viele falsche Codes. Bitte später erneut versuchen.',
+  REMOTE_RATE_LIMITED: 'Zu viele Anfragen. Bitte eine Minute warten.',
   REMOTE_ACTION_LIMIT: 'Zu viele Aktionen in kurzer Zeit. Bitte ein paar Minuten warten.',
   REMOTE_RESTART_COOLDOWN: 'Dieser Server wurde gerade erst neu gestartet. Bitte kurz warten.',
   REMOTE_ACTIONS_DISABLED: 'Fernaktionen sind für dich nicht freigeschaltet.',
