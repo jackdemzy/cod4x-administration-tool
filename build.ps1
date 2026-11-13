@@ -7,7 +7,7 @@ Set-Location $PSScriptRoot
 
 Write-Host ''
 Write-Host '========================================='
-Write-Host ' COD4X CONTROL 4.18.29 - Windows Build'
+Write-Host ' COD4X CONTROL 4.18.30 - Windows Build'
 Write-Host '========================================='
 Write-Host ''
 
@@ -30,7 +30,7 @@ Write-Host ''
 
 # Dependencies come first: the preflight runs the test suite, and those tests import
 # npm packages (tar, express, ssh2). On a fresh source folder they are not there yet.
-Write-Host '[1/4] Installiere Dependencies ...'
+Write-Host '[1/5] Installiere Dependencies ...'
 $lockfile = Join-Path $PSScriptRoot 'package-lock.json'
 if (Test-Path $lockfile) {
   Write-Host 'package-lock.json gefunden -> npm ci'
@@ -60,23 +60,32 @@ if (-not (Test-Path $stdUtils)) {
 }
 Write-Host 'NSIS-Abhängigkeit OK: StdUtils.nsh vorhanden.' -ForegroundColor Green
 
-Write-Host '[2/4] Prüfe Source ...'
+Write-Host '[2/5] Prüfe Source ...'
 npm run preflight
 if ($LASTEXITCODE -ne 0) { throw "Preflight fehlgeschlagen (ExitCode $LASTEXITCODE)." }
 
-Write-Host '[3/4] Baue React/Vite ...'
+Write-Host '[3/5] Baue React/Vite ...'
 npm run build
 if ($LASTEXITCODE -ne 0) { throw "Vite-Build fehlgeschlagen (ExitCode $LASTEXITCODE). Installer wird nicht gebaut." }
 
-Write-Host '[4/4] Erzeuge Electron/NSIS Installer ...'
-npx electron-builder --win nsis
+Write-Host '[4/5] Erzeuge Electron/NSIS Installer und Portable-EXE ...'
+npx electron-builder --win nsis portable --publish never
 if ($LASTEXITCODE -ne 0) { throw "Electron/NSIS-Build fehlgeschlagen (ExitCode $LASTEXITCODE)." }
 
-$installer = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Setup-4.18.29-x64.exe'
-if (-not (Test-Path $installer)) {
-  throw "Build beendet, aber erwartete EXE wurde nicht gefunden: $installer"
+$installer = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Setup-4.18.30-x64.exe'
+$portable = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Portable-4.18.30-x64.exe'
+foreach ($artifact in @($installer, $portable)) {
+  if (-not (Test-Path $artifact)) { throw "Build beendet, aber erwartete EXE wurde nicht gefunden: $artifact" }
 }
+
+# Block 23: SHA-256 and artifact verification (expected files, app.asar content), writes
+# dist-installer\SHA256SUMS and dist-installer\release-manifest.json.
+Write-Host '[5/5] Pruefe Artefakte und schreibe SHA-256 ...'
+node scripts/release-verify.mjs --platform win
+if ($LASTEXITCODE -ne 0) { throw "Artefaktpruefung fehlgeschlagen (ExitCode $LASTEXITCODE)." }
 
 Write-Host ''
 Write-Host 'BUILD ERFOLGREICH' -ForegroundColor Green
 Write-Host "Installer: $installer"
+Write-Host "Portable : $portable"
+Write-Host "SHA-256  : $(Join-Path $PSScriptRoot 'dist-installer\SHA256SUMS')"
