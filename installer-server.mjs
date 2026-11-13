@@ -2153,10 +2153,15 @@ function validateBackupPayload(payload) {
 }
 
 // R-1: the restored user set must keep an enabled administrator, or nobody could log in to fix it.
+// Judged on the set loadAuthUsers would build: invalid rows dropped, one entry per name
+// (case-insensitive, the last row wins).
 function backupUsersHaveAdmin(text) {
   try {
     const rows = JSON.parse(text)?.users;
-    return Array.isArray(rows) && rows.some(row => row?.disabled !== true && normalizeAuthUser(row)?.role === "admin");
+    if (!Array.isArray(rows)) return false;
+    const users = new Map();
+    for (const row of rows) { const user = normalizeAuthUser(row); if (user) users.set(user.username.toLowerCase(), { role: user.role, disabled: row.disabled === true }); }
+    return [...users.values()].some(user => user.role === "admin" && !user.disabled);
   } catch { return false; }
 }
 // R-2: loads the restored accounts and ends every local and remote session of an account that
@@ -2164,7 +2169,15 @@ function backupUsersHaveAdmin(text) {
 async function applyRestoredUsers() {
   const fingerprint = user => user ? JSON.stringify([user.role, user.passwordHash, user.disabled === true, user.remoteAccess === true, user.remoteActions === true, user.totp?.secret || null, user.recovery || []]) : null;
   const before = new Map([...authUsers].map(([name, user]) => [name, fingerprint(user)]));
+  const steps = new Map([...authUsers].filter(([, user]) => user.totp).map(([name, user]) => [name, user.totp]));
   await loadAuthUsers();
+  // A used TOTP code stays used: for the same secret the replay counter never goes back.
+  let keptSteps = false;
+  for (const [name, user] of authUsers) {
+    const old = steps.get(name);
+    if (user.totp && old && old.secret === user.totp.secret && Number.isInteger(old.lastStep) && !(user.totp.lastStep >= old.lastStep)) { user.totp.lastStep = old.lastStep; keptSteps = true; }
+  }
+  if (keptSteps) await saveAuthUsers();
   const changed = [...new Set([...before.keys(), ...authUsers.keys()])].filter(name => before.get(name) !== fingerprint(authUsers.get(name)));
   let ended = 0;
   for (const name of changed) {
@@ -2264,11 +2277,17 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
     try {
       for (const item of BACKUP_FILES) {
         const value = record.raw.payload[item.key];
-        if (value === null) continue;
+        // Unchanged accounts are not written at all, so a restore never overwrites an account
+        // change made while it runs (an operator's restore never touches users.json).
+        if (value === null || (item.key === "users" && !usersChange)) continue;
         const dir = path.dirname(item.file); await fs.mkdir(dir,{recursive:true});
         const tmp = `${item.file}.restore-${process.pid}-${crypto.randomUUID()}`;
         // R-3: users.json holds password hashes and TOTP secrets; all three files stay owner-only.
         await fs.writeFile(tmp, value, { encoding: "utf8", mode: 0o600 }); temps.push({tmp,target:item.file});
+      }
+      // The accounts the permission check saw must still be the current ones.
+      if (usersChange && (await fs.readFile(AUTH_USERS_FILE, "utf8").catch(err => { if (err.code === "ENOENT") return null; throw err; })) !== currentUsers) {
+        throw Object.assign(new Error("Restore blocked: the user accounts changed during the restore."), { code: "BACKUP_RESTORE_CONFLICT" });
       }
       for (const item of temps) { await fs.rename(item.tmp,item.target); await fs.chmod(item.target, 0o600).catch(() => {}); }
     } catch (e) {
@@ -2284,7 +2303,7 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
     res.json({ok:true,restored:record.meta.id,correlationId,sha256:actual,safetySnapshotId:safetyId,usersRestored:usersChange,sessionsEnded});
   } catch (e) {
     audit("error", "backup.restore.failed", {id:req.params.id, correlationId, error:e.message});
-    res.status(500).json({ok:false,error:e.message,correlationId});
+    res.status(e.code === "BACKUP_RESTORE_CONFLICT" ? 409 : 500).json({ok:false,...(e.code === "BACKUP_RESTORE_CONFLICT" ? {code:e.code} : {}),error:e.message,correlationId});
   }
 });
 
