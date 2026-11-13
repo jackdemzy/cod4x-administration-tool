@@ -13,7 +13,7 @@ const source = fs.readFileSync(new URL('../lib/runtime-manager.mjs', import.meta
 const start = source.indexOf('const RUNTIME_STATE_FILE =');
 const end = source.indexOf('// Runtime manager API', start);
 assert.ok(start >= 0 && end > start, 'Runtime Manager extraction boundary missing');
-function harness({ queryFails = false, imagePath = 'C:\\core\\cod4x18_dedrun.exe', reuseBeforeForce = false, lifecycle = false, earlyExit = false, verified = true } = {}) {
+function harness({ queryFails = false, imagePath = 'C:\\core\\cod4x18_dedrun.exe', reuseBeforeForce = false, lifecycle = false, earlyExit = false, verified = true, createdAt = undefined } = {}) {
   const commands = [];
   const children = [];
   let terminated = false;
@@ -55,7 +55,7 @@ function harness({ queryFails = false, imagePath = 'C:\\core\\cod4x18_dedrun.exe
         if (queryFails) throw new Error('Access denied during process inspection');
         return { stdout: terminated ? 'INFO: No tasks are running' : '"cod4x18_dedrun.exe","456","Console","1","1 K"' };
       }
-      if (file === 'powershell.exe') return { stdout: JSON.stringify(terminated ? { found: false } : { found: true, executablePath: reuseBeforeForce && firstStop ? 'C:\\other\\cod4x18_dedrun.exe' : imagePath }) };
+      if (file === 'powershell.exe') return { stdout: JSON.stringify(terminated ? { found: false } : { found: true, executablePath: reuseBeforeForce && firstStop ? 'C:\\other\\cod4x18_dedrun.exe' : imagePath, createdAt }) };
       if (file === 'taskkill.exe') {
         firstStop = true;
         if (!reuseBeforeForce || args.includes('/F')) terminated = true;
@@ -238,4 +238,20 @@ test('control: runtime output stays bounded for ASCII output', () => {
   const output = h.evaluate('runtimeState.output');
   assert.ok(Buffer.byteLength(output.stdout) <= 64 * 1024);
   assert.equal(output.stdoutTruncated, true);
+});
+
+// Security audit 4.18.26 (A1-4): the legacy runtime (no instance ownership) compares the saved
+// process creation time too, so a reused PID of another core at the same path is not stopped.
+test('legacy stop refuses a process whose creation time differs from the saved one', async () => {
+  const h = harness({ createdAt: '2026-11-13T01:00:00.0000000Z' });
+  h.evaluate("runtimeState.processCreatedAt='2026-11-13T00:00:00.0000000Z'");
+  await assert.rejects(h.evaluate('stopRuntime()'), error => error.code === 'RUNTIME_PROCESS_IDENTITY_BLOCKED');
+  assert.equal(h.commands.some(command => command.file === 'taskkill.exe'), false);
+  assert.equal(h.evaluate('runtimeState.pid'), 456);
+});
+
+test('legacy stop with a matching creation time still stops', async () => {
+  const h = harness({ createdAt: '2026-11-13T00:00:00.0000000Z' });
+  h.evaluate("runtimeState.processCreatedAt='2026-11-13T00:00:00.0000000Z'");
+  assert.equal((await h.evaluate('stopRuntime()')).status, 'STOPPED');
 });

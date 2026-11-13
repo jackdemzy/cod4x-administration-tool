@@ -54,7 +54,7 @@ import { InstanceB3AdminService } from "./lib/instance-b3-admin-service.mjs";
 import { InstanceB3PluginService } from "./lib/instance-b3-plugin-service.mjs";
 import { RconClient } from "./lib/rcon-client.mjs";
 import { RestorePointStore } from "./lib/restore-points.mjs";
-import { installArtifacts, restoreFilesPoint, snapshotFiles, assertSafeChildPath as assertInsideRoot, DEFAULT_RUNTIME_SUBJECT } from "./lib/archive-install.mjs";
+import { installArtifacts, artifactUrl, restoreFilesPoint, snapshotFiles, assertSafeChildPath as assertInsideRoot, DEFAULT_RUNTIME_SUBJECT } from "./lib/archive-install.mjs";
 import { guardedChange } from "./lib/restore-guard.mjs";
 import { MonitorStore, monitorRange } from "./lib/monitor-store.mjs";
 import { MonitorCollector } from "./lib/monitor-collector.mjs";
@@ -849,12 +849,7 @@ async function sha256(file) {
   return hash.digest("hex");
 }
 
-function allowedArtifact(entry) {
-  if (!entry?.url) throw new Error("Artifact URL is not configured on the server");
-  const u = new URL(entry.url);
-  if (!["https:", "http:"].includes(u.protocol)) throw new Error("Only HTTP(S) artifacts are allowed");
-  return u;
-}
+const allowedArtifact = artifactUrl; // https only (security audit 4.18.26, A1-7)
 
 async function downloadTo(url, target) {
   const response = await fetch(url, { redirect: "error" });
@@ -3088,4 +3083,9 @@ await applyRemoteGateway();
 
 app.listen(PORT, HOST, () => {
   console.log(`COD4X CONTROL installer API listening on :${PORT}`);
+  // Security audit 4.18.26 (A1-3): CONTROL does not need root; the core start already refuses it.
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    console.warn("[security] COD4X CONTROL runs as root. Run it as a normal user; server starts are refused as root.");
+    audit("warn", "control.running_as_root", { uid: 0 });
+  }
 });
