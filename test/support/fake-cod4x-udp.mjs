@@ -7,9 +7,9 @@ import dgram from 'node:dgram';
 const OOB = Buffer.from([0xff, 0xff, 0xff, 0xff]);
 const REDIRECT_BUFFER = 1024;
 
-export async function startFakeCod4xServer({ port = 0, password = '', hostname = 'Fake CoD4x', mapname = 'mp_backlot', silent = false, plugins = [], statusPlayers = [] } = {}) {
+export async function startFakeCod4xServer({ port = 0, password = '', hostname = 'Fake CoD4x', mapname = 'mp_backlot', silent = false, plugins = [], statusPlayers = [], joinable = false } = {}) {
   const socket = dgram.createSocket('udp4');
-  const state = { password, hostname, mapname, commands: [], denied: 0, lastDenyAt: 0, silent, rawPackets: [] };
+  const state = { password, hostname, mapname, commands: [], denied: 0, lastDenyAt: 0, silent, rawPackets: [], joined: [] };
   const send = (text, remote) => socket.send(Buffer.concat([OOB, Buffer.from(text, 'latin1')]), remote.port, remote.address);
   // Like Com_PrintMessage + SV_FlushRedirect: flush whenever the buffer would overflow.
   const print = (output, remote) => {
@@ -31,8 +31,15 @@ export async function startFakeCod4xServer({ port = 0, password = '', hostname =
     }
     // Block 24: getstatus (SVC_Status) echoes the challenge in the infostring.
     if (verb === 'getstatus') {
-      const lines = statusPlayers.map(player => `${player.score} ${player.ping} "${player.name}"\n`).join('');
+      const lines = [...statusPlayers, ...state.joined.map(name => ({ score: 0, ping: 48, name }))].map(player => `${player.score} ${player.ping} "${player.name}"\n`).join('');
       send(`statusResponse\n\\challenge\\${rest[0] || ''}\\sv_hostname\\^1${state.hostname}\\mapname\\${state.mapname}\\g_gametype\\war\\sv_maxclients\\18\n${lines}`, remote);
+      return;
+    }
+    // Block 22 (E2E): with joinable, "e2ejoin <name>" stands in for a client that completed
+    // its connect; the player then shows in getstatus and in the rcon status table.
+    if (joinable && verb === 'e2ejoin' && rest[0]) {
+      if (!state.joined.includes(rest[0]) && state.joined.length < 18) state.joined.push(rest[0]);
+      send('e2ejoinResponse', remote);
       return;
     }
     if (verb !== 'rcon') return;
@@ -48,7 +55,8 @@ export async function startFakeCod4xServer({ port = 0, password = '', hostname =
     state.commands.push(command);
     if (command === 'status') {
       let output = `map: ${state.mapname}\nnum score ping guid                             name            lastmsg address               qport rate\n--- ----- ---- -------------------------------- --------------- ------- --------------------- ----- -----\n`;
-      for (let index = 0; index < 24; index++) output += `${String(index).padStart(3)}     0   50 ${'0'.repeat(32)} Bot${index}           0 bot                   0     25000\n`;
+      if (joinable) state.joined.forEach((name, index) => { output += `${String(index).padStart(3)}     0   48 ${(2310346613472386 + index).toString().padEnd(32)} ${name.padEnd(15)}^7       0 127.0.0.1:${String(40000 + index).padEnd(14)} ${String(4321 + index).padStart(5)} 25000\n`; });
+      else for (let index = 0; index < 24; index++) output += `${String(index).padStart(3)}     0   50 ${'0'.repeat(32)} Bot${index}           0 bot                   0     25000\n`;
       print(output, remote);
     } else if (command === 'serverinfo') print(`Server info settings:\nsv_hostname    ${state.hostname}\nmapname        ${state.mapname}\nsv_maxclients  18\n`, remote);
     else if (command === 'systeminfo') print('System info settings:\nsv_serverid    1\n', remote);

@@ -1,4 +1,4 @@
-# WSL-Checkliste: native Tests (Stand 4.18.26)
+# WSL-Checkliste: native Tests (Stand 4.18.28)
 
 Diese Checkliste enthält alles, was die Cloud-Umgebung **nicht** prüfen kann, weil dafür ein echter CoD4x-Core, ein echter `sshd` oder dein Windows-/Handy-Setup nötig ist. Jeder Punkt hat einen genauen Befehl, die erwartete PASS-Zeile und die Frage, was ein Fehlschlag bedeutet.
 
@@ -34,7 +34,7 @@ export COD4X_BASEGAME="$HOME/cod4-base"
 
 | ☐ | Befehl | Erwartung | Ergebnis |
 |---|---|---|---|
-| ☐ | `node scripts/preflight-4.18.27.mjs` | Exit 0, darin `Block 21 recovery gate PASS` und `Security audit gate PASS`, letzte Zeile beginnt mit `4.18.27 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
+| ☐ | `node scripts/preflight-4.18.28.mjs` | Exit 0, darin `4.18.28 E2E gate PASS` (auf Windows `SKIP E2E gate needs Linux and gcc`), `Block 21 recovery gate PASS` und `Security audit gate PASS`, letzte Zeile beginnt mit `4.18.28 source preflight PASS`. Native Prüfungen ohne Voraussetzungen melden `SKIP`, das ist erlaubt. | |
 | ☐ | `node --test "test/*.test.mjs"` | `# fail 0`. Cloud-Referenz 4.18.25 (mit laufendem Docker-Daemon): 832 Tests / 825 PASS / 7 SKIP; ohne Docker-Daemon kommen die Tests gegen echtes Docker als SKIP dazu. In WSL sind weniger SKIPs möglich (mehr Linux-Tests laufen), auf Windows mehr. | |
 
 Notiere `# tests`, `# pass`, `# fail`, `# skipped` und trage sie in `DEVELOPMENT_STATUS.md` („Last run“) ein.
@@ -216,6 +216,30 @@ Von Hand in der App (Remote Linux): beim Host „Docker-Status“ öffnen, bei d
 | ☐ | B3-Migration gegen echtes MySQL | Testdatenbank mit B3-Tabellen, Migration mit eBc-Opt-in so stören, dass sie scheitert (z. B. Rechte für CREATE entziehen): die Tabellen sind danach wie vor der Migration, die Sicherung unter `b3/backups/` ist eingespielt. Einen manuellen Punkt mit B3-Datenbank anlegen, Daten ändern, mit Häkchen und `B3-DATENBANK ZURÜCKSETZEN` einspielen: die Daten sind wie zum Punkt. | |
 | ☐ | Core wechseln (lokal) | Als Admin einen anderen erlaubten Core wählen: der Server startet mit ihm; den Punkt davor einspielen: wieder der alte Core. Als Operator wird `/core` mit 403 abgelehnt. | |
 | ☐ | Remote-Core zurücksetzen | Remote-Server: Core-Update, dann „Core zurücksetzen“: der alte Core und seine Version sind zurück, der Server startet. | |
+
+---
+
+## 3f. End-to-End mit echtem Core (Block 22, 4.18.28)
+
+```bash
+export COD4X_CORE="$HOME/core-21.2/cod4x18_dedrun"
+export COD4X_BASEGAME="$HOME/cod4-base"
+# optional: echter Master-Token, nur um den benannten Master-Zustand zu sehen
+# export COD4X_E2E_MASTER_TOKEN="..."
+node scripts/verify-4.18.28-e2e-native.mjs
+```
+
+| ☐ | Erwartete Zeilen | Ergebnis |
+|---|---|---|
+| ☐ | `PASS Install: adopt the real core`, `PASS Detect Core + BaseGame`, `PASS Create Server + Config (three instances)` | |
+| ☐ | `PASS Start`, `PASS Map: rcon map mp_crash` (echter Mapwechsel), `PASS RCON: status` | |
+| ☐ | `PASS Master List` und `PASS B3` mit einer `INFO`-Zeile (benannter Zustand, kein 5xx) | |
+| ☐ | `PASS Multi-Server: three real cores on consecutive ports, own passwords only` | |
+| ☐ | `PASS Stop + Restart`, `PASS Server crash`, `PASS Backend restart`; letzte Zeile `4.18.28 native E2E PASS` | |
+| ☐ | **Client Join (manuell):** Instanz mit Netz „öffentlich“ starten, mit echtem CoD4-Client (iw3mp) verbinden; der Spieler erscheint in CONTROL unter „Online“ und lässt sich kicken. | |
+| ☐ | **Windows (manuell):** derselbe Ablauf in der Desktop-App unter Windows 11: Core übernehmen, Server anlegen, starten, Map wechseln, RCON `status`, stoppen, neu starten; danach ein Fehlerfall (z. B. `main/*.iwd` umbenennen → Start mit `BASEGAME_INVALID` abgelehnt, App läuft weiter). | |
+
+Bedeutung eines Fehlschlags: Der CI-Lauf nutzt einen Test-Core. Was nur hier rot wird, liegt am echten Core (Startzeit, Ausgaben, Mapwechsel, Prozessverhalten) und ist genau der Fund, den dieser Abschnitt liefern soll.
 
 ---
 
