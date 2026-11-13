@@ -6,8 +6,12 @@
     "dev": "vite",
     "build": "vite build && vite build -c vite.remote.config.js",
     "start": "node installer-server.mjs",
-    "dist:win": "npm run build && electron-builder --win nsis",
-    "preflight": "node scripts/preflight-4.18.29.mjs"
+    "dist:win": "npm run build && electron-builder --win nsis portable --publish never",
+    "preflight": "node scripts/preflight-4.18.29.mjs",
+    "dist:linux": "npm run build && electron-builder --linux AppImage --publish never",
+    "release:win": "node scripts/release.mjs --platform win",
+    "release:linux": "node scripts/release.mjs --platform linux",
+    "release:verify": "node scripts/release-verify.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
@@ -47,7 +51,8 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ],
       "artifactName": "COD4X-CONTROL-Setup-${version}-${arch}.exe"
     },
@@ -60,7 +65,18 @@
       "deleteAppDataOnUninstall": true,
       "license": "LICENSE"
     },
-    "artifactName": "COD4X-CONTROL-Setup-${version}-${arch}.exe"
+    "artifactName": "COD4X-CONTROL-Setup-${version}-${arch}.exe",
+    "portable": {
+      "artifactName": "COD4X-CONTROL-Portable-${version}-${arch}.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "executableName": "cod4x-control",
+      "artifactName": "COD4X-CONTROL-${version}-${arch}.AppImage"
+    }
   },
   "main": "electron-main.cjs",
   "description": "COD4X CONTROL — Windows and Linux Dedicated Server runtime with verified process lifecycle controls.",
