@@ -45,7 +45,7 @@ Fixes the Low findings of the 4.18.26 security audit (issues #40 to #45) and add
 
 ## Issue #49 – rate limit
 
-`express-rate-limit` 8.7.1 (new production dependency, pinned exactly) limits changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) under `/api` to 300 per minute and client by default (`COD4X_WRITE_RATE_LIMIT`, 1 to 10000). Reads stay free; the login keeps its own brake. Above the limit: 429 `RATE_LIMITED` with `Retry-After` and one audit entry per window.
+`express-rate-limit` 8.7.1 (new production dependency, pinned exactly) limits changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) under `/api` to 300 per minute and client by default (`COD4X_WRITE_RATE_LIMIT`, 1 to 10000). Reads stay free; the login keeps its own brake. Above the limit: 429 `RATE_LIMITED` with `Retry-After` and one audit entry per window. The remote gateway limits its changing requests (login, logout, push, step-up, actions) to 60 per minute and client (429 `REMOTE_RATE_LIMITED`).
 
 ## Native checks still open
 
