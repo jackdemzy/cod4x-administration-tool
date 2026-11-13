@@ -270,7 +270,6 @@ const RBAC_PERMISSIONS = [
   { id: "update.execute", label: "Updates ausführen", description: "Verbindliche Update-Ausführung autorisieren." },
   { id: "server.manage", label: "Serververwaltung", description: "Serverinstanzen und Betriebssteuerung verwalten." },
   { id: "config.manage", label: "Konfiguration", description: "Serverkonfiguration und Profile verwalten." },
-  { id: "secrets.manage", label: "Secrets", description: "Credential Vault und Secrets verwalten." },
   { id: "diagnostics.read", label: "Diagnostics", description: "Diagnose- und Health-Daten lesen." },
   { id: "audit.read", label: "Audit", description: "Audit-Trail und persistente Audit-Daten lesen." },
   { id: "user.manage", label: "Benutzerverwaltung", description: "Benutzer, Rollen und Benutzer-Sessions verwalten." },
@@ -343,14 +342,15 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "server", permission: "server.manage", routes: ["POST /api/server/start", "POST /api/runtime/start", "POST /api/runtime/stop", "POST /api/runtime/restart", "POST /api/rcon/execute", "POST /api/instances/:id/rcon/connect", "POST /api/instances/:id/rcon/command", "POST /api/admin/test"] },
   { area: "restore-points", permission: "config.manage", routes: ["GET /api/instances/:id/restore-points", "POST /api/instances/:id/restore-points", "GET /api/instances/:id/restore-points/:pointId/integrity", "POST /api/instances/:id/restore-points/:pointId/restore", "GET /api/runtime/restore-points", "POST /api/runtime/restore-points", "GET /api/runtime/restore-points/:pointId/integrity"] },
   { area: "configuration", permission: "config.manage", routes: ["GET /api/policy", "POST /api/policy/validate", "POST /api/policy/save", "GET /api/config/profiles", "POST /api/config/profiles/save", "POST /api/config/profiles/activate", "POST /api/config/profiles/delete"] },
-  { area: "secrets", permission: "secrets.manage", routes: [] },
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
   { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances/:id/core", "POST /api/runtime/restore-points/:pointId/restore", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   ...REMOTE_LINUX_BINDINGS,
-  { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "POST /api/audit/test", "GET /api/audit/persistent", "POST /api/audit/persist", "POST /api/audit/rotate", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
+  { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "GET /api/audit/persistent", "POST /api/audit/persist", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
+  // Security audit 4.18.26 (A5-5): writing to the audit log is not a read right.
+  { area: "audit-admin", permission: "user.manage", routes: ["POST /api/audit/test", "POST /api/audit/rotate"] },
 ]);
 
 function authorizationBindingChecks() {
@@ -360,7 +360,6 @@ function authorizationBindingChecks() {
     { id: "updates", label: "Update binding", pass: hasPermission("admin", "update.execute") },
     { id: "server", label: "Server management binding", pass: hasPermission("admin", "server.manage") },
     { id: "config", label: "Configuration binding", pass: hasPermission("admin", "config.manage") },
-    { id: "secrets", label: "Secrets permission available", pass: hasPermission("admin", "secrets.manage") },
     { id: "diagnostics", label: "Diagnostics binding", pass: hasPermission("admin", "diagnostics.read") },
     { id: "audit", label: "Audit binding", pass: hasPermission("admin", "audit.read") },
     { id: "denied", label: "Denied role produces 403", pass: !hasPermission("viewer", "server.manage") },
@@ -1512,13 +1511,15 @@ function isSafeAuditPath(candidate) {
 
 function rotatedAuditFiles(entries) {
   return entries
-    .filter(name => /^audit-\d{8}-\d{6}-\d{3}\.ndjson$/.test(name))
+    .filter(name => /^audit-\d{8}-\d{6}[.-]\d{3}(?:-\d{2,})?\.ndjson$/.test(name))
     .sort()
     .reverse();
 }
 
 async function enforceAuditPermissions() {
   if (process.platform === "win32") return;
+  // Security audit 4.18.26 (A2-3): also tightens a folder created by an older version.
+  try { await fs.chmod(AUDIT_DIR, 0o700); } catch {}
   try { await fs.chmod(AUDIT_FILE, 0o600); } catch {}
 }
 
@@ -1527,7 +1528,7 @@ async function rotateAuditLog(reason = "size") {
     throw new Error("Audit log path escapes configured audit root");
   }
   try {
-    await fs.mkdir(AUDIT_DIR, { recursive: true });
+    await fs.mkdir(AUDIT_DIR, { recursive: true, mode: 0o700 });
     let stat;
     try { stat = await fs.stat(AUDIT_FILE); } catch (err) {
       if (err.code === "ENOENT") return { rotated: false, reason: "missing" };
@@ -1573,14 +1574,14 @@ function persistAuditEntry(entry) {
       if (!isSafeAuditPath(AUDIT_DIR) || !isSafeAuditPath(AUDIT_FILE)) {
         throw new Error("Audit log path escapes configured audit root");
       }
-      await fs.mkdir(AUDIT_DIR, { recursive: true });
+      await fs.mkdir(AUDIT_DIR, { recursive: true, mode: 0o700 });
       let currentBytes = 0;
       try { currentBytes = (await fs.stat(AUDIT_FILE)).size; }
       catch (err) { if (err.code !== "ENOENT") throw err; }
       if (currentBytes > 0 && currentBytes + Buffer.byteLength(line, "utf8") > AUDIT_MAX_BYTES()) {
         await rotateAuditLog("size");
       }
-      await fs.appendFile(AUDIT_FILE, line, { encoding: "utf8", flag: "a" });
+      await fs.appendFile(AUDIT_FILE, line, { encoding: "utf8", flag: "a", mode: 0o600 });
       await enforceAuditPermissions();
       auditIoState = { ok: true, error: "" };
     })
@@ -1667,7 +1668,7 @@ app.get("/api/audit", requirePermission("audit.read"), (req, res) => {
   res.json({ ok: true, bounded: true, maxEvents: AUDIT_MAX_EVENTS(), events });
 });
 
-app.post("/api/audit/test", requirePermission("audit.read"), (_req, res) => {
+app.post("/api/audit/test", requirePermission("user.manage"), (_req, res) => {
   const entry = audit("info", "audit.test", { source: "manual" });
   res.json({ ok: true, entry });
 });
@@ -1695,7 +1696,7 @@ app.post("/api/audit/persist", requirePermission("audit.read"), async (_req, res
   }
 });
 
-app.post("/api/audit/rotate", requirePermission("audit.read"), async (_req, res) => {
+app.post("/api/audit/rotate", requirePermission("user.manage"), async (_req, res) => {
   try {
     await auditWriteQueue;
     const result = await rotateAuditLog("manual");
