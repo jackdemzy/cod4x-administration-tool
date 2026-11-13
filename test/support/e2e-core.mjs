@@ -56,12 +56,22 @@ int main(int argc, char **argv) {
     fclose(handle);
   }
   fflush(stdout);
+  /* No SIGTERM between fork and recording the child's PID; the child checks that the core is
+     still its parent after arming PDEATHSIG, so it can never outlive a core that died early. */
+  sigset_t block, previous;
+  sigemptyset(&block); sigaddset(&block, SIGTERM); sigaddset(&block, SIGINT);
+  sigprocmask(SIG_BLOCK, &block, &previous);
+  pid_t core = getpid();
   udp = fork();
   if (udp == 0) {
     prctl(PR_SET_PDEATHSIG, SIGTERM);
+    if (getppid() != core) _exit(0);
+    signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL);
+    sigprocmask(SIG_SETMASK, &previous, NULL);
     execl(${cString(node)}, "node", ${cString(script)}, "--port", port, "--ip", ip, "--password", password, "--hostname", hostname, "--map", map, (char *)NULL);
     _exit(127);
   }
+  sigprocmask(SIG_SETMASK, &previous, NULL);
   for (;;) {
     int status;
     if (udp > 0 && waitpid(udp, &status, WNOHANG) == udp) { fprintf(stderr, "e2e udp responder exited\\n"); udp = 0; }

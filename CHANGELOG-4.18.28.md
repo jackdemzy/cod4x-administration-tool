@@ -4,7 +4,7 @@ The roadmap flow now runs end to end against the real backend process, driven on
 
 ## What runs
 
-- **Flow** (`test/e2e-flow.test.mjs`): Install (adopt the core) → Detect Core (verified core, valid base game) → Create Server → Config (`server.cfg`, RCON password in the vault) → Start → Map (`rcon map mp_crash`) → RCON (`status`) → Master List (named state without a token) → B3 (start refused with `B3_DEPENDENCIES_BLOCKED` without Python, the game server keeps running) → Client Join (the player shows under `/rcon/online`) → Stop → Restart (same port, new process) → backend restart (instance, config and RCON credential survive, start and RCON work).
+- **Flow** (`test/e2e-flow.test.mjs`): Install (adopt the core) → Detect Core (verified core, valid base game) → Create Server → Config (`server.cfg`, RCON password in the vault) → Start → Map (`rcon map mp_crash`) → RCON (`status`) → Master List (named state without a token) → B3 (start refused with a named `B3_*` code, in CI `B3_DEPENDENCIES_BLOCKED` because Python 2.7 is missing; the game server keeps running) → Client Join (the player shows under `/rcon/online`) → Stop → Restart (same port, new process) → backend restart (instance, config and RCON credential survive, start and RCON work).
 - **Multi-server** (`test/e2e-multi-server.test.mjs`): three instances on three consecutive ports, each answering only with its own identity and its own RCON password; stopping the second leaves the first and third serving; the second comes back on its port.
 - **Intentional failures** (`test/e2e-failures.test.mjs`), each with a named 4xx code, CONTROL answering and a reference server untouched afterwards:
 

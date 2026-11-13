@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { RconClient } from "../lib/rcon-client.mjs";
 import path from "node:path";
@@ -33,7 +34,7 @@ try {
   backend = await e2eBackend(t, { prefix: "cod4x-e2e-native-" });
   const { request } = backend;
   const ports = await consecutiveUdpPorts(3);
-  const servers = ports.map((port, index) => ({ id: `native-${index + 1}`, port, hostname: `NativeE2E${index + 1}`, rcon: `NativeE2eRcon${index + 1}x${port}` }));
+  const servers = ports.map((port, index) => ({ id: `native-${index + 1}`, port, hostname: `NativeE2E${index + 1}`, rcon: `NativeE2eRcon${index + 1}x${crypto.randomBytes(6).toString("hex")}` }));
   const [first] = servers;
   let firstPid;
 
@@ -72,12 +73,13 @@ try {
   await step("Master List: named state, no 5xx", async () => {
     const master = await request(`/api/instances/${first.id}/master/verify`, {}, "POST", { timeoutMs: 60000 });
     ok(master, "master verify");
+    if (!/^[A-Z_]+$/.test(master.json.master?.state || "")) throw new Error(`no named master state: ${JSON.stringify(master.json.master)}`);
     console.log(`INFO master state ${master.json.master.state} ${master.json.master.reason || ""} list=${JSON.stringify(master.json.master.list)}`);
   });
   await step("B3: status and start answer with a named state", async () => {
     ok(await request(`/api/instances/${first.id}/b3`), "b3 status");
     const started = await request(`/api/instances/${first.id}/b3/start`, {});
-    if (started.status >= 500) throw new Error(`HTTP ${started.status}`);
+    if (started.status >= 500 || (started.status >= 400 && !/^B3_[A-Z_]+$/.test(started.json?.code || ""))) throw new Error(`HTTP ${started.status} ${JSON.stringify(started.json)}`);
     console.log(`INFO b3 start HTTP ${started.status} ${started.json?.code || "started"}`);
     if (started.status < 300) ok(await request(`/api/instances/${first.id}/b3/stop`, {}), "b3 stop");
   });
@@ -104,10 +106,12 @@ try {
   await step("Stop + Restart: same port, new process", async () => {
     ok(await request(`/api/instances/${first.id}/stop`, {}), "stop");
     if (!await silent(first.port, 15000)) throw new Error("still answers after stop");
-    ok(await request(`/api/instances/${first.id}/start`, {}), "start");
+    const again = await request(`/api/instances/${first.id}/start`, {});
+    ok(again, "start");
+    if (!await coreAnswers(first.port)) throw new Error("no answer after start");
     const restarted = await request(`/api/instances/${first.id}/restart`, {});
     ok(restarted, "restart");
-    if (restarted.json.runtime.pid === firstPid) throw new Error("same pid after restart");
+    if (restarted.json.runtime.pid === again.json.runtime.pid || restarted.json.runtime.pid === firstPid) throw new Error("same pid after restart");
     if (!await coreAnswers(first.port)) throw new Error("no answer after restart");
   });
   await step("Server crash: SIGKILL is detected, start works again", async () => {

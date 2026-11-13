@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { buildE2eCore, e2eCoreAvailable } from './support/e2e-core.mjs';
-import { e2eBackend, baseGameFixture, consecutiveUdpPorts, udpAsk, until, ok } from './support/e2e-backend.mjs';
+import { e2eBackend, baseGameFixture, consecutiveUdpPorts, udpAsk, until, answers, ok } from './support/e2e-backend.mjs';
 
 // Block 22 (E2E): the roadmap flow against the real backend over HTTP:
 // Install -> Detect Core -> BaseGame -> Create Server -> Config -> Start -> Map -> RCON ->
@@ -76,7 +76,7 @@ test('E2E flow: install to restart through the real backend, CONTROL answers aft
     const master = await request(`/api/instances/${id}/master`, undefined, 'GET', { timeoutMs: 30000 });
     ok(master, 'master status');
     // Without a token the instance is reported as not configured; the listing itself is only
-    // checked natively (COD4X_E2E_MASTER=1 in scripts/verify-4.18.28-e2e-native.mjs).
+    // checked natively (COD4X_E2E_MASTER_TOKEN in scripts/verify-4.18.28-e2e-native.mjs).
     assert.equal(master.json.master.state, 'NOT_CONFIGURED');
     assert.equal(master.json.master.reason, 'MASTER_TOKEN_NOT_CONFIGURED');
   });
@@ -99,10 +99,13 @@ test('E2E flow: install to restart through the real backend, CONTROL answers aft
     assert.ok(await until(async () => { try { await udpAsk(port, 'getinfo e2e', 200); return false; } catch { return true; } }), 'port still answers after stop');
   });
   await step('Restart: same port, new process', async () => {
-    ok(await request(`/api/instances/${id}/start`, {}), 'start again');
+    const again = await request(`/api/instances/${id}/start`, {});
+    ok(again, 'start again');
+    assert.ok(await answers(port), 'core does not answer after start again');
     const restarted = await request(`/api/instances/${id}/restart`, {});
     ok(restarted, 'restart');
-    assert.ok(restarted.json.runtime.pid > 0 && restarted.json.runtime.pid !== firstPid);
+    // Compared with the process that was running right before /restart, not the first start.
+    assert.ok(restarted.json.runtime.pid > 0 && restarted.json.runtime.pid !== again.json.runtime.pid && restarted.json.runtime.pid !== firstPid);
     assert.ok(await until(async () => /infoResponse/.test(await udpAsk(port, 'getinfo e2e', 300))), 'core does not answer after restart');
   });
   await step('Backend restart: instance, config and credentials survive', async () => {

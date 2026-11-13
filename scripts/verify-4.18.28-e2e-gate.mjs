@@ -20,6 +20,7 @@ const faults = ["falscher Core", "fehlende main-Datei", "fehlende zone-Datei", "
 
 for (const file of files) if (!fs.existsSync(file)) { console.error(`FAIL missing ${file}`); process.exit(1); }
 const gcc = process.platform === "linux" && spawnSync("gcc", ["--version"], { encoding: "utf8" }).status === 0;
+if (!gcc && process.platform === "linux" && process.env.CI === "true") { console.error("FAIL E2E gate: Linux CI runner without gcc would skip the E2E tests silently"); console.error("4.18.28 E2E gate FAIL"); process.exit(1); }
 if (!gcc) { console.log(`SKIP E2E gate needs Linux and gcc (platform ${process.platform}); the native checklist covers Windows`); process.exit(0); }
 
 const started = Date.now();

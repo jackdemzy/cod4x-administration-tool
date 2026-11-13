@@ -29,7 +29,7 @@ export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {} } = {
   Object.assign(env, { PORT: String(port), HOST: '127.0.0.1', COD4X_DATA_ROOT: path.join(root, 'data'), COD4X_INSTALL_ROOT: path.join(root, 'installations'), COD4X_RUNTIME_ROOT: root, COD4X_DESKTOP_CLIENT_TOKEN: crypto.randomBytes(32).toString('hex'), ...extraEnv });
   const credentials = { username: 'e2eAdmin', password: `${crypto.randomBytes(16).toString('hex')}Aa9!` };
   const vaultPassphrase = `E2E vault ${crypto.randomBytes(12).toString('hex')}!`;
-  const state = { child: null, closed: null, diagnostics: '', token: null };
+  const state = { child: null, closed: null, diagnostics: '', token: null, corePids: new Set() };
 
   async function start() {
     state.diagnostics = '';
@@ -53,7 +53,10 @@ export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {} } = {
 
   async function request(route, body, method = body ? 'POST' : 'GET', { timeoutMs = 10000 } = {}) {
     const response = await fetch(`${url}${route}`, { method, headers: { 'Content-Type': 'application/json', ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeoutMs) });
-    return { status: response.status, json: await response.json().catch(() => null) };
+    const json = await response.json().catch(() => null);
+    // Cores run detached and outlive the backend; remember every PID as a last-resort cleanup.
+    if (Number.isInteger(json?.runtime?.pid) && json.runtime.pid > 0) state.corePids.add(json.runtime.pid);
+    return { status: response.status, json };
   }
   // The gate of Block 22: after every step CONTROL itself still answers.
   async function assertAlive(step) {
@@ -85,6 +88,11 @@ export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {} } = {
       for (const instance of listed?.json?.instances || []) await request(`/api/instances/${encodeURIComponent(instance.id)}/stop`, {}).catch(() => {});
     }
     await stop();
+    for (const pid of state.corePids) {
+      // Process group first (core + UDP responder), then the PID itself; gone is fine.
+      try { process.kill(-pid, 'SIGKILL'); } catch {}
+      try { process.kill(pid, 'SIGKILL'); } catch {}
+    }
     await fs.rm(root, { recursive: true, force: true });
   });
 
@@ -112,7 +120,7 @@ export async function baseGameFixture(root) {
 export async function consecutiveUdpPorts(count) {
   const dgram = await import('node:dgram');
   for (let attempt = 0; attempt < 50; attempt++) {
-    const first = 30000 + Math.floor(Math.random() * 20000);
+    const first = 30000 + crypto.randomInt(20000);
     const sockets = [];
     try {
       for (let index = 0; index < count; index++) {

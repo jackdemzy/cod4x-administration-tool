@@ -63,6 +63,7 @@ test('E2E core: a SIGKILLed core does not leave its responder behind', { skip: s
   const port = await freeUdpPort();
   const child = spawn(core, ['+set', 'fs_homepath', root, '+set', 'net_port', String(port)], { stdio: 'ignore' });
   const closed = new Promise(resolve => child.once('close', resolve));
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); await closed; });
   assert.ok(await until(async () => { try { return /infoResponse/.test(await ask(port, 'getinfo x', 300)); } catch { return false; } }));
   child.kill('SIGKILL');
   await closed;
