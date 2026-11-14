@@ -136,3 +136,19 @@ test('R-2: a restore never moves the TOTP replay counter back', { timeout: 60000
   assert.equal(await roleOf(call, admin, 'helper'), 'viewer');
   assert.equal(JSON.parse(await fs.readFile(usersFile, 'utf8')).users.find(user => user.username === 'owner').totp.lastStep, step);
 });
+
+test('R-2: a restore and a concurrent account change never leave users.json and the loaded accounts apart', { timeout: 120000 }, async t => {
+  const { call, admin, usersFile } = await setup(t);
+  const backup = (await call('/api/backups/create', { body: { label: 'helper is admin' }, token: admin })).json.backup;
+  for (const role of ['viewer', 'operator', 'auditor', 'viewer', 'operator']) {
+    assert.equal((await call('/api/users/helper', { method: 'PATCH', body: { role: 'monitor' }, token: admin })).status, 200);
+    const [restore, patch] = await Promise.all([
+      call(`/api/backups/${backup.id}/restore`, { body: {}, token: admin }),
+      call('/api/users/helper', { method: 'PATCH', body: { role }, token: admin }),
+    ]);
+    assert.ok([200, 409].includes(restore.status), JSON.stringify(restore.json));
+    assert.equal(patch.status, 200);
+    const onDisk = JSON.parse(await fs.readFile(usersFile, 'utf8')).users.find(user => user.username === 'helper').role;
+    assert.equal(await roleOf(call, admin, 'helper'), onDisk, 'file and loaded accounts agree');
+  }
+});

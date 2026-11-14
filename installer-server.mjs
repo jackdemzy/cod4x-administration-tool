@@ -156,7 +156,7 @@ async function loadAuthUser() {
   return authUser;
 }
 
-async function loadAuthUsers() {
+async function loadAuthUsers({ save = saveAuthUsers } = {}) {
   authUsers.clear();
   try {
     const raw = JSON.parse(await fs.readFile(AUTH_USERS_FILE, "utf8"));
@@ -169,17 +169,30 @@ async function loadAuthUsers() {
   if (authUser && !authUsers.has(authUser.username.toLowerCase())) {
     const now = new Date().toISOString();
     authUsers.set(authUser.username.toLowerCase(), { ...authUser, disabled: false, createdAt: now, updatedAt: now });
-    await saveAuthUsers();
+    await save();
   }
   return authUsers;
 }
 
-async function saveAuthUsers() {
+// The text saveAuthUsers writes for a set of accounts (default: the loaded ones).
+function authUsersText(list = [...authUsers.values()]) {
+  const users = list.map(u => ({ version: 1, username: u.username, role: u.role, passwordHash: u.passwordHash, disabled: u.disabled === true, createdAt: u.createdAt || null, updatedAt: u.updatedAt || null, ...normalizeRemoteFields(u) }));
+  return JSON.stringify({ version: 1, users }, null, 2) + "\n";
+}
+// Release review 4.18.30: every write of users.json runs through one queue, so a backup restore
+// can compare and replace the accounts without another write slipping in between.
+let authUsersLock = Promise.resolve();
+function withAuthUsersLock(fn) {
+  const run = authUsersLock.then(fn);
+  authUsersLock = run.catch(() => {});
+  return run;
+}
+const saveAuthUsers = () => withAuthUsersLock(writeAuthUsersFile);
+async function writeAuthUsersFile() {
   const dir = path.dirname(AUTH_USERS_FILE);
   await fs.mkdir(dir, { recursive: true });
   const tmp = `${AUTH_USERS_FILE}.tmp-${process.pid}`;
-  const users = [...authUsers.values()].map(u => ({ version: 1, username: u.username, role: u.role, passwordHash: u.passwordHash, disabled: u.disabled === true, createdAt: u.createdAt || null, updatedAt: u.updatedAt || null, ...normalizeRemoteFields(u) }));
-  await fs.writeFile(tmp, JSON.stringify({ version: 1, users }, null, 2) + "\n", { encoding: "utf8", flag: "w", mode: 0o600 });
+  await fs.writeFile(tmp, authUsersText(), { encoding: "utf8", flag: "w", mode: 0o600 });
   await fs.chmod(tmp, 0o600).catch(() => {});
   await fs.rename(tmp, AUTH_USERS_FILE);
   await fs.chmod(AUTH_USERS_FILE, 0o600).catch(() => {});
@@ -2166,18 +2179,19 @@ function backupUsersHaveAdmin(text) {
 }
 // R-2: loads the restored accounts and ends every local and remote session of an account that
 // changed or is gone, as PATCH /api/users does for each narrowing change.
+// Runs inside withAuthUsersLock, right after users.json was replaced; writes through writeAuthUsersFile.
 async function applyRestoredUsers() {
   const fingerprint = user => user ? JSON.stringify([user.role, user.passwordHash, user.disabled === true, user.remoteAccess === true, user.remoteActions === true, user.totp?.secret || null, user.recovery || []]) : null;
   const before = new Map([...authUsers].map(([name, user]) => [name, fingerprint(user)]));
-  const steps = new Map([...authUsers].filter(([, user]) => user.totp).map(([name, user]) => [name, user.totp]));
-  await loadAuthUsers();
+  const steps = new Map([...authUsers].filter(([, user]) => user.totp).map(([name, user]) => [name, { ...user.totp }]));
+  await loadAuthUsers({ save: writeAuthUsersFile });
   // A used TOTP code stays used: for the same secret the replay counter never goes back.
   let keptSteps = false;
   for (const [name, user] of authUsers) {
     const old = steps.get(name);
     if (user.totp && old && old.secret === user.totp.secret && Number.isInteger(old.lastStep) && !(user.totp.lastStep >= old.lastStep)) { user.totp.lastStep = old.lastStep; keptSteps = true; }
   }
-  if (keptSteps) await saveAuthUsers();
+  if (keptSteps) await writeAuthUsersFile();
   const changed = [...new Set([...before.keys(), ...authUsers.keys()])].filter(name => before.get(name) !== fingerprint(authUsers.get(name)));
   let ended = 0;
   for (const name of changed) {
@@ -2252,6 +2266,7 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
     const usersPayload = record.raw.payload.users;
     const currentUsers = await fs.readFile(AUTH_USERS_FILE, "utf8").catch(err => { if (err.code === "ENOENT") return null; throw err; });
     const usersChange = usersPayload !== null && usersPayload !== currentUsers;
+    const loadedUsers = authUsersText();
     if (usersChange) {
       if (!hasPermission(req.auth.role, "user.manage")) {
         audit("warn", "backup.restore.blocked", {id:record.meta.id, correlationId, reason:"users_need_user_manage", actor:req.auth.username});
@@ -2274,6 +2289,7 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
     await saveBackupRegistry(registry);
     // Transactional-ish restore: write temp files first, then rename each file atomically.
     const temps = [];
+    let sessionsEnded = 0;
     try {
       for (const item of BACKUP_FILES) {
         const value = record.raw.payload[item.key];
@@ -2285,20 +2301,29 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
         // R-3: users.json holds password hashes and TOTP secrets; all three files stay owner-only.
         await fs.writeFile(tmp, value, { encoding: "utf8", mode: 0o600 }); temps.push({tmp,target:item.file});
       }
-      // The accounts the permission check saw must still be the current ones.
-      if (usersChange && (await fs.readFile(AUTH_USERS_FILE, "utf8").catch(err => { if (err.code === "ENOENT") return null; throw err; })) !== currentUsers) {
-        throw Object.assign(new Error("Restore blocked: the user accounts changed during the restore."), { code: "BACKUP_RESTORE_CONFLICT" });
-      }
-      for (const item of temps) { await fs.rename(item.tmp,item.target); await fs.chmod(item.target, 0o600).catch(() => {}); }
+      // Accounts first, inside the users.json queue: the accounts the permission check saw (file and
+      // memory) must still be the current ones, or nothing is restored.
+      const usersTemp = temps.find(item => item.target === AUTH_USERS_FILE);
+      if (usersTemp) sessionsEnded = await withAuthUsersLock(async () => {
+        const conflict = () => Object.assign(new Error("Restore blocked: the user accounts changed during the restore."), { code: "BACKUP_RESTORE_CONFLICT" });
+        const fileNow = await fs.readFile(AUTH_USERS_FILE, "utf8").catch(err => { if (err.code === "ENOENT") return null; throw err; });
+        if (fileNow !== currentUsers || authUsersText() !== loadedUsers) throw conflict();
+        const loaded = [...authUsers.values()];
+        await fs.rename(usersTemp.tmp, AUTH_USERS_FILE); usersTemp.done = true;
+        await fs.chmod(AUTH_USERS_FILE, 0o600).catch(() => {});
+        // A change to a loaded account during the rename: keep it, write it back, restore nothing.
+        if (authUsersText(loaded) !== loadedUsers) { await writeAuthUsersFile(); throw conflict(); }
+        return applyRestoredUsers();
+      });
+      for (const item of temps) { if (item.done) continue; await fs.rename(item.tmp,item.target); item.done = true; await fs.chmod(item.target, 0o600).catch(() => {}); }
     } catch (e) {
-      for (const item of temps) { try { await fs.unlink(item.tmp); } catch {} }
+      for (const item of temps) { if (item.done) continue; try { await fs.unlink(item.tmp); } catch {} }
       throw e;
     }
     // R-2: the restored files take effect now, not at the next start (and are not overwritten
     // by the next save from the old in-memory state).
     await loadPolicy();
     await loadProfiles();
-    const sessionsEnded = usersChange ? await applyRestoredUsers() : 0;
     audit("info", "backup.restored", {id:record.meta.id, correlationId, sha256:actual, safetySnapshotId:safetyId, actor:req.auth.username, usersRestored:usersChange, sessionsEnded});
     res.json({ok:true,restored:record.meta.id,correlationId,sha256:actual,safetySnapshotId:safetyId,usersRestored:usersChange,sessionsEnded});
   } catch (e) {
