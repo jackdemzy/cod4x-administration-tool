@@ -13,7 +13,7 @@ const VERIFY = fileURLToPath(new URL('../scripts/release-verify.mjs', import.met
 const workflow = fs.readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
 // Artifact names carry the current package version, so the fake release folder must use it too.
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-const V = VERSION.replace(/\./g, '\\.');
+const V = VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const tmp = t => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cod4x-sign-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; };
 
 // Minimal PE header: MZ, e_lfanew, "PE\0\0", COFF header, optional header with 16 data directories.
