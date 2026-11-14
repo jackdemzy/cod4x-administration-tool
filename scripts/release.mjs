@@ -25,13 +25,26 @@ if (!npmCli) { console.error('npm-cli.js not found next to this Node.js'); proce
 const builderCli = path.join('node_modules', 'electron-builder', 'cli.js');
 const targets = platform === 'win' ? ['--win', 'nsis', 'portable'] : ['--linux', 'AppImage'];
 
-const steps = [
+// Code signing (Windows, Release workflow): the build is split in two stages so that an external
+// signing service can sign the app exe before it is packed into the installers, and the installers
+// afterwards. --stage unpacked: preflight, full suite, Vite, electron-builder --dir.
+// --stage installers: setup + portable from the (signed) dist-installer/win-unpacked; the artifact
+// verification runs separately after the installers are signed. Without --stage: all in one go.
+const STAGES = ['unpacked', 'installers'];
+const stage = args.includes('--stage') ? args[args.indexOf('--stage') + 1] : null;
+if (stage !== null && (!STAGES.includes(stage) || platform !== 'win')) {
+  console.error(`--stage ${STAGES.join('|')} is only for --platform win`);
+  process.exit(2);
+}
+const checks = [
   ['Preflight', process.execPath, [npmCli, 'run', 'preflight']],
   ['Full test suite', process.execPath, ['--test', 'test/*.test.mjs']],
   ['Build (Vite)', process.execPath, [npmCli, 'run', 'build']],
-  ['Package (electron-builder)', process.execPath, [builderCli, ...targets, '--publish', 'never']],
-  ['SHA-256 + artifact verification', process.execPath, ['scripts/release-verify.mjs', '--platform', platform]],
 ];
+const verify = ['SHA-256 + artifact verification', process.execPath, ['scripts/release-verify.mjs', '--platform', platform]];
+const steps = stage === 'unpacked' ? [...checks, ['Package app folder (electron-builder --dir)', process.execPath, [builderCli, '--win', '--dir', '--publish', 'never']]]
+  : stage === 'installers' ? [['Package installers (electron-builder, prepackaged)', process.execPath, [builderCli, ...targets, '--prepackaged', path.join('dist-installer', 'win-unpacked'), '--publish', 'never']]]
+  : [...checks, ['Package (electron-builder)', process.execPath, [builderCli, ...targets, '--publish', 'never']], verify];
 
 if (args.includes('--dry-run')) {
   steps.forEach(([name, , stepArgs], index) => console.log(`${index + 1}. ${name}: ${stepArgs.map(arg => (arg === npmCli ? 'npm' : arg)).join(' ')}`));
@@ -49,4 +62,4 @@ for (const [index, [name, command, stepArgs]] of steps.entries()) {
     process.exit(run.status || 1);
   }
 }
-console.log(`\nRelease PASS (${platform})`);
+console.log(`\nRelease PASS (${platform}${stage ? `, stage ${stage}` : ''})`);

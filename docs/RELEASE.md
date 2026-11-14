@@ -60,10 +60,13 @@ Get-FileHash .\COD4X-CONTROL-Setup-4.18.30-x64.exe -Algorithm SHA256
 
 ## Code-Signing
 
-Die Dateien sind nicht signiert, Windows SmartScreen warnt beim ersten Start („Weitere Informationen“ →
-„Trotzdem ausführen“). Mit einem Zertifikat später ohne Codeänderung: electron-builder liest
-`CSC_LINK` und `CSC_KEY_PASSWORD` (im Workflow als Secrets). Die Pipeline setzt nur
-`CSC_IDENTITY_AUTO_DISCOVERY=false`, damit nicht zufällig ein lokales Zertifikat verwendet wird.
+Ohne Zugangsdaten sind die Dateien nicht signiert, Windows SmartScreen warnt beim ersten Start
+(„Weitere Informationen“ → „Trotzdem ausführen“). Der Workflow „Release“ ist für SignPath vorbereitet:
+mit dem Secret `SIGNPATH_API_TOKEN` und der Variable `SIGNPATH_ORGANIZATION_ID` signiert ein Tag-Build
+die App-EXE, das Setup und die Portable-EXE und schlägt fehl, wenn eine davon keine gültige Signatur
+hat. Einrichtung, Prüfung der Anbieter und Quellen: [`docs/CODE-SIGNING.md`](CODE-SIGNING.md).
+Die Pipeline setzt `CSC_IDENTITY_AUTO_DISCOVERY=false`, damit nicht zufällig ein lokales Zertifikat
+verwendet wird.
 
 ## Linux
 
