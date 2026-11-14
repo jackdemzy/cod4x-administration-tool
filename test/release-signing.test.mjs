@@ -11,6 +11,9 @@ import { WINDOWS_APP_EXE, authenticodeInfo, authenticodeOfFile } from '../script
 // Release workflow (only with SignPath configured, never on pull requests).
 const VERIFY = fileURLToPath(new URL('../scripts/release-verify.mjs', import.meta.url));
 const workflow = fs.readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+// Artifact names carry the current package version, so the fake release folder must use it too.
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+const V = VERSION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const tmp = t => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cod4x-sign-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; };
 
 // Minimal PE header: MZ, e_lfanew, "PE\0\0", COFF header, optional header with 16 data directories.
@@ -49,8 +52,8 @@ test('Authenticode: no PE, truncated or out-of-file tables are not signed', () =
 // A fake release folder: setup, portable (> 1 MiB each) and the app exe, signed or not.
 function release(dir, signed) {
   const exe = size => pe({ size, certOffset: signed ? size - 1024 : 0, certSize: signed ? 1024 : 0 });
-  fs.writeFileSync(path.join(dir, 'COD4X-CONTROL-Setup-4.18.30-x64.exe'), exe(1100000));
-  fs.writeFileSync(path.join(dir, 'COD4X-CONTROL-Portable-4.18.30-x64.exe'), exe(1100000));
+  fs.writeFileSync(path.join(dir, `COD4X-CONTROL-Setup-${VERSION}-x64.exe`), exe(1100000));
+  fs.writeFileSync(path.join(dir, `COD4X-CONTROL-Portable-${VERSION}-x64.exe`), exe(1100000));
   fs.mkdirSync(path.join(dir, 'win-unpacked'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'win-unpacked', WINDOWS_APP_EXE), exe(8192));
 }
@@ -61,9 +64,9 @@ test('release-verify --require-signed fails on an unsigned exe, reports INFO wit
   release(dir, false);
   const strict = verify(dir, '--require-signed');
   assert.equal(strict.status, 1);
-  assert.match(strict.stderr, /COD4X-CONTROL-Setup-4\.18\.30-x64\.exe has no Authenticode signature/);
+  assert.match(strict.stderr, new RegExp(`COD4X-CONTROL-Setup-${V}-x64\\.exe has no Authenticode signature`));
   const lax = verify(dir);
-  assert.match(lax.stdout, /INFO COD4X-CONTROL-Setup-4\.18\.30-x64\.exe: not signed/);
+  assert.match(lax.stdout, new RegExp(`INFO COD4X-CONTROL-Setup-${V}-x64\\.exe: not signed`));
   assert.match(lax.stdout, /INFO COD4X CONTROL\.exe: not signed/);
   assert.match(lax.stderr, /app\.asar not found/);
 });
@@ -73,7 +76,7 @@ test('release-verify --require-signed passes the signature check when every exe 
   release(dir, true);
   assert.equal(authenticodeOfFile(path.join(dir, 'win-unpacked', WINDOWS_APP_EXE)).signed, true);
   const run = verify(dir, '--require-signed');
-  assert.match(run.stdout, /PASS COD4X-CONTROL-Portable-4\.18\.30-x64\.exe: Authenticode signature present/);
+  assert.match(run.stdout, new RegExp(`PASS COD4X-CONTROL-Portable-${V}-x64\\.exe: Authenticode signature present`));
   assert.match(run.stdout, /PASS COD4X CONTROL\.exe: Authenticode signature present/);
   // The fake folder has no app.asar, so the verification stops there, after the signature check.
   assert.equal(run.status, 1);
