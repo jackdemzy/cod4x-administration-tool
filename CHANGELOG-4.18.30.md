@@ -36,4 +36,27 @@ Design: `docs/superpowers/specs/2026-11-13-release-installer-design.md`, plan:
   portable start are manual: `docs/WSL-NATIVE-CHECKLIST.md` section 3g.
 - Issues #21 (minimatch via electron-builder, build tooling only) and #40 (A1-5) stay open.
 
-No product code changed.
+## Release review (before the tag)
+
+An independent cross-block review before tagging v4.18.30 (one reviewer). Fixed, with
+`test/security-backup-restore.test.mjs`:
+
+- **R-1 (High):** the production backup (4.16.x) holds `users.json`, and `POST /api/backups/:id/restore`
+  needs only `config.manage`. An operator could roll user accounts back (roles, password hashes,
+  second factors, disabled flags), which only `user.manage` may change. A restore whose user accounts
+  differ from the current ones now needs `user.manage` (`403 BACKUP_RESTORE_USERS_FORBIDDEN`), and a
+  user set without an enabled administrator is refused (`409 BACKUP_RESTORE_NO_ADMIN`).
+- **R-2 (Medium):** a restore wrote the files but kept the old policy, profiles and accounts in memory
+  (in effect only after a restart, and the next account change wrote the old state back). The restored
+  files are loaded at once; every local and remote session of an account that changed or is gone ends.
+- **R-3 (Medium):** the restore wrote `users.json` (password hashes, TOTP secrets) with the default mode
+  (0644 under umask 022). The three restored files are written 0600.
+- **R-4 (Low):** the 4.11.7 browser test client `/session-test` (unauthenticated page, inline script,
+  bearer token in localStorage) was still served by the release backend; removed.
+- **R-5 (Low):** `actions/checkout` kept the GitHub token in `.git/config`; both workflows set
+  `persist-credentials: false`.
+
+Checked without a finding: origin policy and desktop header, RBAC bindings of all routes, remote
+gateway (route list, CSRF, brakes, step-up), Block 21 restore points (`server.code` for code), remote
+Linux routes, Electron (navigation, IPC sender, permissions, safeStorage), version strings in
+package, lock file, BUILD_INFO, UI, README, DEVELOPMENT_STATUS and docs/RELEASE.md.

@@ -41,6 +41,9 @@ jobs:
           echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
+        with:
+          # Release review 4.18.30 (R-5): no job pushes; the token does not stay in .git/config.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
