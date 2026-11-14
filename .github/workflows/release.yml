@@ -30,12 +30,13 @@ on:
       - installer-server.mjs
       - lib/**
       - src/**
-      - scripts/preflight-4.18.30.mjs
+      - scripts/preflight-*.mjs
       - build.ps1
       - scripts/release*.mjs
       - scripts/verify-4.18.30-installer-gate.mjs
       - .signpath/**
       - test/installer-*.test.mjs
+      - test/release-*.test.mjs
       - test/support/e2e-backend.mjs
       - .github/workflows/release.yml
 
