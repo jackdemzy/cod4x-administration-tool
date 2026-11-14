@@ -16,6 +16,20 @@ async function setup(t) {
   assert.equal((await call('/api/users', { body: { username: 'helper', password: secret, role: 'admin' }, token: admin })).status, 201);
   return { ...api, admin, secret, usersFile: path.join(api.root, 'data', 'config', 'users.json') };
 }
+// Rewrites a stored backup's user accounts, with a matching hash in the registry.
+async function tamperUsers(root, id, change) {
+  const crypto = await import('node:crypto');
+  const registryFile = path.join(root, 'data', 'config', 'production-backups.json');
+  const registry = JSON.parse(await fs.readFile(registryFile, 'utf8'));
+  const meta = registry.backups.find(item => item.id === id);
+  const raw = JSON.parse(await fs.readFile(meta.file, 'utf8'));
+  const users = JSON.parse(raw.payload.users);
+  change(users);
+  raw.payload.users = JSON.stringify(users);
+  raw.sha256 = meta.sha256 = crypto.createHash('sha256').update(JSON.stringify(raw.payload), 'utf8').digest('hex');
+  await fs.writeFile(meta.file, JSON.stringify(raw));
+  await fs.writeFile(registryFile, JSON.stringify(registry));
+}
 const roleOf = async (call, admin, username) => (await call('/api/users', { token: admin })).json.users.find(user => user.username === username)?.role;
 
 test('R-1: an operator cannot roll back user accounts through a backup restore', { timeout: 60000 }, async t => {
@@ -89,5 +103,52 @@ test('R-5: workflows do not keep the GitHub token in the checkout', async () => 
     const checkouts = text.split('uses: actions/checkout@').length - 1;
     assert.ok(checkouts > 0, file);
     assert.equal(text.split('persist-credentials: false').length - 1, checkouts, `${file}: every checkout sets persist-credentials: false`);
+  }
+});
+
+test('R-1: duplicate names in a backup are judged as loaded (the last row wins)', { timeout: 60000 }, async t => {
+  const { call, admin, root } = await setup(t);
+  const backup = (await call('/api/backups/create', { body: { label: 'x' }, token: admin })).json.backup;
+  await tamperUsers(root, backup.id, users => {
+    users.users = users.users.filter(user => user.username !== 'helper');
+    const owner = users.users.find(user => user.username === 'owner');
+    users.users.push({ ...owner, username: 'OWNER', role: 'viewer' });
+  });
+  const refused = await call(`/api/backups/${backup.id}/restore`, { body: {}, token: admin });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.code, 'BACKUP_RESTORE_NO_ADMIN');
+});
+
+test('R-2: a restore never moves the TOTP replay counter back', { timeout: 60000 }, async t => {
+  const { call, admin, root, usersFile } = await setup(t);
+  const { totp } = await import('../lib/totp.mjs');
+  const { secret } = (await call('/api/auth/totp/setup', { body: {}, token: admin })).json;
+  assert.equal((await call('/api/auth/totp/confirm', { body: { code: totp(secret) }, token: admin })).status, 200);
+  const step = JSON.parse(await fs.readFile(usersFile, 'utf8')).users.find(user => user.username === 'owner').totp.lastStep;
+  assert.ok(Number.isInteger(step));
+  const backup = (await call('/api/backups/create', { body: { label: 'x' }, token: admin })).json.backup;
+  await tamperUsers(root, backup.id, users => {
+    users.users.find(user => user.username === 'owner').totp.lastStep = step - 5;
+    users.users.find(user => user.username === 'helper').role = 'viewer';
+  });
+  const restored = await call(`/api/backups/${backup.id}/restore`, { body: {}, token: admin });
+  assert.equal(restored.status, 200, JSON.stringify(restored.json));
+  assert.equal(await roleOf(call, admin, 'helper'), 'viewer');
+  assert.equal(JSON.parse(await fs.readFile(usersFile, 'utf8')).users.find(user => user.username === 'owner').totp.lastStep, step);
+});
+
+test('R-2: a restore and a concurrent account change never leave users.json and the loaded accounts apart', { timeout: 120000 }, async t => {
+  const { call, admin, usersFile } = await setup(t);
+  const backup = (await call('/api/backups/create', { body: { label: 'helper is admin' }, token: admin })).json.backup;
+  for (const role of ['viewer', 'operator', 'auditor', 'viewer', 'operator']) {
+    assert.equal((await call('/api/users/helper', { method: 'PATCH', body: { role: 'monitor' }, token: admin })).status, 200);
+    const [restore, patch] = await Promise.all([
+      call(`/api/backups/${backup.id}/restore`, { body: {}, token: admin }),
+      call('/api/users/helper', { method: 'PATCH', body: { role }, token: admin }),
+    ]);
+    assert.ok([200, 409].includes(restore.status), JSON.stringify(restore.json));
+    assert.equal(patch.status, 200);
+    const onDisk = JSON.parse(await fs.readFile(usersFile, 'utf8')).users.find(user => user.username === 'helper').role;
+    assert.equal(await roleOf(call, admin, 'helper'), onDisk, 'file and loaded accounts agree');
   }
 });

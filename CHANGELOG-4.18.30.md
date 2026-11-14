@@ -49,6 +49,11 @@ An independent cross-block review before tagging v4.18.30 (one reviewer). Fixed,
 - **R-2 (Medium):** a restore wrote the files but kept the old policy, profiles and accounts in memory
   (in effect only after a restart, and the next account change wrote the old state back). The restored
   files are loaded at once; every local and remote session of an account that changed or is gone ends.
+- Review follow-up: the administrator check works on the set as loaded (one entry per name, case-insensitive,
+  last row wins); unchanged accounts are not written at all, and a restore that changes accounts stops
+  with `409 BACKUP_RESTORE_CONFLICT` if `users.json` changed while it ran; the TOTP replay counter of an
+  unchanged secret never goes back. Every write of `users.json` runs through one queue; the restore compares
+  and replaces the accounts inside it (accounts first, so a conflict restores nothing).
 - **R-3 (Medium):** the restore wrote `users.json` (password hashes, TOTP secrets) with the default mode
   (0644 under umask 022). The three restored files are written 0600.
 - **R-4 (Low):** the 4.11.7 browser test client `/session-test` (unauthenticated page, inline script,
