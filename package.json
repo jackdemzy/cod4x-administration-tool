@@ -7,7 +7,7 @@
     "build": "vite build && vite build -c vite.remote.config.js",
     "start": "node installer-server.mjs",
     "dist:win": "npm run build && electron-builder --win nsis portable --publish never",
-    "preflight": "node scripts/preflight-4.18.30.mjs",
+    "preflight": "node scripts/preflight-4.18.31.mjs",
     "dist:linux": "npm run build && electron-builder --linux AppImage --publish never",
     "release:win": "node scripts/release.mjs --platform win",
     "release:linux": "node scripts/release.mjs --platform linux",
@@ -22,7 +22,7 @@
     "ssh2": "^1.17.0",
     "tar": "^7.4.3"
   },
-  "version": "4.18.30",
+  "version": "4.18.31",
   "license": "AGPL-3.0-or-later",
   "engines": {
     "node": ">=22.12"

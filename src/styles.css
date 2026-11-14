@@ -30,3 +30,38 @@ body{background:#070b09;letter-spacing:.01em;}
 .app-shell input::placeholder{color:#4f6057;}
 .app-shell option{background:#0b120f;color:#e5eee8;}
 @media (max-width:900px){.app-sidebar{width:190px!important}.app-main{max-width:calc(100vw - 190px)!important;padding-left:18px!important;padding-right:18px!important}.topbar-right{display:none}.app-footer span:nth-child(2){display:none;}}
+/* 4.18.31: Remote Linux page in the look of the other pages (cards, field grid, buttons). */
+.remote-linux{font-size:12px;color:#e5eee8;}
+.remote-linux .rl-panel{display:block;box-shadow:none;}
+.remote-linux .rl-card{background:#0b120f;border:1px solid #26382f;border-radius:7px;padding:18px;margin-bottom:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.018),0 10px 24px rgba(0,0,0,.12);}
+.remote-linux .rl-card-title{font-size:11px;font-weight:700;color:#e5eee8;margin-bottom:14px;}
+.remote-linux .rl-subcard,.remote-linux .rl-dialog,.remote-linux .rl-output,.remote-linux .rl-docker{background:#050806;border:1px solid #26382f;border-radius:6px;padding:12px;margin:10px 0;display:grid;gap:8px;}
+.remote-linux .rl-dialog{border-color:#6bc47b77;}
+.remote-linux p{margin:0 0 10px;line-height:1.55;}
+.remote-linux .rl-text,.remote-linux .rl-empty{font-size:11px;color:#82938a;}
+.remote-linux .rl-note,.remote-linux [role="note"]{font-size:11px;color:#c6d8cc;background:rgba(107,196,123,.06);border:1px solid #26382f;border-left:3px solid #6bc47b;border-radius:4px;padding:8px 10px;}
+.remote-linux [role="alert"]{font-size:11px;color:#d45c5c;background:rgba(212,92,92,.1);border:1px solid #d45c5c55;border-radius:6px;padding:8px 10px;margin:8px 0;}
+.remote-linux .rl-status,.remote-linux [role="status"]{font-size:11px;color:#6bc47b;background:rgba(107,196,123,.08);border:1px solid #6bc47b55;border-radius:6px;padding:8px 10px;}
+.remote-linux .rl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px 12px;margin-bottom:12px;}
+.remote-linux .rl-field{display:grid;gap:5px;font-size:10px;color:#82938a;letter-spacing:.02em;}
+.remote-linux label{font-size:11px;color:#82938a;}
+.remote-linux input[type="text"],.remote-linux input[type="password"],.remote-linux input:not([type]),.remote-linux select,.remote-linux textarea{width:100%;box-sizing:border-box;background:#080d0a;border:1px solid #293b31;color:#e5eee8;border-radius:3px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;}
+.remote-linux textarea{font-family:monospace;font-size:12px;resize:vertical;}
+.remote-linux input[type="checkbox"]{accent-color:#6bc47b;margin-right:6px;}
+.remote-linux button:not([style]){background:#0b120f;border:1px solid #26382f;color:#6bc47b;border-radius:6px;padding:7px 11px;font-size:11px;cursor:pointer;transition:background .12s ease,border-color .12s ease;}
+.remote-linux button:not([style]):hover:not(:disabled){background:#12271a;border-color:#6bc47b77;}
+.remote-linux button:not([style]):disabled{opacity:.5;cursor:not-allowed;}
+.remote-linux button.rl-primary{background:#12271a;border-color:#6bc47b77;}
+.remote-linux button.rl-danger{color:#d45c5c;border-color:#d45c5c55;}
+.remote-linux .rl-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+.remote-linux .rl-list{list-style:none;margin:0;padding:0;display:grid;gap:10px;}
+.remote-linux .rl-item,.remote-linux .rl-instance{background:#101915;border:1px solid #26382f;border-radius:6px;padding:12px;list-style:none;}
+.remote-linux .rl-item .rl-instance{padding:0;border:0;background:transparent;}
+.remote-linux .rl-item-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;}
+.remote-linux .rl-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:11px;}
+.remote-linux .rl-tag{font-size:10px;color:#82938a;font-family:monospace;}
+.remote-linux .rl-tag.rl-ok{color:#6bc47b;} .remote-linux .rl-tag.rl-warn{color:#d9a441;}
+.remote-linux code{font-family:monospace;font-size:11px;color:#c6d8cc;background:#050806;border:1px solid #1d2c24;border-radius:3px;padding:1px 5px;word-break:break-all;}
+.remote-linux pre{background:#050806;border:1px solid #26382f;border-radius:6px;padding:10px;font-size:11px;color:#c6d8cc;overflow:auto;max-height:320px;white-space:pre-wrap;margin:0;}
+.remote-linux h4,.remote-linux h5{font-size:11px;font-weight:700;color:#e5eee8;margin:6px 0;}
+.remote-linux strong{color:#e5eee8;}

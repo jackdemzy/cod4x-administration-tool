@@ -3,6 +3,7 @@ import { RuntimePersistenceWarning } from "./lib/runtime-persistence-warning.mjs
 import { InstanceConfigEditor } from "./lib/instance-config-editor.jsx";
 import { InstanceCredentialEditor } from "./lib/instance-credential-editor.jsx";
 import { RemoteHostsPanel } from "./lib/remote-hosts.jsx";
+import { MENU_LABELS, MENU_GUIDE, QUICK_START, pick } from "./lib/overview-guide.mjs";
 import { InstanceRconConsole } from "./lib/instance-rcon-console.jsx";
 import { InstanceMasterStatus } from "./lib/instance-master-status.jsx";
 import { InstancePluginManager } from "./lib/instance-plugin-manager.jsx";
@@ -63,9 +64,9 @@ const MODES = [
 // These are selectable presets, not claims that every server has these mods installed.
 // Custom installations can be added through the Custom Mod field.
 const MODS = [
-  { id: "", name: "Vanilla / Basisspiel", folder: "", description: "Kein fs_game — Basisspiel verwenden." },
+  { id: "", name: "Vanilla / Base game", folder: "", description: "No fs_game — use the base game." },
   { id: "mods/pml220", name: "Promod LIVE 2.20", folder: "mods/pml220", description: "Promod LIVE 2.20 preset." },
-  { id: "mods/pml220_custom", name: "Promod LIVE 2.20 Custom", folder: "mods/pml220_custom", description: "Beispiel-Preset für eine angepasste Promod-Installation." },
+  { id: "mods/pml220_custom", name: "Promod LIVE 2.20 Custom", folder: "mods/pml220_custom", description: "Example preset for a customized Promod installation." },
 ];
 
 
@@ -454,6 +455,22 @@ const DVARS = [
   ["aim_accel_turnrate_lerp","1200","COD4 Stock / Aim","Aim acceleration interpolation."]
 ].map(([name,def,sub,desc]) => ({name,def,sub,desc}));
 
+// 4.18.31: English descriptions of the reference tables (the German text stays in the tables).
+const RCON_DESC_EN = {"status": "Lists connected clients with slot, name and network data.", "clientkick": "Kick by client slot from status.", "kick": "Kick by player name; quote/escape special characters properly.", "banClient": "Ban a client slot.", "banUser": "Ban a user/player name.", "tempBanClient": "Temporary ban of a client slot.", "tempBanUser": "Temporary ban of a user.", "unbanuser": "Lift a user ban.", "map": "Change the map immediately.", "map_rotate": "Load the next entry of the rotation.", "fast_restart": "Quickly restart the current map.", "map_restart": "Reload the current map.", "say": "Server broadcast.", "set": "Set a CVar/Dvar.", "get": "Query a CVar/Dvar.", "exec": "Run a CFG.", "serverinfo": "Print public server information.", "dumpuser": "Print the userinfo of a client slot.", "users": "Show connected users.", "rcon_password": "Change the RCON password at runtime.", "g_password": "Set the join password.", "heartbeat": "Send a heartbeat to the master server.", "player": "Extended player info for a slot (CoD4x)."};
+const DVAR_DESC_EN = {"sv_hostname": "Server name in the browser.", "sv_maxclients": "Maximum number of clients.", "sv_password": "Join password; empty = public.", "sv_pure": "Client file check.", "sv_floodProtect": "Flood protection.", "sv_allowDownload": "Allow downloads.", "sv_maxRate": "Maximum network rate.", "sv_fps": "Server FPS; engine value, not a freely definable tick rate.", "sv_timeout": "Time limit for missing client messages.", "sv_kickBots": "Remove bots when real players join, if needed.", "sv_privateClients": "Reserved private client slots.", "sv_connectTimeout": "Timeout while connecting.", "sv_mapRotation": "Map rotation.", "sv_mapRotationCurrent": "Current rotation state.", "sv_randomMapRotation": "Random map rotation.", "g_gametype": "Active game type.", "g_maxping": "Maximum ping to join; 0 = unlimited.", "g_allowvote": "Allow votes.", "g_friendlyfire": "Friendly fire mode.", "g_deadchat": "Dead players may chat.", "g_voicechat": "Voice chat.", "g_inactivity": "Inactivity kick in seconds; 0 = off.", "g_spectatormode": "Allow spectating.", "g_teamkillpointloss": "Point loss per team kill.", "scr_war_scorelimit": "Score limit TDM.", "scr_war_timelimit": "Time limit TDM in minutes.", "scr_sd_scorelimit": "Rounds to win in S&D.", "scr_sd_timelimit": "Round time limit S&D.", "scr_sd_roundlimit": "Maximum rounds S&D.", "scr_sd_bombtimer": "Bomb countdown in seconds.", "scr_dom_scorelimit": "Score limit Domination.", "scr_dm_scorelimit": "Kill limit FFA.", "scr_dm_timelimit": "Time limit FFA.", "scr_koth_scorelimit": "Score limit Headquarters.", "scr_ctf_scorelimit": "Score limit CTF.", "scr_player_respawndelay": "Respawn delay.", "scr_player_sprinttime": "Sprint duration.", "scr_game_killstreaks": "Killstreaks.", "scr_game_perks": "Perks.", "scr_team_fftype": "Friendly fire type for scripted modes.", "net_port": "UDP port.", "net_ip": "Bind address.", "rate": "Client network rate.", "fs_game": "Mod folder; empty = base game.", "fs_basepath": "Base file system path.", "developer": "Developer mode.", "developer_script": "Script debugging; mind the CVAR_INIT/startup context.", "logfile": "Log mode.", "g_log": "Log file name.", "g_logSync": "Synchronous log flushing."};
+const localizedDesc = (t, table, key, desc) => t.code === "de" ? desc : (table[key] || desc);
+
+const QUICK_PROMPTS_EN = [
+  "Write an init() function for a custom game mode",
+  "Register a player callback with waittill",
+  "Create a custom HUD element",
+  "Give a player a specific weapon",
+  "Explain thread vs. waittillframeend",
+  "Implement a UAV at 3 kills",
+  "Spawn all players and balance teams",
+  "Explain setClientDvars and show an example",
+];
+
 const QUICK_PROMPTS = [
   "init()-Funktion für einen Custom-Gamemode schreiben",
   "Spieler-Callback mit waittill registrieren",
@@ -467,6 +484,7 @@ const QUICK_PROMPTS = [
 
 const I18N = {
   de: {
+    code:"de", all:"Alle", dvarCatalogNote:"COD4 Stock-DVAR-Katalog: dokumentierte Legacy-CoD4-DVARs sind enthalten. Client-, Developer- und Server-DVARs werden getrennt gekennzeichnet; nicht jede Legacy-DVAR ist in CoD4x 21.5 serverseitig verfügbar.",
     config:"Server Config", rotation:"Map Rotation", rcon:"RCON Referenz", dvars:"Dvar Browser", gsc:"GSC Assistent", versionManager:"Version Manager", antiCheat:"Anti-Cheat",
     subtitle:"CoD4x 21.5 Admin Panel", configTitle:"Server Config Builder", configSub:"Erzeugt eine server.cfg aus validierten Eingaben",
     identity:"Server Identity", network:"Netzwerk", gameplay:"Gameplay", security:"Sicherheit", logging:"Logging",
@@ -505,6 +523,7 @@ const I18N = {
     vanilla:"Vanilla / Basisspiel", custom:"Custom", modInstalled:"Mod-Preset",
   },
   en: {
+    code:"en", all:"All", dvarCatalogNote:"COD4 stock dvar catalog: documented legacy CoD4 dvars are included. Client, developer and server dvars are marked separately; not every legacy dvar is available server-side in CoD4x 21.5.",
     config:"Server Config", rotation:"Map Rotation", rcon:"RCON Reference", dvars:"Dvar Browser", gsc:"GSC Assistant", versionManager:"Version Manager", antiCheat:"Anti-Cheat",
     subtitle:"CoD4x 21.5 Admin Panel", configTitle:"Server Config Builder", configSub:"Generate a server.cfg from validated inputs",
     identity:"Server Identity", network:"Network", gameplay:"Gameplay", security:"Security", logging:"Logging",
@@ -594,18 +613,18 @@ const buttonStyle = {background:C.surface,border:`1px solid ${C.border}`,color:C
 
 const CFG_CONTROL_RE = /[\u0000-\u001F\u007F]/;
 const FS_GAME_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
-function cfgTextError(value,label,max=256){
+function cfgTextError(value,label,max=256,de=false){
   const raw=String(value??"");
-  if(raw.length>max) return `${label}: maximal ${max} Zeichen.`;
-  if(CFG_CONTROL_RE.test(raw)) return `${label}: Steuerzeichen oder Zeilenumbrüche sind nicht erlaubt.`;
+  if(raw.length>max) return de?`${label}: maximal ${max} Zeichen.`:`${label}: at most ${max} characters.`;
+  if(CFG_CONTROL_RE.test(raw)) return de?`${label}: Steuerzeichen oder Zeilenumbrüche sind nicht erlaubt.`:`${label}: control characters or line breaks are not allowed.`;
   return "";
 }
-function fsGameError(value){
+function fsGameError(value,de=false){
   const raw=String(value??"").trim().replaceAll("\\","/");
   if(!raw) return "";
-  if(!raw.startsWith("mods/")) return "Custom Mod Path: nur mods/<name> ist erlaubt.";
+  if(!raw.startsWith("mods/")) return de?"Custom Mod Path: nur mods/<name> ist erlaubt.":"Custom mod path: only mods/<name> is allowed.";
   const parts=raw.split("/").slice(1);
-  if(!parts.length || parts.some(part=>!part || part===".." || part==="." || !FS_GAME_SEGMENT_RE.test(part))) return "Custom Mod Path: ungültiger mods/<name>-Pfad.";
+  if(!parts.length || parts.some(part=>!part || part===".." || part==="." || !FS_GAME_SEGMENT_RE.test(part))) return de?"Custom Mod Path: ungültiger mods/<name>-Pfad.":"Custom mod path: invalid mods/<name> path.";
   return "";
 }
 
@@ -667,17 +686,17 @@ function ConfigBuilder({t,lang}) {
   if (!Number.isInteger(port) || port<1 || port>65535) errors.push("net_port: 1–65535");
   if (Number(cfg.sv_maxrate)<0) errors.push("sv_maxRate: >= 0");
   if (Number(cfg.g_inactivity)<0) errors.push("g_inactivity: >= 0");
-  for (const [value,label,max] of [[cfg.sv_hostname,"Hostname",128],[cfg.sv_password,"Server-Passwort",128],[cfg.g_log,"g_log",128]]) {
-    const err=cfgTextError(value,label,max); if(err) errors.push(err);
+  for (const [value,label,max] of [[cfg.sv_hostname,"Hostname",128],[cfg.sv_password,lang==="de"?"Server-Passwort":"Server password",128],[cfg.g_log,"g_log",128]]) {
+    const err=cfgTextError(value,label,max,lang==="de"); if(err) errors.push(err);
   }
-  const fsErr=fsGameError(effectiveMod); if(fsErr) errors.push(fsErr);
+  const fsErr=fsGameError(effectiveMod,lang==="de"); if(fsErr) errors.push(fsErr);
 
   const generated = errors.length ? "// CFG-Erzeugung blockiert — Eingaben korrigieren.\n// " + errors.join("\n// ") : `// server.cfg — COD4X CONTROL
 // ${new Date().toLocaleDateString(lang==="de"?"de-DE":"en-US")}
 
 set sv_hostname "${cfg.sv_hostname.replaceAll('"','\\"')}"
 set sv_maxclients ${cfg.sv_maxclients}
-${cfg.sv_password ? `set sv_password "${cfg.sv_password.replaceAll('"','\\"')}"` : "// sv_password leer — öffentlicher Server"}
+${cfg.sv_password ? `set sv_password "${cfg.sv_password.replaceAll('"','\\"')}"` : (lang==="de"?"// sv_password leer — öffentlicher Server":"// sv_password empty — public server")}
 ${cfg.fs_game ? `set fs_game "${cfg.fs_game.replaceAll('"','\\"')}"` : "// fs_game leer — Basisspiel"}
 // Anti-cheat profile: ${anticheat}${anticheat==="fpschallenge" ? ` / FPSAC ${fpsacVersion}` : ""}
 // FPSChallenge FPSAC client/server integration is selected in the control panel.
@@ -930,7 +949,7 @@ set g_log "${cfg.g_log}"
       <div>
         <div style={{color:C.muted,fontSize:10,textTransform:"uppercase",letterSpacing:".09em",marginBottom:12}}>{t.network}</div>
         <Field label={t.port}><input style={inputStyle} type="number" min="1" max="65535" value={cfg.net_port} onChange={e=>set("net_port",e.target.value)}/></Field>
-        <Field label={t.fps} help="Engine-FPS; nicht mit einer frei konfigurierbaren Netzwerk-Tickrate gleichsetzen."><input style={inputStyle} type="number" value={cfg.sv_fps} onChange={e=>set("sv_fps",e.target.value)}/></Field>
+        <Field label={t.fps} help={lang==="de"?"Engine-FPS; nicht mit einer frei konfigurierbaren Netzwerk-Tickrate gleichsetzen.":"Engine FPS; not the same as a freely configurable network tick rate."}><input style={inputStyle} type="number" value={cfg.sv_fps} onChange={e=>set("sv_fps",e.target.value)}/></Field>
         <Field label={t.maxrate}><input style={inputStyle} type="number" min="0" value={cfg.sv_maxrate} onChange={e=>set("sv_maxrate",e.target.value)}/></Field>
 
         <div style={{color:C.muted,fontSize:10,textTransform:"uppercase",letterSpacing:".09em",margin:"20px 0 12px"}}>{t.gameplay}</div>
@@ -994,7 +1013,8 @@ const iconBtn={background:"none",border:0,color:C.muted,cursor:"pointer",padding
 
 function RCONCommands({t}) {
   const [search,setSearch]=useState("");
-  const filtered=RCON_CMDS.filter(c=>c.cmd.toLowerCase().includes(search.toLowerCase())||c.desc.toLowerCase().includes(search.toLowerCase()));
+  const rows=RCON_CMDS.map(c=>({...c,desc:localizedDesc(t,RCON_DESC_EN,c.cmd,c.desc)}));
+  const filtered=rows.filter(c=>c.cmd.toLowerCase().includes(search.toLowerCase())||c.desc.toLowerCase().includes(search.toLowerCase()));
   return <div><SectionHeader sub={t.rconSub}>{t.rconTitle}</SectionHeader><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.commandSearch} style={{...inputStyle,marginBottom:14}}/>
     <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden"}}>
       <div style={{display:"grid",gridTemplateColumns:"150px 170px 1fr 70px",padding:"8px 12px",borderBottom:`1px solid ${C.border}`,color:C.muted,fontSize:10,textTransform:"uppercase"}}><span>{t.command}</span><span>{t.args}</span><span>{t.description}</span><span/></div>
@@ -1004,13 +1024,14 @@ function RCONCommands({t}) {
 }
 
 function DvarBrowser({t}) {
-  const [search,setSearch]=useState(""),[sub,setSub]=useState("Alle");
-  const subs=["Alle",...new Set(DVARS.map(d=>d.sub))];
-  const filtered=DVARS.filter(d=>(sub==="Alle"||d.sub===sub)&&(d.name.toLowerCase().includes(search.toLowerCase())||d.desc.toLowerCase().includes(search.toLowerCase())));
+  const [search,setSearch]=useState(""),[sub,setSub]=useState("*");
+  const rows=DVARS.map(d=>({...d,desc:localizedDesc(t,DVAR_DESC_EN,d.name,d.desc)}));
+  const subs=["*",...new Set(DVARS.map(d=>d.sub))];
+  const filtered=rows.filter(d=>(sub==="*"||d.sub===sub)&&(d.name.toLowerCase().includes(search.toLowerCase())||d.desc.toLowerCase().includes(search.toLowerCase())));
   return <div><SectionHeader sub={t.dvarSub}>{t.dvarTitle}</SectionHeader><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 11px",fontSize:11,color:C.muted,marginBottom:10}}>
-      COD4 Stock-DVAR-Katalog: dokumentierte Legacy-CoD4-DVARs sind enthalten. Client-, Developer- und Server-DVARs werden getrennt gekennzeichnet; nicht jede Legacy-DVAR ist in CoD4x 21.5 serverseitig verfügbar.
+      {t.dvarCatalogNote}
     </div><div style={{display:"flex",gap:10,marginBottom:12}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.dvarSearch} style={{...inputStyle,flex:1}}/></div>
-    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{subs.map(s=><button key={s} onClick={()=>setSub(s)} style={{background:sub===s?C.accentDim:C.surface,border:`1px solid ${sub===s?C.accent:C.border}`,color:sub===s?C.accent:C.muted,borderRadius:6,padding:"5px 11px",fontSize:11,cursor:"pointer"}}>{s}</button>)}</div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{subs.map(s=><button key={s} onClick={()=>setSub(s)} style={{background:sub===s?C.accentDim:C.surface,border:`1px solid ${sub===s?C.accent:C.border}`,color:sub===s?C.accent:C.muted,borderRadius:6,padding:"5px 11px",fontSize:11,cursor:"pointer"}}>{s==="*"?t.all:s}</button>)}</div>
     <div style={{color:C.muted,fontSize:11,marginBottom:8}}>{filtered.length} Dvars</div>
     <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden"}}>
       <div style={{overflowX:"auto"}}>
@@ -1062,7 +1083,7 @@ function GSCAssistant({t,lang}) {
   return <div style={{display:"flex",flexDirection:"column",minHeight:"calc(100vh - 110px)"}}>
     <SectionHeader sub={t.gscSub}>{t.gscTitle}</SectionHeader>
     <div style={{background:C.accentDim,border:`1px solid ${C.accent}33`,borderRadius:6,padding:"8px 11px",fontSize:11,color:C.muted,marginBottom:12}}>{t.apiHint}</div>
-    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>{QUICK_PROMPTS.map((p,i)=><button key={i} onClick={()=>send(p)} style={{background:C.surface,border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"5px 9px",fontSize:11,cursor:"pointer"}}>{p.length>48?p.slice(0,48)+"…":p}</button>)}</div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>{(lang==="de"?QUICK_PROMPTS:QUICK_PROMPTS_EN).map((p,i)=><button key={i} onClick={()=>send(p)} style={{background:C.surface,border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"5px 9px",fontSize:11,cursor:"pointer"}}>{p.length>48?p.slice(0,48)+"…":p}</button>)}</div>
     <div style={{flex:1,minHeight:360,overflow:"auto",background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:14,display:"flex",flexDirection:"column",gap:10}}>
       {messages.map((m,i)=><div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}><div style={{maxWidth:"88%",background:m.role==="user"?C.accentDim:C.card,border:`1px solid ${m.role==="user"?C.accent+"33":C.border}`,borderRadius:8,padding:"9px 13px",color:C.text,fontSize:13,lineHeight:1.7}}><MsgContent content={m.content} t={t}/></div></div>)}
       {loading&&<div style={{color:C.muted,fontFamily:"monospace",fontSize:12}}>{t.analyzing}...</div>}<div ref={bottomRef}/>
@@ -1215,7 +1236,7 @@ dry_run=${dryRun ? "true" : "false"}`;
         </Field>
         <Field label={lang==="de"?"Mod":"Mod"}>
           <select style={selectStyle} value={mod} onChange={e=>setMod(e.target.value)}>
-            <option value="">Vanilla / Basisspiel</option>
+            <option value="">{t.vanilla}</option>
             {MODS.filter(m=>m.id).map(m=><option key={m.id} value={m.folder}>{m.name}</option>)}
             <option value={BOT_WARFARE.folder}>{BOT_WARFARE.name}</option>
           </select>
@@ -1311,7 +1332,7 @@ function DiagnosticsPanel({t,lang}){
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
         <Field label={t.cod4xVersion}><select style={selectStyle} value={cod4x} onChange={e=>setCod4x(e.target.value)}>{COD4X_VERSIONS.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></Field>
         <Field label={t.fpsVersion}><select style={selectStyle} value={fps} onChange={e=>setFps(e.target.value)}>{FPS_PROMOD_VERSIONS.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select></Field>
-        <Field label={lang==="de"?"Mod":"Mod"}><select style={selectStyle} value={mod} onChange={e=>setMod(e.target.value)}><option value="">Vanilla / Basisspiel</option>{MODS.filter(m=>m.id).map(m=><option key={m.id} value={m.folder}>{m.name}</option>)}</select></Field>
+        <Field label={lang==="de"?"Mod":"Mod"}><select style={selectStyle} value={mod} onChange={e=>setMod(e.target.value)}><option value="">{t.vanilla}</option>{MODS.filter(m=>m.id).map(m=><option key={m.id} value={m.folder}>{m.name}</option>)}</select></Field>
         <Field label={lang==="de"?"Server-Verzeichnis":"Server directory"}><input style={inputStyle} value={path} onChange={e=>setPath(e.target.value)} placeholder="./server" /></Field>
         <Field label="RCON Host"><input style={inputStyle} value={rconHost} onChange={e=>setRconHost(e.target.value)} /></Field>
         <Field label="RCON Port"><input style={inputStyle} value={rconPort} onChange={e=>setRconPort(e.target.value)} inputMode="numeric" /></Field>
@@ -1400,7 +1421,7 @@ function ProductionRuntimePanel({lang}){
   return <>
     <Header
       title={de ? "Production Runtime" : "Production Runtime"}
-      sub={de ? "4.18.30 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3-Datenbank, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Fernzugriff · Wiederherstellungspunkte" : "4.18.30 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3-Datenbank, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Remote Access · Restore points"}
+      sub={de ? "4.18.31 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3-Datenbank, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Fernzugriff · Wiederherstellungspunkte" : "4.18.31 · Windows / Linux Dedicated Runtime · Remote Linux (SSH, RCON, B3 database, Docker) · Config Engine · RCON · Master List · Plugins · B3 Manager · B3 Database · B3 Administration · Live Kick · Monitoring · Remote Access · Restore points"}
     />
 
     <ServerInstancesPanel lang={lang} executablePath={executablePath} baseGamePath={baseGamePath} platform={platform} cod4x={cod4x}/>
@@ -1532,7 +1553,7 @@ function ProductionRuntimePanel({lang}){
           </div>
           {!coreOk && (
             <div style={{color:C.muted,marginTop:6}}>
-              {(preflight.core?.reasons || []).join(" · ") || "Verified-Core-Prüfung fehlgeschlagen."}
+              {(preflight.core?.reasons || []).join(" · ") || (de?"Verified-Core-Prüfung fehlgeschlagen.":"Verified core check failed.")}
             </div>
           )}
           {coreOk && preflight?.core?.manifestSource && (
@@ -1596,7 +1617,7 @@ function ProductionRuntimePanel({lang}){
 
     <Section title={de ? "Sicherheitsgrenzen 4.18.26" : "4.18.26 security boundaries"}>
       <div style={{fontSize:10,color:C.muted,lineHeight:1.7}}>
-        Windows Runtime startet ausschließlich <code style={{color:C.text}}>cod4x18_dedrun.exe</code> · Linux-Core <code style={{color:C.text}}>cod4x18_dedrun</code> ist für Discovery/Verifikation vorbereitet · Client-EXE <code style={{color:C.text}}>iw3mp.exe</code> wird nicht als Server-Core akzeptiert · getrenntes Server-Arbeitsverzeichnis je Instanz (<code style={{color:C.text}}>fs_homepath</code>) · Verified-Core Gate · <code style={{color:C.text}}>shell:false</code> · PID-/Pfad-Verifikation nach Spawn · begrenztes stdout/stderr · kontrollierter Stop mit Prozessende-Prüfung · persistenter Runtime-State · SHA-256-Fingerprint · Core-Nachweis im Runtime-Core-Registry-Verzeichnis möglich · schema-basierte Instanzkonfiguration mit Vorprüfung, Backup, Apply, Verify, Restore und Aktivierungsnachweis · RCON nur über 127.0.0.1 mit Befehls-Allowlist, Passwort nur kurzlebig aus dem Tresor und redigiert in Runtime-History/-Output · optionaler Master-Token (<code style={{color:C.text}}>sv_authtoken</code>) aus dem Tresor, Serverstart nie davon abhängig · Netzwerkbindung standardmäßig Loopback, öffentlich nur ausdrücklich pro Instanz bestätigt · Master-List-Prüfung gegen die offizielle Liste · Plugins nur mit freigegebenem SHA-256, Abweichung blockiert den Start · B3-Abhängigkeiten nur per fester Interpreter-Probe und statischer Quellprüfung, B3 wird nicht gestartet · B3 als eigener Prozess je Instanz, unabhängig vom Server-Lebenszyklus, nur mit geprüftem eBc-B3 · B3-Health-Dashboard mit getrennter Fehlerdiagnose, B3-publist dauerhaft unterdrückt · Audit + Correlation-ID.
+        {de?<>Windows Runtime startet ausschließlich <code style={{color:C.text}}>cod4x18_dedrun.exe</code> · Linux-Core <code style={{color:C.text}}>cod4x18_dedrun</code> ist für Discovery/Verifikation vorbereitet · Client-EXE <code style={{color:C.text}}>iw3mp.exe</code> wird nicht als Server-Core akzeptiert · getrenntes Server-Arbeitsverzeichnis je Instanz (<code style={{color:C.text}}>fs_homepath</code>) · Verified-Core Gate · <code style={{color:C.text}}>shell:false</code> · PID-/Pfad-Verifikation nach Spawn · begrenztes stdout/stderr · kontrollierter Stop mit Prozessende-Prüfung · persistenter Runtime-State · SHA-256-Fingerprint · Core-Nachweis im Runtime-Core-Registry-Verzeichnis möglich · schema-basierte Instanzkonfiguration mit Vorprüfung, Backup, Apply, Verify, Restore und Aktivierungsnachweis · RCON nur über 127.0.0.1 mit Befehls-Allowlist, Passwort nur kurzlebig aus dem Tresor und redigiert in Runtime-History/-Output · optionaler Master-Token (<code style={{color:C.text}}>sv_authtoken</code>) aus dem Tresor, Serverstart nie davon abhängig · Netzwerkbindung standardmäßig Loopback, öffentlich nur ausdrücklich pro Instanz bestätigt · Master-List-Prüfung gegen die offizielle Liste · Plugins nur mit freigegebenem SHA-256, Abweichung blockiert den Start · B3-Abhängigkeiten nur per fester Interpreter-Probe und statischer Quellprüfung, B3 wird nicht gestartet · B3 als eigener Prozess je Instanz, unabhängig vom Server-Lebenszyklus, nur mit geprüftem eBc-B3 · B3-Health-Dashboard mit getrennter Fehlerdiagnose, B3-publist dauerhaft unterdrückt · Audit + Correlation-ID.</>:<>Windows runtime starts only <code style={{color:C.text}}>cod4x18_dedrun.exe</code> · Linux core <code style={{color:C.text}}>cod4x18_dedrun</code> is prepared for discovery/verification · client EXE <code style={{color:C.text}}>iw3mp.exe</code> is not accepted as a server core · separate server working directory per instance (<code style={{color:C.text}}>fs_homepath</code>) · verified core gate · <code style={{color:C.text}}>shell:false</code> · PID/path verification after spawn · bounded stdout/stderr · controlled stop with process exit check · persistent runtime state · SHA-256 fingerprint · core evidence possible in the runtime core registry folder · schema-based instance configuration with pre-check, backup, apply, verify, restore and activation record · RCON only over 127.0.0.1 with a command allowlist, password only short-lived from the vault and redacted in runtime history/output · optional master token (<code style={{color:C.text}}>sv_authtoken</code>) from the vault, server start never depends on it · network binding loopback by default, public only when confirmed per instance · master list check against the official list · plugins only with an approved SHA-256, a mismatch blocks the start · B3 dependencies only through a fixed interpreter probe and static source check, B3 is not started · B3 as its own process per instance, independent of the server lifecycle, only with audited eBc-B3 · B3 health dashboard with separate fault diagnosis, B3 publist permanently suppressed · audit + correlation ID.</>}
       </div>
     </Section>
   </>;
@@ -1713,6 +1734,7 @@ function RBACPanel({lang}){
 
 
 function UserAdministrationPanel({lang, user}){
+  const de=lang==="de";
   const [users,setUsers]=useState([]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
@@ -1733,47 +1755,48 @@ function UserAdministrationPanel({lang, user}){
       const r=await apiFetch(apiUrl("/api/backups/lifecycle"));
       const d=await r.json().catch(()=>({})); setLifecycle(d);
       if(!r.ok && !d?.maxTotal) throw new Error(d?.error||`HTTP ${r.status}`);
-      setMessage(d.ok?`Lifecycle PASS · ${d.total} Backups · ${d.regular} normal · ${d.safety} Safety`:`Lifecycle Prüfung: Bereinigung erforderlich · ${d.deletable?.length||0} Backups betroffen · ${d.orphanFiles?.length||0} verwaiste Dateien`);
+      setMessage(d.ok?`Lifecycle PASS · ${d.total} Backups · ${d.regular} normal · ${d.safety} Safety`:(de?`Lifecycle Prüfung: Bereinigung erforderlich · ${d.deletable?.length||0} Backups betroffen · ${d.orphanFiles?.length||0} verwaiste Dateien`:`Lifecycle check: cleanup needed · ${d.deletable?.length||0} backups affected · ${d.orphanFiles?.length||0} orphaned files`));
     }catch(e){setError(e.message)}finally{setBusy(false)}
   }
   async function cleanupLifecycle(){
-    if(!window.confirm("Backup-Lifecycle bereinigen? Dabei werden nur überzählige Backups und verwaiste Backup-Dateien innerhalb des sicheren Backup-Verzeichnisses entfernt."))return;
+    if(!window.confirm(de?"Backup-Lifecycle bereinigen? Dabei werden nur überzählige Backups und verwaiste Backup-Dateien innerhalb des sicheren Backup-Verzeichnisses entfernt.":"Clean up the backup lifecycle? Only surplus backups and orphaned backup files inside the safe backup folder are removed."))return;
     setError("");setMessage("");setBusy(true);
     try{
       const r=await apiFetch(apiUrl("/api/backups/lifecycle/cleanup"),{method:"POST"});
       const d=await r.json().catch(()=>({})); setLifecycle(d.after||d);
       if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`);
-      setMessage(`Lifecycle bereinigt · ${d.removedBackups||0} Backups · ${d.removedOrphans||0} verwaiste Dateien entfernt`); await load();
+      setMessage(de?`Lifecycle bereinigt · ${d.removedBackups||0} Backups · ${d.removedOrphans||0} verwaiste Dateien entfernt`:`Lifecycle cleaned · ${d.removedBackups||0} backups · ${d.removedOrphans||0} orphaned files removed`); await load();
     }catch(e){setError(e.message)}finally{setBusy(false)}
   }
   async function create(){
     setBusy(true); setError(""); setMessage("");
-    try{ const r=await apiFetch(apiUrl("/api/users"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(form)}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setForm({username:"",password:"",role:"viewer"}); setMessage("Benutzer angelegt."); await load(); }catch(e){setError(e.message);} finally{setBusy(false);}
+    try{ const r=await apiFetch(apiUrl("/api/users"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(form)}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setForm({username:"",password:"",role:"viewer"}); setMessage(de?"Benutzer angelegt.":"User created."); await load(); }catch(e){setError(e.message);} finally{setBusy(false);}
   }
   async function update(username,patch){
     setError(""); setMessage("");
-    try{ const r=await apiFetch(apiUrl(`/api/users/${encodeURIComponent(username)}`),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setMessage("Benutzer aktualisiert."); await load(); }catch(e){setError(e.message);}
+    try{ const r=await apiFetch(apiUrl(`/api/users/${encodeURIComponent(username)}`),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setMessage(de?"Benutzer aktualisiert.":"User updated."); await load(); }catch(e){setError(e.message);}
   }
   async function revoke(username){
-    if(!window.confirm(`Alle Sessions von ${username} widerrufen?`)) return;
-    try{ const r=await apiFetch(apiUrl(`/api/users/${encodeURIComponent(username)}/revoke`),{method:"POST"}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setMessage(`${d.revoked||0} Session(s) widerrufen.`); await load(); }catch(e){setError(e.message);}
+    if(!window.confirm(de?`Alle Sessions von ${username} widerrufen?`:`Revoke all sessions of ${username}?`)) return;
+    try{ const r=await apiFetch(apiUrl(`/api/users/${encodeURIComponent(username)}/revoke`),{method:"POST"}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setMessage(de?`${d.revoked||0} Session(s) widerrufen.`:`${d.revoked||0} session(s) revoked.`); await load(); }catch(e){setError(e.message);}
   }
   if(user?.role!=="admin") return null;
   return <Section title={lang==="de"?"Benutzer & Rollen":"Users & roles"}>
     {error&&<div style={{background:"rgba(239,68,68,.1)",border:`1px solid ${C.danger}55`,color:C.danger,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:10}}>{error}</div>}
     {message&&<div style={{background:"rgba(34,197,94,.08)",border:`1px solid ${C.success}55`,color:C.success,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:10}}>{message}</div>}
     <div style={{display:"grid",gridTemplateColumns:"1.2fr 1.2fr .8fr auto",gap:8,marginBottom:14}}>
-      <input style={inputStyle} placeholder="Benutzername" value={form.username} onChange={e=>setForm({...form,username:e.target.value})}/><input style={inputStyle} type="password" placeholder="Passwort (≥12)" value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/><select style={selectStyle} value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{["admin","operator","auditor","viewer","monitor"].map(r=><option key={r}>{r}</option>)}</select><button onClick={create} disabled={busy} style={buttonStyle}>Anlegen</button>
+      <input style={inputStyle} placeholder={de?"Benutzername":"Username"} value={form.username} onChange={e=>setForm({...form,username:e.target.value})}/><input style={inputStyle} type="password" placeholder={de?"Passwort (≥12)":"Password (≥12)"} value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/><select style={selectStyle} value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{["admin","operator","auditor","viewer","monitor"].map(r=><option key={r}>{r}</option>)}</select><button onClick={create} disabled={busy} style={buttonStyle}>{de?"Anlegen":"Create"}</button>
     </div>
     <div style={{display:"grid",gap:6}}>
       {users.map(u=><div key={u.username} style={{display:"grid",gridTemplateColumns:"1.3fr .8fr .8fr auto auto auto auto auto",gap:8,alignItems:"center",background:C.code,border:`1px solid ${C.border}`,borderRadius:5,padding:"8px 10px"}}>
-        <span style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{u.username}</span><select style={{...selectStyle,padding:"5px 7px"}} value={u.role} onChange={e=>update(u.username,{role:e.target.value})}>{["admin","operator","auditor","viewer","monitor"].map(r=><option key={r}>{r}</option>)}</select><span style={{fontSize:10,color:u.disabled?C.danger:C.success}}>{u.disabled?"DEAKTIVIERT":"AKTIV"}</span><label title="Fernzugriff (Block 24b)" style={{fontSize:10,color:u.remoteAccess?C.success:C.muted,display:"flex",gap:4,alignItems:"center"}}><input type="checkbox" checked={u.remoteAccess===true} onChange={e=>update(u.username,{remoteAccess:e.target.checked})}/>Fern{u.totpEnabled?" · 2FA":""}</label><label title="Fernaktionen: Nachricht, Kick, Neustart vom Handy (Block 24d, nur admin/operator)" style={{fontSize:10,color:u.remoteActions?C.success:C.muted,display:"flex",gap:4,alignItems:"center"}}><input type="checkbox" checked={u.remoteActions===true} disabled={!["admin","operator"].includes(u.role)} onChange={e=>update(u.username,{remoteActions:e.target.checked})}/>Aktionen</label>{u.totpEnabled?<button onClick={()=>{ if(window.confirm(`Zweiten Faktor von ${u.username} zurücksetzen? Fern-Sitzungen enden sofort.`)) update(u.username,{totpReset:true}); }} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>2FA zurücksetzen</button>:<span/>}<button onClick={()=>update(u.username,{disabled:!u.disabled})} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>{u.disabled?"Aktivieren":"Deaktivieren"}</button><button onClick={()=>revoke(u.username)} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>Sessions widerrufen</button>
+        <span style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{u.username}</span><select style={{...selectStyle,padding:"5px 7px"}} value={u.role} onChange={e=>update(u.username,{role:e.target.value})}>{["admin","operator","auditor","viewer","monitor"].map(r=><option key={r}>{r}</option>)}</select><span style={{fontSize:10,color:u.disabled?C.danger:C.success}}>{u.disabled?(de?"DEAKTIVIERT":"DISABLED"):(de?"AKTIV":"ACTIVE")}</span><label title={de?"Fernzugriff (Block 24b)":"Remote access (Block 24b)"} style={{fontSize:10,color:u.remoteAccess?C.success:C.muted,display:"flex",gap:4,alignItems:"center"}}><input type="checkbox" checked={u.remoteAccess===true} onChange={e=>update(u.username,{remoteAccess:e.target.checked})}/>{de?"Fern":"Remote"}{u.totpEnabled?" · 2FA":""}</label><label title={de?"Fernaktionen: Nachricht, Kick, Neustart vom Handy (Block 24d, nur admin/operator)":"Remote actions: message, kick, restart from the phone (Block 24d, admin/operator only)"} style={{fontSize:10,color:u.remoteActions?C.success:C.muted,display:"flex",gap:4,alignItems:"center"}}><input type="checkbox" checked={u.remoteActions===true} disabled={!["admin","operator"].includes(u.role)} onChange={e=>update(u.username,{remoteActions:e.target.checked})}/>{de?"Aktionen":"Actions"}</label>{u.totpEnabled?<button onClick={()=>{ if(window.confirm(de?`Zweiten Faktor von ${u.username} zurücksetzen? Fern-Sitzungen enden sofort.`:`Reset the second factor of ${u.username}? Remote sessions end at once.`)) update(u.username,{totpReset:true}); }} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>{de?"2FA zurücksetzen":"Reset 2FA"}</button>:<span/>}<button onClick={()=>update(u.username,{disabled:!u.disabled})} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>{u.disabled?(de?"Aktivieren":"Enable"):(de?"Deaktivieren":"Disable")}</button><button onClick={()=>revoke(u.username)} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>{de?"Sessions widerrufen":"Revoke sessions"}</button>
       </div>)}
     </div>
   </Section>;
 }
 
 function SessionManagementPanel({lang, user}){
+  const de=lang==="de";
   const [sessions,setSessions]=useState([]);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
@@ -1788,16 +1811,16 @@ function SessionManagementPanel({lang, user}){
 
   async function revoke(sessionId){
     if(!window.confirm("Diese Session wirklich widerrufen?")) return;
-    try{ const r=await apiFetch(apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}/revoke`),{method:"POST"}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setMessage(d.revoked?"Session widerrufen.":"Session war nicht mehr aktiv."); await load(); }
+    try{ const r=await apiFetch(apiUrl(`/api/sessions/${encodeURIComponent(sessionId)}/revoke`),{method:"POST"}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setMessage(d.revoked?"Session widerrufen.":(de?"Session war nicht mehr aktiv.":"Session was no longer active.")); await load(); }
     catch(e){setError(e.message);}
   }
   async function logoutOthers(){
-    if(!window.confirm("Alle anderen aktiven Sessions abmelden?")) return;
+    if(!window.confirm((de?"Alle anderen aktiven Sessions abmelden?":"Log out all other active sessions?"))) return;
     try{ const r=await apiFetch(apiUrl("/api/sessions/logout-all"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({includeCurrent:false})}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); setMessage(`${d.revoked||0} andere Session(s) abgemeldet.`); await load(); }
     catch(e){setError(e.message);}
   }
   async function logoutAll(){
-    if(!window.confirm("ALLE Sessions einschließlich deiner aktuellen Session abmelden? Du musst dich danach erneut anmelden.")) return;
+    if(!window.confirm(de?"ALLE Sessions einschließlich deiner aktuellen Session abmelden? Du musst dich danach erneut anmelden.":"Log out ALL sessions including your current one? You will have to sign in again.")) return;
     try{ const r=await apiFetch(apiUrl("/api/sessions/logout-all"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({includeCurrent:true})}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`); localStorage.removeItem("cod4x.auth.token"); localStorage.removeItem("cod4x.auth.expiresAt"); localStorage.removeItem("cod4x.auth.sessionId"); window.location.reload(); }
     catch(e){setError(e.message);}
   }
@@ -1812,7 +1835,7 @@ function SessionManagementPanel({lang, user}){
       <button onClick={logoutAll} style={{...buttonStyle,border:`1px solid ${C.danger}55`,color:C.danger}}>{lang==="de"?"Alle Sessions abmelden":"Logout all sessions"}</button>
       <Tag color={C.muted}>{sessions.length} {lang==="de"?"aktiv":"active"}</Tag>
     </div>
-    <div style={{fontSize:10,color:C.muted,marginBottom:10}}>Idle-Timeout: 30 Minuten · maximale Session-Laufzeit: 12 Stunden. Jede authentifizierte Anfrage verlängert die Idle-Frist innerhalb dieser Maximaldauer.</div>
+    <div style={{fontSize:10,color:C.muted,marginBottom:10}}>{de?"Idle-Timeout: 30 Minuten · maximale Session-Laufzeit: 12 Stunden. Jede authentifizierte Anfrage verlängert die Idle-Frist innerhalb dieser Maximaldauer.":"Idle timeout: 30 minutes · maximum session lifetime: 12 hours. Every authenticated request extends the idle period within this maximum."}</div>
     <div style={{display:"grid",gap:6}}>
       {sessions.map(s=><div key={s.sessionId} style={{display:"grid",gridTemplateColumns:"1.1fr .7fr .9fr 1.2fr 1.2fr auto",gap:8,alignItems:"center",background:C.code,border:`1px solid ${C.border}`,borderRadius:5,padding:"8px 10px"}}>
         <div><div style={{fontSize:11,color:C.text,fontFamily:"monospace"}}>{s.username}</div><div style={{fontSize:9,color:C.muted}}>{s.sessionId}</div></div>
@@ -1829,6 +1852,7 @@ function SessionManagementPanel({lang, user}){
 
 
 function BackupRecoveryPanel({lang}){
+  const de=lang==="de";
   const [backups,setBackups]=useState([]),[status,setStatus]=useState(null),[consistency,setConsistency]=useState(null),[lifecycle,setLifecycle]=useState(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(""),[error,setError]=useState("");
   async function load(){
     setBusy(true);setError("");
@@ -1847,7 +1871,7 @@ function BackupRecoveryPanel({lang}){
       const d=await r.json().catch(()=>({}));
       setConsistency(d);
       if(!r.ok && !d?.checks) throw new Error(d?.error||`HTTP ${r.status}`);
-      setMessage(d.ok?`Konsistenz PASS · ${d.count||0} Backups geprüft`:`Konsistenz FEHLER · ${d.invalid?.length||0} ungültige Einträge · ${d.orphanFiles?.length||0} verwaiste Dateien`);
+      setMessage(d.ok?(de?`Konsistenz PASS · ${d.count||0} Backups geprüft`:`Consistency PASS · ${d.count||0} backups checked`):(de?`Konsistenz FEHLER · ${d.invalid?.length||0} ungültige Einträge · ${d.orphanFiles?.length||0} verwaiste Dateien`:`Consistency FAILED · ${d.invalid?.length||0} invalid entries · ${d.orphanFiles?.length||0} orphaned files`));
     }catch(e){setError(e.message)}finally{setBusy(false)}
   }
   async function checkLifecycle(){
@@ -1856,29 +1880,29 @@ function BackupRecoveryPanel({lang}){
       const r=await apiFetch(apiUrl("/api/backups/lifecycle"));
       const d=await r.json().catch(()=>({})); setLifecycle(d);
       if(!r.ok && !d?.maxTotal) throw new Error(d?.error||`HTTP ${r.status}`);
-      setMessage(d.ok?`Lifecycle PASS · ${d.total} Backups · ${d.regular} normal · ${d.safety} Safety`:`Lifecycle Prüfung: Bereinigung erforderlich · ${d.deletable?.length||0} Backups betroffen · ${d.orphanFiles?.length||0} verwaiste Dateien`);
+      setMessage(d.ok?`Lifecycle PASS · ${d.total} Backups · ${d.regular} normal · ${d.safety} Safety`:(de?`Lifecycle Prüfung: Bereinigung erforderlich · ${d.deletable?.length||0} Backups betroffen · ${d.orphanFiles?.length||0} verwaiste Dateien`:`Lifecycle check: cleanup needed · ${d.deletable?.length||0} backups affected · ${d.orphanFiles?.length||0} orphaned files`));
     }catch(e){setError(e.message)}finally{setBusy(false)}
   }
   async function cleanupLifecycle(){
-    if(!window.confirm("Backup-Lifecycle bereinigen? Dabei werden nur überzählige Backups und verwaiste Backup-Dateien innerhalb des sicheren Backup-Verzeichnisses entfernt."))return;
+    if(!window.confirm(de?"Backup-Lifecycle bereinigen? Dabei werden nur überzählige Backups und verwaiste Backup-Dateien innerhalb des sicheren Backup-Verzeichnisses entfernt.":"Clean up the backup lifecycle? Only surplus backups and orphaned backup files inside the safe backup folder are removed."))return;
     setError("");setMessage("");setBusy(true);
     try{
       const r=await apiFetch(apiUrl("/api/backups/lifecycle/cleanup"),{method:"POST"});
       const d=await r.json().catch(()=>({})); setLifecycle(d.after||d);
       if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`);
-      setMessage(`Lifecycle bereinigt · ${d.removedBackups||0} Backups · ${d.removedOrphans||0} verwaiste Dateien entfernt`); await load();
+      setMessage(de?`Lifecycle bereinigt · ${d.removedBackups||0} Backups · ${d.removedOrphans||0} verwaiste Dateien entfernt`:`Lifecycle cleaned · ${d.removedBackups||0} backups · ${d.removedOrphans||0} orphaned files removed`); await load();
     }catch(e){setError(e.message)}finally{setBusy(false)}
   }
   async function create(){
     setBusy(true);setError("");setMessage("");
-    try{const r=await apiFetch(apiUrl("/api/backups/create"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({label:"Production backup"})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`HTTP ${r.status}`);setMessage(`Backup erstellt · SHA-256 ${d.backup.sha256}`);await load()}catch(e){setError(e.message)}finally{setBusy(false)}
+    try{const r=await apiFetch(apiUrl("/api/backups/create"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({label:"Production backup"})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`HTTP ${r.status}`);setMessage(de?`Backup erstellt · SHA-256 ${d.backup.sha256}`:`Backup created · SHA-256 ${d.backup.sha256}`);await load()}catch(e){setError(e.message)}finally{setBusy(false)}
   }
   async function verify(id){
     setError("");setMessage("");
-    try{const r=await apiFetch(apiUrl(`/api/backups/${encodeURIComponent(id)}/integrity`));const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`HTTP ${r.status}`);setMessage(d.valid?`Integrität PASS · ${d.actual}`:`Integrität FEHLER · Restore blockiert`);await load()}catch(e){setError(e.message)}
+    try{const r=await apiFetch(apiUrl(`/api/backups/${encodeURIComponent(id)}/integrity`));const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`HTTP ${r.status}`);setMessage(d.valid?(de?`Integrität PASS · ${d.actual}`:`Integrity PASS · ${d.actual}`):(de?`Integrität FEHLER · Restore blockiert`:`Integrity FAILED · restore blocked`));await load()}catch(e){setError(e.message)}
   }
   async function restore(id){
-    if(!window.confirm("Dieses Backup wiederherstellen? Vor dem Restore wird automatisch ein Safety Snapshot erstellt."))return;
+    if(!window.confirm(de?"Dieses Backup wiederherstellen? Vor dem Restore wird automatisch ein Safety Snapshot erstellt.":"Restore this backup? A safety snapshot is created automatically first."))return;
     setError("");setMessage("");
     try{const r=await apiFetch(apiUrl(`/api/backups/${encodeURIComponent(id)}/restore`),{method:"POST"});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`HTTP ${r.status}`);setMessage(`Restore PASS · Safety Snapshot: ${d.safetySnapshotId}`);await load()}catch(e){setError(e.message)}
   }
@@ -1886,18 +1910,18 @@ function BackupRecoveryPanel({lang}){
     {error&&<div style={{background:"rgba(239,68,68,.1)",border:`1px solid ${C.danger}55`,color:C.danger,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:10}}>{error}</div>}
     {message&&<div style={{background:"rgba(34,197,94,.08)",border:`1px solid ${C.success}55`,color:C.success,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:10,wordBreak:"break-word"}}>{message}</div>}
     <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
-      <button onClick={load} disabled={busy} style={buttonStyle}>{busy?"Lade…":"Aktualisieren"}</button>
-      <button onClick={create} disabled={busy} style={{...buttonStyle,border:`1px solid ${C.accent}55`,color:C.accent}}>Backup erstellen</button>
-      <button onClick={checkConsistency} disabled={busy} style={buttonStyle}>Konsistenz prüfen</button>
-      <button onClick={checkLifecycle} disabled={busy} style={buttonStyle}>Lifecycle prüfen</button>
-      <button onClick={cleanupLifecycle} disabled={busy} style={{...buttonStyle,border:`1px solid ${C.accent}55`,color:C.accent}}>Lifecycle bereinigen</button>
+      <button onClick={load} disabled={busy} style={buttonStyle}>{busy?(de?"Lade…":"Loading…"):(de?"Aktualisieren":"Refresh")}</button>
+      <button onClick={create} disabled={busy} style={{...buttonStyle,border:`1px solid ${C.accent}55`,color:C.accent}}>{de?"Backup erstellen":"Create backup"}</button>
+      <button onClick={checkConsistency} disabled={busy} style={buttonStyle}>{de?"Konsistenz prüfen":"Check consistency"}</button>
+      <button onClick={checkLifecycle} disabled={busy} style={buttonStyle}>{de?"Lifecycle prüfen":"Check lifecycle"}</button>
+      <button onClick={cleanupLifecycle} disabled={busy} style={{...buttonStyle,border:`1px solid ${C.accent}55`,color:C.accent}}>{de?"Lifecycle bereinigen":"Clean up lifecycle"}</button>
       <Tag color={C.muted}>{backups.length}/50 Backups</Tag>
-      {status&&<Tag color={C.accent}>SHA-256 · Integrity Gate aktiv</Tag>}
+      {status&&<Tag color={C.accent}>{de?"SHA-256 · Integrity Gate aktiv":"SHA-256 · integrity gate active"}</Tag>}
     </div>
-    <div style={{fontSize:10,color:C.muted,marginBottom:10}}>4.16.5 Registry · 4.16.6 SHA-256 · 4.16.7 Restore-Gate · 4.16.8 Registry-Konsistenz · 4.16.9 Lifecycle/Retention. Restore erzeugt vorher automatisch einen Safety Snapshot.</div>
-    {lifecycle&&<div style={{background:lifecycle.ok?"rgba(34,197,94,.06)":"rgba(245,158,11,.06)",border:`1px solid ${lifecycle.ok?C.success:C.accent}55`,borderRadius:6,padding:"8px 10px",fontSize:10,marginBottom:10}}><div style={{color:lifecycle.ok?C.success:C.accent,fontWeight:600,marginBottom:5}}>Backup-Lifecycle: {lifecycle.ok?"PASS":"BEREINIGUNG ERFORDERLICH"}</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:4,color:C.muted}}><span>Gesamt: {lifecycle.total||0}/{lifecycle.maxTotal||50}</span><span>Normal: {lifecycle.regular||0}/{lifecycle.maxRegular||40}</span><span>Safety: {lifecycle.safety||0}/{lifecycle.maxSafety||10}</span><span>Überzählig: {lifecycle.deletable?.length||0}</span><span>Verwaist: {lifecycle.orphanFiles?.length||0}</span></div></div>}
+    <div style={{fontSize:10,color:C.muted,marginBottom:10}}>4.16.5 Registry · 4.16.6 SHA-256 · 4.16.7 Restore-Gate · 4.16.8 Registry-Konsistenz · 4.16.9 Lifecycle/Retention. {de?"Restore erzeugt vorher automatisch einen Safety Snapshot.":"A restore creates a safety snapshot first."}</div>
+    {lifecycle&&<div style={{background:lifecycle.ok?"rgba(34,197,94,.06)":"rgba(245,158,11,.06)",border:`1px solid ${lifecycle.ok?C.success:C.accent}55`,borderRadius:6,padding:"8px 10px",fontSize:10,marginBottom:10}}><div style={{color:lifecycle.ok?C.success:C.accent,fontWeight:600,marginBottom:5}}>Backup lifecycle: {lifecycle.ok?"PASS":(de?"BEREINIGUNG ERFORDERLICH":"CLEANUP NEEDED")}</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:4,color:C.muted}}><span>{de?"Gesamt":"Total"}: {lifecycle.total||0}/{lifecycle.maxTotal||50}</span><span>Normal: {lifecycle.regular||0}/{lifecycle.maxRegular||40}</span><span>Safety: {lifecycle.safety||0}/{lifecycle.maxSafety||10}</span><span>{de?"Überzählig":"Surplus"}: {lifecycle.deletable?.length||0}</span><span>{de?"Verwaist":"Orphaned"}: {lifecycle.orphanFiles?.length||0}</span></div></div>}
     {consistency&&<div style={{background:consistency.ok?"rgba(34,197,94,.06)":"rgba(239,68,68,.08)",border:`1px solid ${consistency.ok?C.success:C.danger}55`,borderRadius:6,padding:"8px 10px",fontSize:10,marginBottom:10}}>
-      <div style={{color:consistency.ok?C.success:C.danger,fontWeight:600,marginBottom:5}}>Backup-Konsistenz: {consistency.ok?"PASS":"FEHLER"}</div>
+      <div style={{color:consistency.ok?C.success:C.danger,fontWeight:600,marginBottom:5}}>{de?"Backup-Konsistenz":"Backup consistency"}: {consistency.ok?"PASS":(de?"FEHLER":"FAILED")}</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:4,color:C.muted}}>
         {Object.entries(consistency.checks||{}).map(([k,v])=><span key={k} style={{color:v?C.success:C.danger}}>{v?"✓":"✕"} {k}</span>)}
       </div>
@@ -1906,9 +1930,9 @@ function BackupRecoveryPanel({lang}){
       {backups.map(b=><div key={b.id} style={{background:C.code,border:`1px solid ${C.border}`,borderRadius:5,padding:"9px 10px",display:"grid",gap:6}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}><div><div style={{fontSize:11,color:C.text}}>{b.label}</div><div style={{fontSize:9,color:C.muted}}>{new Date(b.createdAt).toLocaleString(lang==="de"?"de-DE":"en-US")} · {b.id}</div></div><span style={{fontSize:9,color:C.accent}}>SHA-256</span></div>
         <div style={{fontSize:9,color:C.muted,fontFamily:"monospace",wordBreak:"break-all"}}>{b.sha256}</div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><button onClick={()=>verify(b.id)} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>Integrität prüfen</button><button onClick={()=>restore(b.id)} style={{...buttonStyle,padding:"5px 8px",fontSize:10,border:`1px solid ${C.accent}55`,color:C.accent}}>Restore</button></div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><button onClick={()=>verify(b.id)} style={{...buttonStyle,padding:"5px 8px",fontSize:10}}>{de?"Integrität prüfen":"Verify integrity"}</button><button onClick={()=>restore(b.id)} style={{...buttonStyle,padding:"5px 8px",fontSize:10,border:`1px solid ${C.accent}55`,color:C.accent}}>Restore</button></div>
       </div>)}
-      {!backups.length&&<div style={{fontSize:11,color:C.muted}}>Noch keine Production Backups vorhanden.</div>}
+      {!backups.length&&<div style={{fontSize:11,color:C.muted}}>{de?"Noch keine Production Backups vorhanden.":"No production backups yet."}</div>}
     </div>
   </Section>;
 }
@@ -2217,6 +2241,7 @@ function ConfigurationPolicyPanel({lang}){
 }
 
 function SecurityPanel({t,lang}){
+  const de=lang==="de";
   const [fpsAcCatalog,setFpsAcCatalog]=useState([]);
   const [securityCod4x,setSecurityCod4x]=useState("21.5");
   const [securityTarget,setSecurityTarget]=useState("server");
@@ -2290,8 +2315,8 @@ function SecurityPanel({t,lang}){
           </select>
         </Field>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-          <button style={buttonStyle} disabled={loading} onClick={loadCatalog}>{loading?"Laden…":"FPSAC-Versionen laden"}</button>
-          <a href={apiUrl("/api/fpschallenge/anticheat/download/9.2.0")} style={{...buttonStyle,textDecoration:"none"}}>FPSAC 9.2.0 herunterladen</a>
+          <button style={buttonStyle} disabled={loading} onClick={loadCatalog}>{loading?(de?"Laden…":"Loading…"):(de?"FPSAC-Versionen laden":"Load FPSAC versions")}</button>
+          <a href={apiUrl("/api/fpschallenge/anticheat/download/9.2.0")} style={{...buttonStyle,textDecoration:"none"}}>{de?"FPSAC 9.2.0 herunterladen":"Download FPSAC 9.2.0"}</a>
         </div>
         <div style={{display:"flex",gap:18,fontSize:11,color:C.muted}}>
           <label><input type="checkbox" checked={enforce} onChange={e=>setEnforce(e.target.checked)}/> Enforce</label>
@@ -2312,9 +2337,37 @@ function SecurityPanel({t,lang}){
 }
 
 function Header({title,sub}){return <div style={{marginBottom:22}}><h1 style={{fontSize:22,fontWeight:650,margin:0,color:C.text}}>{title}</h1><div style={{fontSize:11,color:C.muted,marginTop:5}}>{sub}</div></div>;}
+// 4.18.31: overview page: quick start and what every menu item is for (lib/overview-guide.mjs).
+function OverviewGuide({de,labels,onOpen}){
+  return <>
+    <Header title="COD4X CONTROL" sub={de?"Serververwaltung für CoD4x-Dedicated-Server":"Server administration for CoD4x dedicated servers"}/>
+    <Section title={de?"Schnellstart: Schritt für Schritt":"Quick start: step by step"}>
+      <ol style={{margin:0,paddingLeft:20,display:"grid",gap:7}}>{QUICK_START.map((step,i)=><li key={i} style={{fontSize:12,color:C.text,lineHeight:1.55}}>{pick(de,step)}</li>)}</ol>
+    </Section>
+    <Section title={de?"Menüpunkte im Überblick":"Menu items at a glance"}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10}}>{MENU_GUIDE.map(([id,german,english])=>{const icon=(TABS.find(([tab])=>tab===id)||[])[1];return <button key={id} type="button" onClick={()=>onOpen(id)} style={{textAlign:"left",background:C.code,border:`1px solid ${C.border}`,borderRadius:6,padding:"11px 12px",cursor:"pointer",color:C.text,fontFamily:"inherit"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12,fontWeight:700,color:C.accent,marginBottom:5}}><span style={{fontFamily:"monospace",minWidth:16}}>{icon}</span>{labels[id]}</div>
+        <div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>{de?german:english}</div>
+      </button>;})}</div>
+    </Section>
+  </>;
+}
 function Section({title,children}){return <section style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:7,padding:18,marginBottom:14}}><div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:14}}>{title}</div>{children}</section>;}
 
+// 4.18.31: English is the default UI language; German stays selectable. The choice is kept per
+// computer in localStorage ("cod4x.ui.lang") and applies to the login screen and the whole app.
+export const UI_LANG_KEY="cod4x.ui.lang";
+export function readUiLang(){ try{ return localStorage.getItem(UI_LANG_KEY)==="de"?"de":"en"; }catch{ return "en"; } }
+function useUiLang(){
+  const [lang,setLangState]=useState(readUiLang);
+  useEffect(()=>{ try{ document.documentElement.lang=lang; }catch{} },[lang]);
+  const setLang=value=>{ const next=value==="de"?"de":"en"; setLangState(next); try{ localStorage.setItem(UI_LANG_KEY,next); }catch{} };
+  return [lang,setLang];
+}
+
 function AuthGate(){
+  const [lang,setLang]=useUiLang();
+  const de=lang==="de";
   const [mode,setMode]=useState("loading");
   const [username,setUsername]=useState("");
   const [password,setPassword]=useState("");
@@ -2363,11 +2416,11 @@ function AuthGate(){
           if(remembered) setRememberPassword(true);
         }catch(e){
           setRememberAvailable(false);
-          setRememberError(e?.message||"Die sichere Windows-Anmeldespeicherung konnte nicht initialisiert werden.");
+          setRememberError(e?.message||(de?"Die sichere Windows-Anmeldespeicherung konnte nicht initialisiert werden.":"Windows secure credential storage could not be initialized."));
         }
       }else{
         setRememberAvailable(false);
-        setRememberError("Die sichere Windows-Anmeldespeicherung ist in dieser App-Instanz nicht verfügbar.");
+        setRememberError(de?"Die sichere Windows-Anmeldespeicherung ist in dieser App-Instanz nicht verfügbar.":"Windows secure credential storage is not available in this app instance.");
       }
 
       const token=localStorage.getItem("cod4x.auth.token");
@@ -2395,7 +2448,7 @@ function AuthGate(){
           // A changed/revoked password must not cause an endless auto-login loop.
           try{ await window.cod4xControl?.clearRememberedLogin?.(); }catch{}
           setRememberPassword(false);
-          setError("Die gespeicherte Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.");
+          setError(de?"Die gespeicherte Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.":"The saved login is no longer valid. Please sign in again.");
         }
       }
 
@@ -2427,45 +2480,41 @@ function AuthGate(){
     setPassword("");
   }
 
-  if(mode==="loading") return <div style={{minHeight:"100vh",background:C.bg,color:C.muted,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif"}}>Authentifizierung wird geladen…</div>;
+  if(mode==="loading") return <div style={{minHeight:"100vh",background:C.bg,color:C.muted,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif"}}>{de?"Authentifizierung wird geladen…":"Loading authentication…"}</div>;
   if(mode==="error") return <div style={{minHeight:"100vh",background:C.bg,color:C.danger,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif"}}>{error}</div>;
   if(mode!=="authenticated") return <div style={{minHeight:"100vh",background:C.bg,color:C.text,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif",padding:24}}>
     <form onSubmit={submit} style={{width:"100%",maxWidth:420,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:24,boxSizing:"border-box"}}>
-      <div style={{color:C.accent,fontFamily:"monospace",fontWeight:800,fontSize:13,letterSpacing:"0.12em",marginBottom:5}}>COD4X CONTROL</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}><div style={{color:C.accent,fontFamily:"monospace",fontWeight:800,fontSize:13,letterSpacing:"0.12em"}}>COD4X CONTROL</div><div style={{display:"flex",gap:5}}><button type="button" onClick={()=>setLang("en")} style={langBtn(!de)}>EN</button><button type="button" onClick={()=>setLang("de")} style={langBtn(de)}>DE</button></div></div>
       <div style={{color:C.muted,fontSize:10,letterSpacing:"0.08em",marginBottom:22}}>{mode==="init"?"FIRST-RUN ADMIN INITIALIZATION":"AUTHENTICATION"}</div>
-      <h1 style={{fontSize:19,margin:"0 0 7px",fontWeight:650}}>{mode==="init"?"Administrator einrichten":"Anmelden"}</h1>
-      <div style={{fontSize:11,color:C.muted,marginBottom:18}}>{mode==="init"?`Mindestens ${12} Zeichen für das Administrator-Passwort.`:"30 Minuten Session-Lifetime."}</div>
-      <Field label="Benutzername"><input autoFocus style={inputStyle} value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" /></Field>
-      <Field label="Passwort"><input style={inputStyle} type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete={mode==="init"?"new-password":"current-password"} /></Field>
+      <h1 style={{fontSize:19,margin:"0 0 7px",fontWeight:650}}>{mode==="init"?(de?"Administrator einrichten":"Set up administrator"):(de?"Anmelden":"Sign in")}</h1>
+      <div style={{fontSize:11,color:C.muted,marginBottom:18}}>{mode==="init"?(de?`Mindestens ${12} Zeichen für das Administrator-Passwort.`:`At least ${12} characters for the administrator password.`):(de?"30 Minuten Session-Lifetime.":"30 minute session lifetime.")}</div>
+      <Field label={de?"Benutzername":"Username"}><input autoFocus style={inputStyle} value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" /></Field>
+      <Field label={de?"Passwort":"Password"}><input style={inputStyle} type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete={mode==="init"?"new-password":"current-password"} /></Field>
       {mode==="login"&&<div style={{margin:"2px 0 14px"}}>
         <label style={{display:"flex",alignItems:"center",gap:8,fontSize:11,color:rememberAvailable?C.text:C.muted,cursor:rememberAvailable?"pointer":"not-allowed"}}>
           <input type="checkbox" checked={rememberPassword} disabled={!rememberAvailable} onChange={e=>setRememberPassword(e.target.checked)} />
-          <span>Passwort auf diesem Windows-Konto merken</span>
+          <span>{de?"Passwort auf diesem Windows-Konto merken":"Remember password on this Windows account"}</span>
         </label>
         <div style={{fontSize:9,color:rememberAvailable?C.muted:C.danger,lineHeight:1.45,marginTop:5}}>
-          {rememberAvailable?"Das Passwort wird verschlüsselt über den Windows-Anmeldekontext gespeichert und nicht als Klartext abgelegt.":`Nicht verfügbar: ${rememberError||"Windows Secure Storage konnte nicht aktiviert werden."}`}
+          {rememberAvailable?(de?"Das Passwort wird verschlüsselt über den Windows-Anmeldekontext gespeichert und nicht als Klartext abgelegt.":"The password is stored encrypted through the Windows sign-in context, never as plain text."):`${de?"Nicht verfügbar":"Not available"}: ${rememberError||(de?"Windows Secure Storage konnte nicht aktiviert werden.":"Windows secure storage could not be enabled.")}`}
         </div>
       </div>}
       {error&&<div style={{background:"rgba(239,68,68,.1)",border:`1px solid ${C.danger}55`,color:C.danger,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:12}}>{error}</div>}
-      <button type="submit" disabled={busy} style={{...buttonStyle,width:"100%",opacity:busy?.65:1}}>{busy?(mode==="init"?"Initialisiere…":"Anmeldung…"):(mode==="init"?"Administrator initialisieren":"Anmelden")}</button>
-      {mode==="init"&&<div style={{fontSize:10,color:C.muted,marginTop:12,lineHeight:1.5}}>Das Passwort wird als scrypt-Hash gespeichert. Der Klartext wird nicht persistiert.</div>}
+      <button type="submit" disabled={busy} style={{...buttonStyle,width:"100%",opacity:busy?.65:1}}>{busy?(mode==="init"?(de?"Initialisiere…":"Initializing…"):(de?"Anmeldung…":"Signing in…")):(mode==="init"?(de?"Administrator initialisieren":"Initialize administrator"):(de?"Anmelden":"Sign in"))}</button>
+      {mode==="init"&&<div style={{fontSize:10,color:C.muted,marginTop:12,lineHeight:1.5}}>{de?"Das Passwort wird als scrypt-Hash gespeichert. Der Klartext wird nicht persistiert.":"The password is stored as a scrypt hash. The plain text is never persisted."}</div>}
     </form>
   </div>;
 
-  return <ControlApp user={user} expiresAt={expiresAt} onLogout={logout}/>;
+  return <ControlApp user={user} expiresAt={expiresAt} onLogout={logout} lang={lang} setLang={setLang}/>;
 }
 
 function App(){ return <AuthGate/>; }
 
-function ControlApp({user,onLogout}){
-  const [tab,setTab]=useState("config"),[lang,setLang]=useState("de");
+export function ControlApp({user,onLogout,lang="en",setLang=()=>{}}){
+  const [tab,setTab]=useState("overview");
   const t=I18N[lang];
-  const labels={
-    overview:lang==="de"?"Übersicht":"Overview",monitor:"Monitoring",
-    config:t.config,rotation:t.rotation,mods:lang==="de"?"Mods":"Mods",
-    security:lang==="de"?"Sicherheit":"Security",diagnostics:lang==="de"?"Diagnose":"Diagnostics",runtime:lang==="de"?"Runtime":"Runtime",remote:"Remote Linux",audit:lang==="de"?"Audit":"Audit",rcon:t.rcon,
-    versions:t.versionManager,tools:lang==="de"?"Werkzeuge":"Tools"
-  };
+  const de=lang==="de";
+  const labels={rotation:t.rotation,...Object.fromEntries(Object.entries(MENU_LABELS).map(([id,pair])=>[id,pick(de,pair)]))};
   const currentLabel=labels[tab]||"COD4X CONTROL";
   return <div className="app-shell" style={{display:"flex",background:C.bg,minHeight:"100vh",fontFamily:"Inter,Segoe UI,system-ui,sans-serif",color:C.text}}>
     <aside className="app-sidebar" style={{width:228,minHeight:"100vh",background:C.surface,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",flexShrink:0}}>
@@ -2476,17 +2525,18 @@ function ControlApp({user,onLogout}){
       <div className="sidebar-caption">CONTROL PANEL</div>
       <nav style={{flex:1}}>{TABS.map(([id,icon])=>{const active=tab===id;return <button className={`nav-item ${active?"active":""}`} key={id} onClick={()=>setTab(id)} aria-current={active?"page":undefined} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"11px 16px",cursor:"pointer",background:active?C.accentDim:"transparent",border:0,borderLeft:`3px solid ${active?C.accent:"transparent"}`,color:active?C.accent:C.muted,fontSize:13,textAlign:"left"}}><span className="nav-icon" style={{fontFamily:"monospace",fontSize:15,minWidth:20}}>{icon}</span><span>{labels[id]}</span>{active&&<span className="nav-arrow">›</span>}</button>})}</nav>
       <div className="sidebar-footer" style={{padding:"12px 14px",borderTop:`1px solid ${C.border}`}}>
-        <div style={{display:"flex",gap:5,marginBottom:9}}><button onClick={()=>setLang("de")} style={langBtn(lang==="de")}>DE</button><button onClick={()=>setLang("en")} style={langBtn(lang==="en")}>EN</button></div>
+        <div className="sidebar-caption" style={{padding:"0 0 6px"}}>{de?"SPRACHE":"LANGUAGE"}</div>
+        <div role="group" aria-label={de?"Sprache":"Language"} style={{display:"flex",gap:5,marginBottom:9}}><button onClick={()=>setLang("en")} aria-pressed={!de} style={langBtn(!de)}>EN · English</button><button onClick={()=>setLang("de")} aria-pressed={de} style={langBtn(de)}>DE · Deutsch</button></div>
         <div className="sidebar-version">CoD4x 21.5 · iw3mp<br/>RCON: UDP / 28960</div>
       </div>
     </aside>
     <main className="app-main" style={{flex:1,padding:"0 30px 30px",overflow:"auto",maxWidth:"calc(100vw - 228px)"}}>
       <header className="topbar">
         <div><div className="topbar-kicker">COD4X CONTROL <span>/</span> {currentLabel.toUpperCase()}</div><div className="topbar-title">{tab==="overview"?"SERVER OVERVIEW":"SERVER ADMINISTRATION"}</div></div>
-        <div className="topbar-right"><span className="topbar-version">4.18.30</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>Logout</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
+        <div className="topbar-right"><span className="topbar-version">4.18.31</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>{de?"Abmelden":"Logout"}</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
       </header>
       <div className="content-frame">
-        {tab==="overview"&&<><Header title="COD4X CONTROL" sub={lang==="de"?"Serververwaltung":"Server administration"}/><Section title={lang==="de"?"Server":"Server"}><div style={{fontSize:12,color:C.muted}}>Bereit. Wähle links nur den Bereich, den du gerade benötigst.</div></Section></>}
+        {tab==="overview"&&<OverviewGuide de={de} labels={labels} onOpen={setTab}/>}
         {tab==="monitor"&&<><Header title="Monitoring" sub={lang==="de"?"Status, Spieler, Verlauf und Ausfälle aller Serverinstanzen":"Status, players, history and outages of all server instances"}/><MonitorDashboard de={lang==="de"} request={monitorRequest}/><RemoteAccessPanel de={lang==="de"} request={remoteRequest} isAdmin={user?.role==="admin"} canAlerts={["admin","operator"].includes(user?.role)}/></>}
         {tab==="config"&&<ConfigBuilder t={t} lang={lang}/>}
         {tab==="rotation"&&<MapRotationBuilder t={t}/>}
@@ -2494,13 +2544,13 @@ function ControlApp({user,onLogout}){
         {tab==="security"&&<SecurityPanel t={t} lang={lang}/>}
         {tab==="diagnostics"&&<DiagnosticsPanel t={t} lang={lang}/>}
         {tab==="runtime"&&<ProductionRuntimePanel lang={lang}/>}
-        {tab==="remote"&&<><Header title="Remote Linux" sub={lang==="de"?"Linux-Server über SSH verwalten":"Manage Linux servers over SSH"}/><RemoteHostsPanel de={lang==="de"} request={(route,options)=>apiFetch(apiUrl(route),options)}/></>}
+        {tab==="remote"&&<><Header title="Remote Linux" sub={de?"Linux-Server über SSH verwalten":"Manage Linux servers over SSH"}/><div className="remote-linux"><RemoteHostsPanel de={de} request={(route,options)=>apiFetch(apiUrl(route),options)}/></div></>}
         {tab==="audit"&&<><RBACPanel lang={lang}/><UserAdministrationPanel lang={lang} user={user}/><SessionManagementPanel lang={lang} user={user}/><BackupRecoveryPanel lang={lang}/><AuditTrailPanel lang={lang}/><PersistentAuditPanel lang={lang}/><PersistentLogHardeningPanel lang={lang}/><ConfigurationPolicyPanel lang={lang}/><ConfigurationProfilesPanel lang={lang}/></>}
         {tab==="rcon"&&<RCONCommands t={t}/>}
         {tab==="versions"&&<VersionManager t={t} lang={lang}/>}
         {tab==="tools"&&<><DvarBrowser t={t}/><GSCAssistant t={t} lang={lang}/></>}
       </div>
-      <footer className="app-footer"><span>COD4X CONTROL 4.18.30</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
+      <footer className="app-footer"><span>COD4X CONTROL 4.18.31</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
     </main>
   </div>;
 }

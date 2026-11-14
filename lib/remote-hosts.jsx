@@ -71,14 +71,14 @@ export function RemoteError({ de, code, presentedSha256, pinnedSha256, output })
 }
 
 export function HostKeyDialog({ de, host, fingerprint, confirmed, onConfirm, onTrust, onCancel }) {
-  return <div role="dialog" aria-label={text(de, 'Host-Schlüssel prüfen', 'Verify host key')} style={{ border: '1px solid currentColor', padding: 12, margin: '10px 0' }}>
+  return <div role="dialog" aria-label={text(de, 'Host-Schlüssel prüfen', 'Verify host key')} className="rl-dialog">
     <strong>{text(de, 'Host-Schlüssel von ', 'Host key of ')}{host.host || host.id}</strong>
     <p>{text(de, 'Beim ersten Kontakt wird nichts angemeldet und nichts gesendet. Vergleiche den Fingerabdruck mit dem Server (z. B. mit „ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub“ dort).', 'On first contact nothing is sent and nobody is logged in. Compare the fingerprint with the server (for example with “ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub” there).')}</p>
     <p>SHA-256 (hex): <code>{fingerprint.sha256Hex}</code></p>
     <p>OpenSSH: <code>{openSsh(fingerprint.sha256Base64)}</code></p>
     <label><input type="checkbox" checked={Boolean(confirmed)} onChange={event => onConfirm(event.target.checked)} /> {text(de, 'Ich habe diesen Fingerabdruck mit dem Server verglichen', 'I compared this fingerprint with the server')}</label>
-    <div>
-      <button type="button" disabled={!confirmed} onClick={onTrust}>{text(de, 'Diesem Schlüssel vertrauen', 'Trust this key')}</button>
+    <div className="rl-actions">
+      <button type="button" className="rl-primary" disabled={!confirmed} onClick={onTrust}>{text(de, 'Diesem Schlüssel vertrauen', 'Trust this key')}</button>
       <button type="button" onClick={onCancel}>{text(de, 'Abbrechen', 'Cancel')}</button>
     </div>
   </div>;
@@ -96,13 +96,13 @@ export function HostCredentialForm({ de, host, status, busy, onSave, onRemove })
     clear();
     onSave({ privateKey, ...(pass ? { passphrase: pass } : {}) });
   }
-  return <form onSubmit={submit} style={{ marginTop: 8 }}>
-    <label>{text(de, 'SSH-Schlüssel (privat, OpenSSH oder PEM)', 'SSH private key (OpenSSH or PEM)')}<br />
-      <textarea ref={key} rows={6} cols={64} spellCheck={false} autoComplete="off" required disabled={busy || !known} /></label><br />
-    <label>{text(de, 'Schlüssel-Passphrase (nur bei verschlüsseltem Schlüssel)', 'Key passphrase (only if the key is encrypted)')} <input ref={passphrase} type="password" autoComplete="off" maxLength={256} disabled={busy || !known} /></label>
-    <span> {!known ? text(de, 'Status unbekannt', 'Status unknown') : configured ? text(de, 'Gespeichert', 'Stored') : text(de, 'Nicht eingerichtet', 'Not configured')}</span>
-    <div>
-      <button type="submit" disabled={busy || !known}>{text(de, 'Verschlüsselt speichern', 'Save encrypted')}</button>
+  return <form onSubmit={submit} className="rl-subcard">
+    <label className="rl-field"><span>{text(de, 'SSH-Schlüssel (privat, OpenSSH oder PEM)', 'SSH private key (OpenSSH or PEM)')}</span>
+      <textarea ref={key} rows={6} cols={64} spellCheck={false} autoComplete="off" required disabled={busy || !known} /></label>
+    <label className="rl-field"><span>{text(de, 'Schlüssel-Passphrase (nur bei verschlüsseltem Schlüssel)', 'Key passphrase (only if the key is encrypted)')}</span><input ref={passphrase} type="password" autoComplete="off" maxLength={256} disabled={busy || !known} /></label>
+    <span className="rl-tag"> {!known ? text(de, 'Status unbekannt', 'Status unknown') : configured ? text(de, 'Gespeichert', 'Stored') : text(de, 'Nicht eingerichtet', 'Not configured')}</span>
+    <div className="rl-actions">
+      <button type="submit" className="rl-primary" disabled={busy || !known}>{text(de, 'Verschlüsselt speichern', 'Save encrypted')}</button>
       <button type="button" disabled={busy || !known || configured !== true} onClick={() => onRemove()}>{text(de, 'Entfernen', 'Remove')}</button>
     </div>
   </form>;
@@ -118,7 +118,7 @@ export function DockerHostLine({ de, status, busy, onConfirm, onBuild, onWithdra
   if (status.mode === 'NO_DOCKER') return <p>{text(de, 'Docker ist auf diesem Host für den SSH-Benutzer nicht verfügbar.', 'Docker is not available to the SSH user on this host.')}</p>;
   const rootful = status.mode === 'ROOTFUL';
   const image = IMAGE_STATE[status.image];
-  return <div style={{ marginTop: 8 }}>
+  return <div className="rl-docker">
     <span>Docker {status.version} — {rootful ? text(de, 'über die docker-Gruppe', 'through the docker group') : 'rootless'} — {status.confirmed ? text(de, 'bestätigt', 'confirmed') : text(de, 'nicht bestätigt', 'not confirmed')}{image ? <> — {text(de, image[0], image[1])}</> : null}</span>
     {rootful
       ? <p role={status.confirmed ? 'note' : 'alert'}>{text(de, 'Achtung: Die Mitgliedschaft in der docker-Gruppe ist auf diesem Host root-gleich. Wer diesen SSH-Schlüssel hat, kann über Docker alles auf dem Host lesen und ändern. Rootless Docker vermeidet das.', 'Warning: membership in the docker group is equivalent to root on this host. Whoever holds this SSH key can read and change everything on the host through Docker. Rootless Docker avoids this.')}</p>
@@ -138,9 +138,9 @@ export function RemoteInstanceRow({ de, entry, busy, onAction }) {
   const { instance, runtime } = entry;
   const docker = instance.deployment === 'docker';
   const stopped = !entry.error && (!runtime?.status || SWITCHABLE.includes(runtime.status)) && !runtime?.recoveryBlocked;
-  return <li style={{ margin: '8px 0' }}>
+  return <li className="rl-instance">
     <strong>{instance.name}</strong> <code>{instance.id}</code> @ <code>{instance.hostId}</code>:{instance.port} — <span>{entry.error || runtime?.status || 'UNKNOWN'}</span>{runtime?.pid ? <span> (PID {runtime.pid})</span> : null}{runtime?.containerId ? <span> (Container {String(runtime.containerId).slice(0, 12)})</span> : null} <span>[{docker ? 'Docker' : text(de, 'nativ', 'native')}]</span>{runtime?.recoveryBlocked ? <span> ⚠ {text(de, 'Wiederherstellung nötig', 'recovery needed')}</span> : null}
-    <div>
+    <div className="rl-actions">
       {ACTIONS.map(([id, german, english]) => <button key={id} type="button" disabled={busy} onClick={() => onAction(id, instance)}>{text(de, german, english)}</button>)}
       <button type="button" disabled={busy} onClick={() => onAction('logs', instance)}>Logs</button>
       <button type="button" disabled={busy} onClick={() => onAction('health', instance)}>Health</button>
@@ -286,54 +286,68 @@ export function RemoteHostsPanel({ de, request }) {
     setConfigEdit(old => ({ ...old, sha256: saved.sha256 })); setMessage(text(de, 'Konfiguration gespeichert.', 'Configuration saved.'));
   });
 
-  return <section>
-    <h3>Remote Linux</h3>
-    <p role="note">{text(de, 'B3 startet CONTROL für Remote-Server nicht: B3 läuft auf dem Server, CONTROL verwaltet nur seine Datenbank. RCON läuft über SSH (auf dem Server wird python3 gebraucht).', 'CONTROL does not start B3 for remote servers: B3 runs on the server, CONTROL only manages its database. RCON runs over SSH (python3 is needed on the server).')}</p>
-    <p>{text(de, 'Die Verbindung läuft über SSH mit Schlüssel. Es gibt keinen Passwort-Login und keinen Agenten. Der SSH-Schlüssel liegt nur im verschlüsselten Tresor.', 'The connection uses SSH with a key. There is no password login and no agent. The key lives only in the encrypted vault.')}</p>
-    <button type="button" disabled={busy} onClick={refresh}>{text(de, 'Laden / aktualisieren', 'Load / refresh')}</button>
-    {error && <RemoteError de={de} {...error} />}
-    {message && <p role="status">{message}</p>}
+  // 4.18.31: same look as the other pages: cards, field grid and buttons through the classes of
+  // .remote-linux in src/styles.css. Texts, fields and actions are unchanged.
+  return <section className="rl-panel">
+    <div className="rl-card">
+      <div className="rl-card-title">{text(de, 'Verbindung', 'Connection')}</div>
+      <p role="note" className="rl-note">{text(de, 'B3 startet CONTROL für Remote-Server nicht: B3 läuft auf dem Server, CONTROL verwaltet nur seine Datenbank. RCON läuft über SSH (auf dem Server wird python3 gebraucht).', 'CONTROL does not start B3 for remote servers: B3 runs on the server, CONTROL only manages its database. RCON runs over SSH (python3 is needed on the server).')}</p>
+      <p className="rl-text">{text(de, 'Die Verbindung läuft über SSH mit Schlüssel. Es gibt keinen Passwort-Login und keinen Agenten. Der SSH-Schlüssel liegt nur im verschlüsselten Tresor.', 'The connection uses SSH with a key. There is no password login and no agent. The key lives only in the encrypted vault.')}</p>
+      <div className="rl-actions"><button type="button" className="rl-primary" disabled={busy} onClick={refresh}>{text(de, 'Laden / aktualisieren', 'Load / refresh')}</button></div>
+      {error && <div className="rl-error"><RemoteError de={de} {...error} /></div>}
+      {message && <p role="status" className="rl-status">{message}</p>}
+    </div>
 
-    <h4>{text(de, 'Hosts', 'Hosts')}</h4>
-    <form onSubmit={addHost}>
-      {[['id', 'ID', 'ID'], ['label', 'Bezeichnung', 'Label'], ['host', 'Host / IP', 'Host / IP'], ['port', 'Port', 'Port'], ['username', 'Benutzer (nicht root)', 'User (not root)']].map(([field, german, english]) =>
-        <label key={field} style={{ marginRight: 8 }}>{text(de, german, english)} <input type="text" value={hostForm[field]} onChange={event => setHostForm({ ...hostForm, [field]: event.target.value })} required disabled={busy} autoComplete="off" /></label>)}
-      <button type="submit" disabled={busy}>{text(de, 'Host anlegen', 'Add host')}</button>
-    </form>
-    {dialog && <HostKeyDialog de={de} host={dialog.host} fingerprint={dialog.fingerprint} confirmed={confirmed} onConfirm={setConfirmed} onTrust={trust} onCancel={() => { setDialog(null); setConfirmed(false); }} />}
-    <ul>{hosts.map(host => <li key={host.id}>
-      <strong>{host.label}</strong> <code>{host.username}@{host.host}:{host.port}</code> — {host.hostKeySha256 ? <span>{text(de, 'Schlüssel bestätigt', 'key pinned')} <code>{host.hostKeySha256.slice(0, 16)}…</code></span> : <span>{text(de, 'Schlüssel nicht bestätigt', 'key not confirmed')}</span>}
-      <div>
-        {!host.hostKeySha256 && <button type="button" disabled={busy} onClick={() => probe(host)}>{text(de, 'Host-Schlüssel prüfen', 'Verify host key')}</button>}
-        <button type="button" disabled={busy} onClick={() => loadCredentials(host)}>{text(de, 'SSH-Schlüssel-Status', 'SSH key status')}</button>
-        <button type="button" disabled={busy} onClick={() => loadDocker(host)}>{text(de, 'Docker-Status', 'Docker status')}</button>
-        <button type="button" disabled={busy} onClick={() => removeHost(host)}>{text(de, 'Host entfernen', 'Remove host')}</button>
-      </div>
-      {credentials[host.id] && <HostCredentialForm de={de} host={host} status={credentials[host.id]} busy={busy} onSave={body => saveKey(host, body)} onRemove={() => removeKey(host)} />}
-      <DockerHostLine de={de} status={docker[host.id]} busy={busy} onConfirm={word => confirmDocker(host, word)} onBuild={() => buildImage(host)} onWithdraw={() => withdrawDocker(host)} />
-    </li>)}</ul>
+    <div className="rl-card">
+      <div className="rl-card-title">{text(de, 'Hosts', 'Hosts')}</div>
+      <form onSubmit={addHost}>
+        <div className="rl-grid">
+          {[['id', 'ID', 'ID'], ['label', 'Bezeichnung', 'Label'], ['host', 'Host / IP', 'Host / IP'], ['port', 'Port', 'Port'], ['username', 'Benutzer (nicht root)', 'User (not root)']].map(([field, german, english]) =>
+            <label key={field} className="rl-field"><span>{text(de, german, english)}</span><input type="text" value={hostForm[field]} onChange={event => setHostForm({ ...hostForm, [field]: event.target.value })} required disabled={busy} autoComplete="off" /></label>)}
+        </div>
+        <div className="rl-actions"><button type="submit" className="rl-primary" disabled={busy}>{text(de, 'Host anlegen', 'Add host')}</button></div>
+      </form>
+      {dialog && <HostKeyDialog de={de} host={dialog.host} fingerprint={dialog.fingerprint} confirmed={confirmed} onConfirm={setConfirmed} onTrust={trust} onCancel={() => { setDialog(null); setConfirmed(false); }} />}
+      {hosts.length === 0 ? <p className="rl-empty">{text(de, 'Noch keine Hosts geladen.', 'No hosts loaded yet.')}</p> : <ul className="rl-list">{hosts.map(host => <li key={host.id} className="rl-item">
+        <div className="rl-item-head"><strong>{host.label}</strong> <code>{host.username}@{host.host}:{host.port}</code> {host.hostKeySha256 ? <span className="rl-tag rl-ok">{text(de, 'Schlüssel bestätigt', 'key pinned')} <code>{host.hostKeySha256.slice(0, 16)}…</code></span> : <span className="rl-tag rl-warn">{text(de, 'Schlüssel nicht bestätigt', 'key not confirmed')}</span>}</div>
+        <div className="rl-actions">
+          {!host.hostKeySha256 && <button type="button" disabled={busy} onClick={() => probe(host)}>{text(de, 'Host-Schlüssel prüfen', 'Verify host key')}</button>}
+          <button type="button" disabled={busy} onClick={() => loadCredentials(host)}>{text(de, 'SSH-Schlüssel-Status', 'SSH key status')}</button>
+          <button type="button" disabled={busy} onClick={() => loadDocker(host)}>{text(de, 'Docker-Status', 'Docker status')}</button>
+          <button type="button" className="rl-danger" disabled={busy} onClick={() => removeHost(host)}>{text(de, 'Host entfernen', 'Remove host')}</button>
+        </div>
+        {credentials[host.id] && <HostCredentialForm de={de} host={host} status={credentials[host.id]} busy={busy} onSave={body => saveKey(host, body)} onRemove={() => removeKey(host)} />}
+        <DockerHostLine de={de} status={docker[host.id]} busy={busy} onConfirm={word => confirmDocker(host, word)} onBuild={() => buildImage(host)} onWithdraw={() => withdrawDocker(host)} />
+      </li>)}</ul>}
+    </div>
 
-    <h4>{text(de, 'Server auf Hosts', 'Servers on hosts')}</h4>
-    <ul>{instances.map(entry => <li key={entry.instance.id} style={{ listStyle: 'none' }}><ul><RemoteInstanceRow de={de} entry={entry} busy={busy} onAction={instanceAction} /></ul><RemoteInstanceTools de={de} entry={entry} request={request} /></li>)}</ul>
-    {output?.kind === 'logs' && <div><h5>Logs {output.instance.id}</h5><pre>{output.data.stdout}</pre><pre>{output.data.stderr}</pre><pre>{output.data.console}</pre></div>}
-    {output?.kind === 'health' && <div><h5>Health {output.instance.id}</h5><pre>{JSON.stringify(output.data, null, 2)}</pre></div>}
-    {output?.kind === 'backups' && <div><h5>Backups {output.instance.id}</h5><ul>{output.data.map(backup => <li key={backup.backupId}><code>{backup.backupId}</code> {backup.invalid ? text(de, '(ungültig)', '(invalid)') : backup.createdAt} {backup.action ? <span>[{backup.action}]</span> : null} <button type="button" disabled={busy || backup.invalid} onClick={() => restore(output.instance, backup.backupId)}>{text(de, 'Wiederherstellen', 'Restore')}</button></li>)}</ul></div>}
-    {configEdit && <div><h5>server.cfg {configEdit.instance.id}</h5>
-      <textarea rows={14} cols={72} spellCheck={false} value={configEdit.text} onChange={event => setConfigEdit({ ...configEdit, text: event.target.value })} disabled={busy} />
-      <div><button type="button" disabled={busy} onClick={saveConfig}>{text(de, 'Speichern (Server muss gestoppt sein)', 'Save (server must be stopped)')}</button></div></div>}
+    <div className="rl-card">
+      <div className="rl-card-title">{text(de, 'Server auf Hosts', 'Servers on hosts')}</div>
+      {instances.length === 0 ? <p className="rl-empty">{text(de, 'Noch keine Server geladen.', 'No servers loaded yet.')}</p> : <ul className="rl-list">{instances.map(entry => <li key={entry.instance.id} className="rl-item" style={{ listStyle: 'none' }}><ul className="rl-list"><RemoteInstanceRow de={de} entry={entry} busy={busy} onAction={instanceAction} /></ul><RemoteInstanceTools de={de} entry={entry} request={request} /></li>)}</ul>}
+      {output?.kind === 'logs' && <div className="rl-output"><h5>Logs {output.instance.id}</h5><pre>{output.data.stdout}</pre><pre>{output.data.stderr}</pre><pre>{output.data.console}</pre></div>}
+      {output?.kind === 'health' && <div className="rl-output"><h5>Health {output.instance.id}</h5><pre>{JSON.stringify(output.data, null, 2)}</pre></div>}
+      {output?.kind === 'backups' && <div className="rl-output"><h5>Backups {output.instance.id}</h5><ul className="rl-list">{output.data.map(backup => <li key={backup.backupId} className="rl-row"><code>{backup.backupId}</code> {backup.invalid ? text(de, '(ungültig)', '(invalid)') : backup.createdAt} {backup.action ? <span>[{backup.action}]</span> : null} <button type="button" disabled={busy || backup.invalid} onClick={() => restore(output.instance, backup.backupId)}>{text(de, 'Wiederherstellen', 'Restore')}</button></li>)}</ul></div>}
+      {configEdit && <div className="rl-output"><h5>server.cfg {configEdit.instance.id}</h5>
+        <textarea rows={14} cols={72} spellCheck={false} value={configEdit.text} onChange={event => setConfigEdit({ ...configEdit, text: event.target.value })} disabled={busy} />
+        <div className="rl-actions"><button type="button" className="rl-primary" disabled={busy} onClick={saveConfig}>{text(de, 'Speichern (Server muss gestoppt sein)', 'Save (server must be stopped)')}</button></div></div>}
+    </div>
 
-    <h4>{text(de, 'Server installieren', 'Install a server')}</h4>
-    <p>{text(de, 'Das BaseGame muss auf dem Server schon vorhanden sein (nur gelesen). Hochgeladen werden nur der CoD4x-Linux-Core (Datei „cod4x18_dedrun“ auf diesem PC, SHA-256 bestätigen) und das Instanzverzeichnis.', 'The base game must already exist on the server (read only). Only the CoD4x Linux core (file “cod4x18_dedrun” on this PC, confirm its SHA-256) and the instance directory are uploaded.')}</p>
-    <p>{text(de, 'Die Core-Datei wird nur aus dem Import-Ordner von CONTROL gelesen. Lege „cod4x18_dedrun“ dort ab (Unterordner sind erlaubt, z. B. „21.5/cod4x18_dedrun“) und gib den Namen relativ zu diesem Ordner an.', 'The core file is read from the import folder of CONTROL only. Put “cod4x18_dedrun” there (subfolders are allowed, for example “21.5/cod4x18_dedrun”) and give its name relative to that folder.')} {coreImportRoot ? <code>{coreImportRoot}</code> : text(de, '(Ordner wird nach „Laden / aktualisieren“ angezeigt)', '(the folder is shown after “Load / refresh”)')}</p>
-    <form onSubmit={install}>
-      {[['id', 'ID', 'ID'], ['name', 'Name', 'Name'], ['hostId', 'Host-ID', 'Host ID'], ['port', 'Server-Port', 'Server port'], ['remoteRoot', 'Zielverzeichnis (Server)', 'Target directory (server)'], ['basePath', 'BaseGame-Pfad (Server)', 'Base game path (server)'], ['corePath', 'Core-Datei: Name oder Pfad im Import-Ordner', 'Core file name or path inside the import folder'], ['coreVersion', 'Core-Version', 'Core version'], ['expectedCoreSha256', 'Core SHA-256', 'Core SHA-256']].map(([field, german, english]) =>
-        <label key={field} style={{ display: 'block' }}>{text(de, german, english)} <input type="text" value={installForm[field]} onChange={event => setInstallForm({ ...installForm, [field]: event.target.value })} required disabled={busy} autoComplete="off" /></label>)}
-      <label style={{ display: 'block' }}>{text(de, 'Betriebsart', 'Deployment')} <select value={installForm.deployment} onChange={event => setInstallForm({ ...installForm, deployment: event.target.value })} disabled={busy}>
-        <option value="native">{text(de, 'Nativ (Prozess auf dem Host)', 'Native (process on the host)')}</option>
-        <option value="docker">{text(de, 'Docker (Container auf dem Host)', 'Docker (container on the host)')}</option>
-      </select></label>
-      <p>{text(de, 'Docker braucht einen Host, auf dem Docker bestätigt und das Image gebaut wurde (Schaltfläche „Docker-Status“ beim Host).', 'Docker needs a host where Docker was confirmed and the image was built (button “Docker status” at the host).')}</p>
-      <button type="submit" disabled={busy}>{text(de, 'Installieren', 'Install')}</button>
-    </form>
+    <div className="rl-card">
+      <div className="rl-card-title">{text(de, 'Server installieren', 'Install a server')}</div>
+      <p className="rl-text">{text(de, 'Das BaseGame muss auf dem Server schon vorhanden sein (nur gelesen). Hochgeladen werden nur der CoD4x-Linux-Core (Datei „cod4x18_dedrun“ auf diesem PC, SHA-256 bestätigen) und das Instanzverzeichnis.', 'The base game must already exist on the server (read only). Only the CoD4x Linux core (file “cod4x18_dedrun” on this PC, confirm its SHA-256) and the instance directory are uploaded.')}</p>
+      <p className="rl-text">{text(de, 'Die Core-Datei wird nur aus dem Import-Ordner von CONTROL gelesen. Lege „cod4x18_dedrun“ dort ab (Unterordner sind erlaubt, z. B. „21.5/cod4x18_dedrun“) und gib den Namen relativ zu diesem Ordner an.', 'The core file is read from the import folder of CONTROL only. Put “cod4x18_dedrun” there (subfolders are allowed, for example “21.5/cod4x18_dedrun”) and give its name relative to that folder.')} {coreImportRoot ? <code>{coreImportRoot}</code> : text(de, '(Ordner wird nach „Laden / aktualisieren“ angezeigt)', '(the folder is shown after “Load / refresh”)')}</p>
+      <form onSubmit={install}>
+        <div className="rl-grid">
+          {[['id', 'ID', 'ID'], ['name', 'Name', 'Name'], ['hostId', 'Host-ID', 'Host ID'], ['port', 'Server-Port', 'Server port'], ['remoteRoot', 'Zielverzeichnis (Server)', 'Target directory (server)'], ['basePath', 'BaseGame-Pfad (Server)', 'Base game path (server)'], ['corePath', 'Core-Datei: Name oder Pfad im Import-Ordner', 'Core file name or path inside the import folder'], ['coreVersion', 'Core-Version', 'Core version'], ['expectedCoreSha256', 'Core SHA-256', 'Core SHA-256']].map(([field, german, english]) =>
+            <label key={field} className="rl-field"><span>{text(de, german, english)}</span><input type="text" value={installForm[field]} onChange={event => setInstallForm({ ...installForm, [field]: event.target.value })} required disabled={busy} autoComplete="off" /></label>)}
+          <label className="rl-field"><span>{text(de, 'Betriebsart', 'Deployment')}</span><select value={installForm.deployment} onChange={event => setInstallForm({ ...installForm, deployment: event.target.value })} disabled={busy}>
+            <option value="native">{text(de, 'Nativ (Prozess auf dem Host)', 'Native (process on the host)')}</option>
+            <option value="docker">{text(de, 'Docker (Container auf dem Host)', 'Docker (container on the host)')}</option>
+          </select></label>
+        </div>
+        <p className="rl-note">{text(de, 'Docker braucht einen Host, auf dem Docker bestätigt und das Image gebaut wurde (Schaltfläche „Docker-Status“ beim Host).', 'Docker needs a host where Docker was confirmed and the image was built (button “Docker status” at the host).')}</p>
+        <div className="rl-actions"><button type="submit" className="rl-primary" disabled={busy}>{text(de, 'Installieren', 'Install')}</button></div>
+      </form>
+    </div>
   </section>;
 }
