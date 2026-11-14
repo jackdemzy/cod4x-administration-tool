@@ -194,7 +194,11 @@ async function writeAuthUsersFile() {
   const tmp = `${AUTH_USERS_FILE}.tmp-${process.pid}`;
   await fs.writeFile(tmp, authUsersText(), { encoding: "utf8", flag: "w", mode: 0o600 });
   await fs.chmod(tmp, 0o600).catch(() => {});
-  await fs.rename(tmp, AUTH_USERS_FILE);
+  // Windows refuses to replace a file another process (a virus scanner, an editor) holds open: retry briefly.
+  for (let attempt = 0; ; attempt++) {
+    try { await fs.rename(tmp, AUTH_USERS_FILE); break; }
+    catch (err) { if (process.platform !== "win32" || !["EPERM", "EACCES", "EBUSY"].includes(err.code) || attempt >= 9) throw err; await new Promise(resolve => setTimeout(resolve, 50)); }
+  }
   await fs.chmod(AUTH_USERS_FILE, 0o600).catch(() => {});
 }
 
@@ -2065,7 +2069,9 @@ async function saveBackupRegistry(registry) {
 async function backupPayloadFromFiles() {
   const files = {};
   for (const item of BACKUP_FILES) {
-    try { files[item.key] = await fs.readFile(item.file, "utf8"); }
+    // users.json is read inside its write queue: on Windows a save cannot replace it while it is open.
+    const read = () => fs.readFile(item.file, "utf8");
+    try { files[item.key] = await (item.file === AUTH_USERS_FILE ? withAuthUsersLock(read) : read()); }
     catch (err) { if (err.code === "ENOENT") files[item.key] = null; else throw err; }
   }
   return files;
@@ -2264,7 +2270,7 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
     // factors, disabled flags) are user.manage data. Restoring different ones needs that right, and
     // the restored set must keep an enabled administrator.
     const usersPayload = record.raw.payload.users;
-    const currentUsers = await fs.readFile(AUTH_USERS_FILE, "utf8").catch(err => { if (err.code === "ENOENT") return null; throw err; });
+    const currentUsers = await withAuthUsersLock(() => fs.readFile(AUTH_USERS_FILE, "utf8")).catch(err => { if (err.code === "ENOENT") return null; throw err; });
     const usersChange = usersPayload !== null && usersPayload !== currentUsers;
     const loadedUsers = authUsersText();
     if (usersChange) {
