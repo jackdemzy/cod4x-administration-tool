@@ -12,8 +12,19 @@ const small = { fontSize: 11, color: T.muted, margin: 0, lineHeight: 1.5 };
 const mono = { fontFamily: 'monospace', fontSize: 12, color: T.text, wordBreak: 'break-all', background: T.code, border: `1px solid ${T.border}`, borderRadius: 4, padding: '6px 8px' };
 const L = (de, a, b) => de ? a : b;
 const when = (t, de) => t ? new Date(t).toLocaleString(de ? 'de-DE' : 'en-GB') : '—';
-const ERRORS = { TOTP_INVALID: 'Code ungültig. Uhrzeit von Handy und Rechner prüfen.', TOTP_SETUP_EXPIRED: 'Einrichtung abgelaufen, bitte neu starten.', PASSWORD_INVALID: 'Passwort ungültig.', REMOTE_SETTINGS_INVALID: 'Einstellung ungültig.', REMOTE_TLS_REQUIRED: 'LAN-Modus braucht Zertifikat und Schlüssel (PEM).', REMOTE_HOST_INVALID: 'LAN-Adresse ungültig (IP-Adresse angeben).', DISCORD_URL_INVALID: 'Keine gültige Discord-Webhook-Adresse (https://discord.com/api/webhooks/…).', DISCORD_HOST_NOT_ALLOWED: 'Nur Webhooks von discord.com oder discordapp.com sind erlaubt.', ALERT_SETTINGS_INVALID: 'Einstellung ungültig.' };
-const message = (failure, de) => (de && ERRORS[failure.code || failure.message]) || failure.message;
+const ERRORS = {
+  TOTP_INVALID: ['Code ungültig. Uhrzeit von Handy und Rechner prüfen.', 'Invalid code. Check the clock of the phone and the computer.'],
+  TOTP_SETUP_EXPIRED: ['Einrichtung abgelaufen, bitte neu starten.', 'Setup expired, please start again.'],
+  PASSWORD_INVALID: ['Passwort ungültig.', 'Invalid password.'],
+  REMOTE_SETTINGS_INVALID: ['Einstellung ungültig.', 'Invalid setting.'],
+  REMOTE_TLS_REQUIRED: ['LAN-Modus braucht Zertifikat und Schlüssel (PEM).', 'LAN mode needs a certificate and a key (PEM).'],
+  REMOTE_HOST_INVALID: ['LAN-Adresse ungültig (IP-Adresse angeben).', 'Invalid LAN address (enter an IP address).'],
+  DISCORD_URL_INVALID: ['Keine gültige Discord-Webhook-Adresse (https://discord.com/api/webhooks/…).', 'Not a valid Discord webhook address (https://discord.com/api/webhooks/…).'],
+  DISCORD_HOST_NOT_ALLOWED: ['Nur Webhooks von discord.com oder discordapp.com sind erlaubt.', 'Only webhooks of discord.com or discordapp.com are allowed.'],
+  ALERT_SETTINGS_INVALID: ['Einstellung ungültig.', 'Invalid setting.'],
+};
+// 4.18.31: known codes in both languages, anything else shows the code itself.
+const message = (failure, de) => { const known = ERRORS[failure.code || failure.message]; return known ? L(de, known[0], known[1]) : failure.message; };
 
 export function SecondFactorSection({ request, de = true, me, onChange = () => {} }) {
   const [setup, setSetup] = useState(null);

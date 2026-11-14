@@ -7,7 +7,7 @@ Set-Location $PSScriptRoot
 
 Write-Host ''
 Write-Host '========================================='
-Write-Host ' COD4X CONTROL 4.18.30 - Windows Build'
+Write-Host ' COD4X CONTROL 4.18.31 - Windows Build'
 Write-Host '========================================='
 Write-Host ''
 
@@ -72,8 +72,8 @@ Write-Host '[4/5] Erzeuge Electron/NSIS Installer und Portable-EXE ...'
 npx electron-builder --win nsis portable --publish never
 if ($LASTEXITCODE -ne 0) { throw "Electron/NSIS-Build fehlgeschlagen (ExitCode $LASTEXITCODE)." }
 
-$installer = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Setup-4.18.30-x64.exe'
-$portable = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Portable-4.18.30-x64.exe'
+$installer = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Setup-4.18.31-x64.exe'
+$portable = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Portable-4.18.31-x64.exe'
 foreach ($artifact in @($installer, $portable)) {
   if (-not (Test-Path $artifact)) { throw "Build beendet, aber erwartete EXE wurde nicht gefunden: $artifact" }
 }
