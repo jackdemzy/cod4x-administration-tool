@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { Component, useState, useRef, useEffect, useMemo } from "react";
 import { RuntimePersistenceWarning } from "./lib/runtime-persistence-warning.mjs";
 import { InstanceConfigEditor } from "./lib/instance-config-editor.jsx";
 import { InstanceCredentialEditor } from "./lib/instance-credential-editor.jsx";
@@ -36,7 +36,21 @@ import { RemoteAccessPanel } from "./lib/remote-access-panel.jsx";
 const API_BASE = "http://127.0.0.1:8787";
 function apiUrl(path){ return `${API_BASE}${path.startsWith("/")?path:`/${path}`}`; }
 function authHeaders(extra={}){ const token=localStorage.getItem("cod4x.auth.token"); return token?{...extra,Authorization:`Bearer ${token}`}:{...extra}; }
-function apiFetch(input, init={}){ return fetch(input,{...init,headers:authHeaders(init.headers || {})}); }
+// Debug phase (4.18.31): a 401 on a request that carried a session token means the session is gone
+// (expired, revoked, or the backend restarted). The token is dropped and the login screen is shown,
+// instead of every panel polling on with "Authentication required".
+export const SESSION_EXPIRED_EVENT="cod4x:session-expired";
+const AUTH_ROUTES=/\/api\/auth\/(?:login|init|status|logout)\b/;
+export function apiFetch(input, init={}){
+  const headers=authHeaders(init.headers || {});
+  return fetch(input,{...init,headers}).then(response=>{
+    if(response.status===401&&headers.Authorization&&!AUTH_ROUTES.test(String(input))&&headers.Authorization===`Bearer ${localStorage.getItem("cod4x.auth.token")}`){
+      localStorage.removeItem("cod4x.auth.token"); localStorage.removeItem("cod4x.auth.expiresAt"); localStorage.removeItem("cod4x.auth.sessionId");
+      try{ window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)); }catch{}
+    }
+    return response;
+  });
+}
 
 const C = {
   bg: "#070b09", surface: "#0b120f", card: "#101915", border: "#26382f",
@@ -678,7 +692,7 @@ function ConfigBuilder({t,lang}) {
     mixed: "set bots_skill_allies_easy 2\nset bots_skill_allies_med 2\nset bots_skill_allies_hard 1\nset bots_skill_axis_easy 2\nset bots_skill_axis_med 2\nset bots_skill_axis_hard 1"
   };
 
-  useEffect(()=>set("fs_game",effectiveMod),[effectiveMod]);
+  useEffect(()=>{set("fs_game",effectiveMod);},[effectiveMod]);
 
   const errors = [];
   const clients = Number(cfg.sv_maxclients), port=Number(cfg.net_port);
@@ -1063,7 +1077,9 @@ function GSCAssistant({t,lang}) {
   const [messages,setMessages]=useState([{role:"assistant",content:lang==="de"?"Hallo! Ich bin dein CoD4x 21.5 GSC-Assistent. Stelle eine Frage oder füge Code/Fehler ein.":"Hello! I am your CoD4x 21.5 GSC assistant. Ask a question or paste code/an error."}]);
   const [input,setInput]=useState(""),[loading,setLoading]=useState(false),[error,setError]=useState("");
   const bottomRef=useRef(null),inputRef=useRef(null),abortRef=useRef(null);
-  useEffect(()=>bottomRef.current?.scrollIntoView({behavior:"smooth"}),[messages,loading]);
+  // Debug phase (4.18.31): braces, so the effect returns nothing. scrollIntoView returns a Promise in current
+  // Chromium; returned from the effect React called it as cleanup and the whole app went blank on leaving Tools.
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages,loading]);
   useEffect(()=>()=>abortRef.current?.abort(),[]);
   const send=async override=>{
     const text=(override??input).trim(); if(!text||loading)return;
@@ -1399,7 +1415,7 @@ function ServerInstancesPanel({lang,executablePath,baseGamePath,platform,cod4x})
         <button style={buttonStyle} disabled={busy||active} onClick={()=>{if(window.confirm(de?`Instanz ${instance.id} aus der Liste entfernen und ihren Ordner wiederherstellbar archivieren?`:`Remove ${instance.id} and archive its directory recoverably?`))request(`/api/instances/${instance.id}`,"DELETE")}}>{de?"Löschen / archivieren":"Delete / archive"}</button>
       </div>
       <details style={{marginTop:8}}><summary>{de?"Instanz-Ausgabe":"Instance output"}</summary><pre style={{maxHeight:180,overflow:"auto",fontSize:10,whiteSpace:"pre-wrap"}}>{instance.runtime?.output?.stdout||""}{instance.runtime?.output?.stderr||""}</pre></details>
-      <details style={{marginTop:8}}><summary>{de?"Windows-Konsolenlog":"Windows console log"} · qconsole.log · {instance.consoleLog?.status||"waiting"}</summary><pre style={{maxHeight:240,overflow:"auto",fontSize:10,whiteSpace:"pre-wrap"}}>{instance.consoleLog?.text||""}</pre>{instance.consoleLog?.truncated&&<small>{de?"Nur die letzten 64 KiB; unvollständige Zeilen ausgelassen.":"Last 64 KiB only; incomplete lines omitted."}</small>}</details>
+      <details style={{marginTop:8}}><summary>{de?"Konsolenlog":"Console log"} · qconsole.log · {instance.consoleLog?.status||"waiting"}</summary><pre style={{maxHeight:240,overflow:"auto",fontSize:10,whiteSpace:"pre-wrap"}}>{instance.consoleLog?.text||""}</pre>{instance.consoleLog?.truncated&&<small>{de?"Nur die letzten 64 KiB; unvollständige Zeilen ausgelassen.":"Last 64 KiB only; incomplete lines omitted."}</small>}</details>
     </div>})}
   </Section>
 }
@@ -1472,7 +1488,7 @@ function ProductionRuntimePanel({lang}){
       </div>
 
       <Field label={de ? "BaseGame-Verzeichnis" : "BaseGame directory"} help={de ? "Gemeinsamer Spielbestand mit main/*.iwd und zone/*; wird nur gelesen." : "Shared game assets with main/*.iwd and zone/*; read-only source."}>
-        <input style={inputStyle} value={baseGamePath} onChange={e=>setBaseGamePath(e.target.value)} disabled={busy || ["STARTING","RUNNING","STOPPING"].includes(state)} placeholder="C:\\Games\\Call of Duty 4" />
+        <input style={inputStyle} value={baseGamePath} onChange={e=>setBaseGamePath(e.target.value)} disabled={busy || ["STARTING","RUNNING","STOPPING"].includes(state)} placeholder={platform==="linux"?"/opt/cod4":"C:\\Games\\Call of Duty 4"} />
         {preflight?.baseGame && <div style={{fontSize:10,color:baseGameOk?C.success:C.danger,marginTop:5}}>{baseGameOk ? (de?"BaseGame geprüft.":"BaseGame checked.") : (preflight.baseGame.reasons||[]).map(item=>item.message).join(" · ")}</div>}
       </Field>
 
@@ -1627,6 +1643,22 @@ function ProductionRuntimePanel({lang}){
 const TABS=[["overview","⌂"],["monitor","◷"],["config","⚙"],["mods","▣"],["security","✓"],["diagnostics","◉"],["runtime","▶"],["remote","⇄"],["audit","≡"],["rcon","⌘"],["versions","⇩"],["tools","•"]];
 
 
+// Debug phase (4.18.31): the backend describes permissions in German only; the panel shows them in
+// the UI language (the backend text stays the fallback for an unknown permission).
+export const RBAC_PERMISSION_TEXT={
+  "installation.manage":["Installationen und Installationsvorgänge verwalten.","Manage installations and install operations."],
+  "install.execute":["Verbindliche Installationsausführung autorisieren.","Authorize binding install runs."],
+  "updates.manage":["Versionen und Update-Vorgänge verwalten.","Manage versions and update operations."],
+  "update.execute":["Verbindliche Update-Ausführung autorisieren.","Authorize binding update runs."],
+  "server.manage":["Serverinstanzen und Betriebssteuerung verwalten.","Manage server instances and operation."],
+  "config.manage":["Serverkonfiguration und Profile verwalten.","Manage server configuration and profiles."],
+  "diagnostics.read":["Diagnose- und Health-Daten lesen.","Read diagnostics and health data."],
+  "audit.read":["Audit-Trail und persistente Audit-Daten lesen.","Read the audit trail and persistent audit data."],
+  "user.manage":["Benutzer, Rollen und Benutzer-Sessions verwalten.","Manage users, roles and user sessions."],
+  "monitor.read":["Serverstatus, Spielerzahlen, Verlauf und Ausfälle lesen.","Read server status, player counts, history and outages."],
+  "b3.plugins.code":["Eigene B3-Plugins anlegen, hochladen und bearbeiten.","Create, upload and edit custom B3 plugins."],
+  "server.code":["Server-Core wählen und übernehmen, CoD4x-Plugins installieren, freie Startargumente.","Choose and adopt the server core, install CoD4x plugins, free start arguments."],
+};
 function RBACPanel({lang}){
   const [data,setData]=useState(null);
   const [me,setMe]=useState(null);
@@ -1715,7 +1747,7 @@ function RBACPanel({lang}){
           <tbody>{data.permissions.map(permission=><tr key={permission.id}>
             <td style={{padding:"8px",borderBottom:`1px solid ${C.border}`}}>
               <div style={{fontFamily:"monospace",color:C.accent}}>{permission.id}</div>
-              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{permission.description}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{RBAC_PERMISSION_TEXT[permission.id]?pick(lang==="de",RBAC_PERMISSION_TEXT[permission.id]):permission.description}</div>
             </td>
             {data.roles.map(role=>{
               const allowed=role.permissions.includes(permission.id);
@@ -1918,7 +1950,7 @@ function BackupRecoveryPanel({lang}){
       <Tag color={C.muted}>{backups.length}/50 Backups</Tag>
       {status&&<Tag color={C.accent}>{de?"SHA-256 · Integrity Gate aktiv":"SHA-256 · integrity gate active"}</Tag>}
     </div>
-    <div style={{fontSize:10,color:C.muted,marginBottom:10}}>4.16.5 Registry · 4.16.6 SHA-256 · 4.16.7 Restore-Gate · 4.16.8 Registry-Konsistenz · 4.16.9 Lifecycle/Retention. {de?"Restore erzeugt vorher automatisch einen Safety Snapshot.":"A restore creates a safety snapshot first."}</div>
+    <div style={{fontSize:10,color:C.muted,marginBottom:10}}>4.16.5 Registry · 4.16.6 SHA-256 · 4.16.7 Restore-Gate · 4.16.8 {de?"Registry-Konsistenz":"Registry consistency"} · 4.16.9 Lifecycle/Retention. {de?"Restore erzeugt vorher automatisch einen Safety Snapshot.":"A restore creates a safety snapshot first."}</div>
     {lifecycle&&<div style={{background:lifecycle.ok?"rgba(34,197,94,.06)":"rgba(245,158,11,.06)",border:`1px solid ${lifecycle.ok?C.success:C.accent}55`,borderRadius:6,padding:"8px 10px",fontSize:10,marginBottom:10}}><div style={{color:lifecycle.ok?C.success:C.accent,fontWeight:600,marginBottom:5}}>Backup lifecycle: {lifecycle.ok?"PASS":(de?"BEREINIGUNG ERFORDERLICH":"CLEANUP NEEDED")}</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:4,color:C.muted}}><span>{de?"Gesamt":"Total"}: {lifecycle.total||0}/{lifecycle.maxTotal||50}</span><span>Normal: {lifecycle.regular||0}/{lifecycle.maxRegular||40}</span><span>Safety: {lifecycle.safety||0}/{lifecycle.maxSafety||10}</span><span>{de?"Überzählig":"Surplus"}: {lifecycle.deletable?.length||0}</span><span>{de?"Verwaist":"Orphaned"}: {lifecycle.orphanFiles?.length||0}</span></div></div>}
     {consistency&&<div style={{background:consistency.ok?"rgba(34,197,94,.06)":"rgba(239,68,68,.08)",border:`1px solid ${consistency.ok?C.success:C.danger}55`,borderRadius:6,padding:"8px 10px",fontSize:10,marginBottom:10}}>
       <div style={{color:consistency.ok?C.success:C.danger,fontWeight:600,marginBottom:5}}>{de?"Backup-Konsistenz":"Backup consistency"}: {consistency.ok?"PASS":(de?"FEHLER":"FAILED")}</div>
@@ -2365,6 +2397,12 @@ function useUiLang(){
   return [lang,setLang];
 }
 
+// The reason is kept as a key and translated when shown, so switching the language applies to it (debug phase 4.18.31).
+const REMEMBER_ERRORS={
+  "unavailable":["Die sichere Windows-Anmeldespeicherung ist derzeit nicht verfügbar.","Windows secure credential storage is currently unavailable."],
+  "init-failed":["Die sichere Windows-Anmeldespeicherung konnte nicht initialisiert werden.","Windows secure credential storage could not be initialized."],
+  "not-in-instance":["Die sichere Windows-Anmeldespeicherung ist in dieser App-Instanz nicht verfügbar.","Windows secure credential storage is not available in this app instance."],
+};
 function AuthGate(){
   const [lang,setLang]=useUiLang();
   const de=lang==="de";
@@ -2404,23 +2442,26 @@ function AuthGate(){
   async function bootstrap(){
     try{
       const status=await apiFetch(apiUrl("/api/auth/status"));
-      const d=await status.json();
+      const d=await status.json().catch(()=>({}));
+      // Debug phase (4.18.31): a refused or broken answer (e.g. another CONTROL backend on the port) is an
+      // error, not "not initialized"; before, the setup form for a new administrator was shown.
+      if(!status.ok||typeof d.initialized!=="boolean") throw new Error(d?.code==="ORIGIN_REFUSED"?(de?"Das Backend auf 127.0.0.1:8787 lehnt diese App ab. Läuft CONTROL bereits in einem anderen Fenster?":"The backend on 127.0.0.1:8787 refuses this app. Is CONTROL already running in another window?"):(d?.error||`HTTP ${status.status}`));
       let remembered=null;
       if(window.cod4xControl?.getRememberedLogin){
         try{
           const stored=await window.cod4xControl.getRememberedLogin();
           const available=Boolean(stored?.available);
           setRememberAvailable(available);
-          setRememberError(available?"":"Windows secure credential storage is currently unavailable.");
+          setRememberError(available?"":"unavailable");
           remembered=stored?.credentials||null;
           if(remembered) setRememberPassword(true);
         }catch(e){
           setRememberAvailable(false);
-          setRememberError(e?.message||(de?"Die sichere Windows-Anmeldespeicherung konnte nicht initialisiert werden.":"Windows secure credential storage could not be initialized."));
+          setRememberError(e?.message||"init-failed");
         }
       }else{
         setRememberAvailable(false);
-        setRememberError(de?"Die sichere Windows-Anmeldespeicherung ist in dieser App-Instanz nicht verfügbar.":"Windows secure credential storage is not available in this app instance.");
+        setRememberError("not-in-instance");
       }
 
       const token=localStorage.getItem("cod4x.auth.token");
@@ -2453,10 +2494,15 @@ function AuthGate(){
       }
 
       setMode(d.initialized?"login":"init");
-    }catch(e){ setError(e.message); setMode("error"); }
+    }catch(e){ setError(e instanceof TypeError?(de?"Das lokale Backend antwortet nicht (127.0.0.1:8787).":"The local backend does not answer (127.0.0.1:8787)."):e.message); setMode("error"); }
   }
 
   useEffect(()=>{bootstrap();},[]);
+  useEffect(()=>{
+    const expired=()=>{ setUser(null); setPassword(""); setMode(current=>current==="authenticated"?"login":current); setError(de?"Die Sitzung ist abgelaufen oder das Backend wurde neu gestartet. Bitte erneut anmelden.":"The session has expired or the backend was restarted. Please sign in again."); };
+    window.addEventListener(SESSION_EXPIRED_EVENT,expired);
+    return()=>window.removeEventListener(SESSION_EXPIRED_EVENT,expired);
+  },[de]);
 
   async function submit(e){
     e.preventDefault(); if(busy) return;
@@ -2481,7 +2527,7 @@ function AuthGate(){
   }
 
   if(mode==="loading") return <div style={{minHeight:"100vh",background:C.bg,color:C.muted,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif"}}>{de?"Authentifizierung wird geladen…":"Loading authentication…"}</div>;
-  if(mode==="error") return <div style={{minHeight:"100vh",background:C.bg,color:C.danger,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif"}}>{error}</div>;
+  if(mode==="error") return <div style={{minHeight:"100vh",background:C.bg,color:C.danger,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif"}}><div style={{textAlign:"center"}}><div role="alert">{error}</div><button onClick={()=>{setError("");setMode("loading");bootstrap();}} style={{...buttonStyle,marginTop:14}}>{de?"Erneut versuchen":"Try again"}</button></div></div>;
   if(mode!=="authenticated") return <div style={{minHeight:"100vh",background:C.bg,color:C.text,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif",padding:24}}>
     <form onSubmit={submit} style={{width:"100%",maxWidth:420,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:24,boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}><div style={{color:C.accent,fontFamily:"monospace",fontWeight:800,fontSize:13,letterSpacing:"0.12em"}}>COD4X CONTROL</div><div style={{display:"flex",gap:5}}><button type="button" onClick={()=>setLang("en")} style={langBtn(!de)}>EN</button><button type="button" onClick={()=>setLang("de")} style={langBtn(de)}>DE</button></div></div>
@@ -2496,7 +2542,7 @@ function AuthGate(){
           <span>{de?"Passwort auf diesem Windows-Konto merken":"Remember password on this Windows account"}</span>
         </label>
         <div style={{fontSize:9,color:rememberAvailable?C.muted:C.danger,lineHeight:1.45,marginTop:5}}>
-          {rememberAvailable?(de?"Das Passwort wird verschlüsselt über den Windows-Anmeldekontext gespeichert und nicht als Klartext abgelegt.":"The password is stored encrypted through the Windows sign-in context, never as plain text."):`${de?"Nicht verfügbar":"Not available"}: ${rememberError||(de?"Windows Secure Storage konnte nicht aktiviert werden.":"Windows secure storage could not be enabled.")}`}
+          {rememberAvailable?(de?"Das Passwort wird verschlüsselt über den Windows-Anmeldekontext gespeichert und nicht als Klartext abgelegt.":"The password is stored encrypted through the Windows sign-in context, never as plain text."):`${de?"Nicht verfügbar":"Not available"}: ${(REMEMBER_ERRORS[rememberError]&&pick(de,REMEMBER_ERRORS[rememberError]))||rememberError||(de?"Windows Secure Storage konnte nicht aktiviert werden.":"Windows secure storage could not be enabled.")}`}
         </div>
       </div>}
       {error&&<div style={{background:"rgba(239,68,68,.1)",border:`1px solid ${C.danger}55`,color:C.danger,borderRadius:6,padding:"8px 10px",fontSize:11,marginBottom:12}}>{error}</div>}
@@ -2535,7 +2581,7 @@ export function ControlApp({user,onLogout,lang="en",setLang=()=>{}}){
         <div><div className="topbar-kicker">COD4X CONTROL <span>/</span> {currentLabel.toUpperCase()}</div><div className="topbar-title">{tab==="overview"?"SERVER OVERVIEW":"SERVER ADMINISTRATION"}</div></div>
         <div className="topbar-right"><span className="topbar-version">4.18.31</span><span style={{color:C.muted,fontSize:10}}>{user?.username||""}</span><button onClick={onLogout} style={{...langBtn(false),padding:"4px 8px"}}>{de?"Abmelden":"Logout"}</button><span className="live-status"><i></i> LOCAL CONTROL READY</span></div>
       </header>
-      <div className="content-frame">
+      <div className="content-frame"><TabErrorBoundary key={tab} de={de}>
         {tab==="overview"&&<OverviewGuide de={de} labels={labels} onOpen={setTab}/>}
         {tab==="monitor"&&<><Header title="Monitoring" sub={lang==="de"?"Status, Spieler, Verlauf und Ausfälle aller Serverinstanzen":"Status, players, history and outages of all server instances"}/><MonitorDashboard de={lang==="de"} request={monitorRequest}/><RemoteAccessPanel de={lang==="de"} request={remoteRequest} isAdmin={user?.role==="admin"} canAlerts={["admin","operator"].includes(user?.role)}/></>}
         {tab==="config"&&<ConfigBuilder t={t} lang={lang}/>}
@@ -2549,7 +2595,7 @@ export function ControlApp({user,onLogout,lang="en",setLang=()=>{}}){
         {tab==="rcon"&&<RCONCommands t={t}/>}
         {tab==="versions"&&<VersionManager t={t} lang={lang}/>}
         {tab==="tools"&&<><DvarBrowser t={t}/><GSCAssistant t={t} lang={lang}/></>}
-      </div>
+      </TabErrorBoundary></div>
       <footer className="app-footer"><span>COD4X CONTROL 4.18.31</span><span>DEDICATED SERVER MANAGEMENT</span><span>BUILD / CONFIG / CONTROL</span></footer>
     </main>
   </div>;
@@ -2558,6 +2604,23 @@ export function ControlApp({user,onLogout,lang="en",setLang=()=>{}}){
 // Block 24: JSON helper for the monitoring view; errors carry the server code.
 async function remoteRequest(route,{method="GET",body}={}){ const response=await apiFetch(apiUrl(route),{method,headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined}); const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.code||data.error||`HTTP ${response.status}`); return data; }
 async function monitorRequest(route){ const response=await apiFetch(apiUrl(route)); const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.code||data.error||`HTTP ${response.status}`); return data; }
+
+// Debug phase (4.18.31): an error in one page shows a message in that page; the menu stays usable.
+// Before, any render or effect error unmounted the whole app and left an empty window.
+export class TabErrorBoundary extends Component{
+  constructor(props){ super(props); this.state={error:null}; }
+  static getDerivedStateFromError(error){ return {error}; }
+  componentDidCatch(error){ try{ console.error("COD4X CONTROL page error",error); }catch{} }
+  render(){
+    if(!this.state.error) return this.props.children;
+    const de=this.props.de;
+    return <div role="alert" style={{background:"rgba(239,68,68,.1)",border:`1px solid ${C.danger}55`,color:C.danger,borderRadius:6,padding:"14px 16px",fontSize:12,margin:"18px 0"}}>
+      <div style={{fontWeight:700,marginBottom:6}}>{de?"Diese Seite ist auf einen Fehler gestoßen.":"This page ran into an error."}</div>
+      <div style={{color:C.muted,marginBottom:10}}>{String(this.state.error?.message||this.state.error)}</div>
+      <button onClick={()=>this.setState({error:null})} style={{...buttonStyle}}>{de?"Seite neu laden":"Reload page"}</button>
+    </div>;
+  }
+}
 
 function langBtn(active){return {background:active?C.accentDim:C.surface,border:`1px solid ${active?C.accent:C.border}`,color:active?C.accent:C.muted,borderRadius:4,padding:"3px 7px",fontSize:10,cursor:"pointer"};}
 

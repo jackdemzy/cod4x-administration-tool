@@ -65,7 +65,7 @@ export function RemoteError({ de, code, presentedSha256, pinnedSha256, output })
     </div>;
   }
   const message = MESSAGES[safe];
-  const shown = safe === 'REMOTE_DOCKER_BUILD_FAILED' && typeof output === 'string' && output ? output.slice(-4096) : null;
+  const shown = ['REMOTE_DOCKER_BUILD_FAILED', 'REMOTE_START_FAILED'].includes(safe) && typeof output === 'string' && output ? output.slice(-4096) : null;
   return <div role="alert"><p>{message ? text(de, message[0], message[1]) : text(de, 'Vorgang fehlgeschlagen.', 'Operation failed.')} <code>{safe}</code></p>
     {shown && <><p>{text(de, 'Letzte Ausgabe von Docker:', 'Last output of Docker:')}</p><pre>{shown}</pre></>}</div>;
 }

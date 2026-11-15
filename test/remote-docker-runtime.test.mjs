@@ -300,7 +300,8 @@ test('health asks the server through the port published on loopback', { skip }, 
   assert.deepEqual(await f.manager.health('public-01'), { process: 'GONE', getinfo: 'SKIPPED' });
   await f.manager.start('public-01');
   let health;
-  assert.ok(await until(async () => (health = await f.manager.health('public-01')).getinfo === 'OK', 5000), JSON.stringify(health));
+  // 15 s, not 5 s (debug phase 4.18.31): under the full suite on a CI runner the scripted container's core needed longer to answer.
+  assert.ok(await until(async () => (health = await f.manager.health('public-01')).getinfo === 'OK', 15_000), JSON.stringify(health));
   assert.deepEqual([health.process, health.hostname, health.map], ['ALIVE', 'container', 'mp_backlot']);
 });
 
