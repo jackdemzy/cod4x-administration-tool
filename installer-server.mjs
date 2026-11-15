@@ -69,6 +69,7 @@ import { REMOTE_DEFAULT_PORT, REMOTE_ROUTES, REMOTE_PROXY_MAX_FAILURES, caddyfil
 import { generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, matchRecoveryCode, totpUri, verifyTotp } from "./lib/totp.mjs";
 import { assertWindowsInstanceOwnership } from "./lib/windows-process-ownership.mjs";
 import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/linux-runtime-adapter.mjs";
+import { detectElevation } from "./lib/elevation-check.mjs";
 import { isB3PluginCodePath, isB3PluginTextPath, localOnlyGuard, publicBlockers } from "./lib/b3-plugin-routes.mjs";
 import { isCredentialPath } from "./lib/credential-request.mjs";
 import { rateLimit } from "express-rate-limit";
@@ -855,7 +856,13 @@ async function adoptExistingRuntimeExecutable({executablePath,cod4x,fpsPromod="c
 
 // ─── 4.17.0 Production Runtime Manager ───────────────────────────────────────
 const runtimeDependencies = { path, fs, crypto, process, dataPath, SERVER_CORE_DEFINITIONS, serverCoreDefinition, execFileAsync, spawn, normalizeServerPlatform, normalizeRuntimePath, resolveServerTarget, resolveRuntimeExecutable, verifiedRuntimeCoreStatus, selectRuntimeBaseGamePath, resolveRuntimeLayout, mergeBaseGameState, policyState: { security: { get allowedCod4xVersions() { return policyState.security.allowedCod4xVersions; } } } };
-runtimeDependencies.linuxRuntimeAdapter = createLinuxRuntimeAdapter({ filesystem: fs, hostProcess: process });
+let pidfdFallbackReported = false;
+runtimeDependencies.linuxRuntimeAdapter = createLinuxRuntimeAdapter({ filesystem: fs, hostProcess: process, onPidfdFallback: reason => {
+  // Security audit 4.18.26 (A1-5): without python3 3.9+ / Linux 5.3 the stop of an adopted server checks, then kills.
+  if (pidfdFallbackReported) return;
+  pidfdFallbackReported = true;
+  audit("warn", "runtime.pidfd_unavailable", { reason: String(reason).slice(0, 64) });
+} });
 runtimeDependencies.assertLinuxInstanceOwnership = assertLinuxInstanceOwnership;
 const defaultRuntime = createRuntimeManager(runtimeDependencies);
 const { startRuntime, stopRuntime, restartRuntime, withRuntimeConfiguration, reconcileRuntimeState, runtimeEvent, persistRuntimeState } = defaultRuntime;
@@ -3138,9 +3145,15 @@ await applyRemoteGateway();
 
 app.listen(PORT, HOST, () => {
   console.log(`COD4X CONTROL installer API listening on :${PORT}`);
-  // Security audit 4.18.26 (A1-3): CONTROL does not need root; the core start already refuses it.
-  if (typeof process.getuid === "function" && process.getuid() === 0) {
-    console.warn("[security] COD4X CONTROL runs as root. Run it as a normal user; server starts are refused as root.");
-    audit("warn", "control.running_as_root", { uid: 0 });
-  }
+  // Security audit 4.18.26 (A1-3): CONTROL needs neither root nor Windows administrator rights.
+  detectElevation({ execFileAsync }).then(({ elevated, kind }) => {
+    if (!elevated) return;
+    if (kind === "root") {
+      console.warn("[security] COD4X CONTROL runs as root. Run it as a normal user; server starts are refused as root.");
+      audit("warn", "control.running_as_root", { uid: 0 });
+    } else {
+      console.warn("[security] COD4X CONTROL runs with Windows administrator rights. Start it without \"Run as administrator\"; it does not need them.");
+      audit("warn", "control.running_as_admin", { platform: "win32" });
+    }
+  }, () => {});
 });

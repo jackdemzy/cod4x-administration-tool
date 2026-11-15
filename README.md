@@ -438,7 +438,7 @@ Die npm-Abhängigkeiten stehen unter eigenen, mit der AGPL vereinbaren Lizenzen 
 
 ## 4.18.29 Security Low findings note
 
-4.18.29 fixes the Low findings of the 4.18.26 security audit (issues #40 to #45, except A1-5) and rate-limits changing requests to the admin API (issue #49, `COD4X_WRITE_RATE_LIMIT`, default 300 per minute). The optional vault idle lock is switched on with `COD4X_VAULT_IDLE_LOCK_MINUTES`. Details: `CHANGELOG-4.18.29.md`.
+4.18.29 fixes the Low findings of the 4.18.26 security audit (issues #40 to #45, except A1-5; A1-5 followed in 4.18.31 with a pidfd-based Linux stop) and rate-limits changing requests to the admin API (issue #49, `COD4X_WRITE_RATE_LIMIT`, default 300 per minute). The optional vault idle lock is switched on with `COD4X_VAULT_IDLE_LOCK_MINUTES`. Details: `CHANGELOG-4.18.29.md`.
 
 ## 4.18.28 End-to-end test note
 

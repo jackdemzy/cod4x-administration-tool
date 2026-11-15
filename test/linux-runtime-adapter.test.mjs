@@ -116,3 +116,85 @@ test('signal waits for an asynchronous kill before it reports success', async ()
   assert.equal(killed, true);
   assert.deepEqual(order, ['kill done', 'signal returned']);
 });
+
+// Security audit 4.18.26 (A1-5): no PID-reuse race between the identity check and the signal.
+function fakeProcessHost({ argv = ['/core/cod4x18_dedrun', '+set', 'fs_homepath', '/srv/a', '+set', 'net_port', '28960'], order = [] } = {}) {
+  const filesystem = {
+    readdir: async () => [], stat: async () => ({}), readlink: async () => '/core/cod4x18_dedrun',
+    open: async file => {
+      if (file.endsWith('/stat') && order.at(-1) !== 'inspect') order.push('inspect'); // one inspection reads stat twice
+      return {
+        cursor: 0, close: async () => {},
+        read: async function read(buffer, offset, length) {
+          const text = file.endsWith('/stat') ? `1 (cod4x18_dedrun) S ${'0 '.repeat(18)}1 0\n`
+            : file.endsWith('/status') ? 'Uid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n'
+            : file.endsWith('/cmdline') ? `${argv.join('\0')}\0` : 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\n';
+          const bytesRead = Buffer.from(text).copy(buffer, offset, this.cursor, this.cursor + length);
+          this.cursor += bytesRead;
+          return { bytesRead };
+        },
+      };
+    },
+  };
+  const hostProcess = { platform: 'linux', getuid: () => 1000, geteuid: () => 1000, getgid: () => 1000, kill: async (pid, signalName) => { order.push(`kill ${signalName}`); } };
+  return { filesystem, hostProcess, order };
+}
+const target = createdAt => ({ homePath: '/srv/a', port: 28960, createdAt, executablePath: '/core/cod4x18_dedrun' });
+
+test('A1-5: an adopted process is signalled through a pidfd opened before the identity check', async () => {
+  const host = fakeProcessHost();
+  let closed = 0;
+  const pidfd = async pid => { host.order.push(`pidfd ${pid}`); return { state: 'ready', send: async signalName => { host.order.push(`pidfd ${signalName}`); return true; }, close: () => { closed++; } }; };
+  const adapter = createLinuxRuntimeAdapter({ ...host, pidfd });
+  const live = await adapter.inspectProcess(4321);
+  host.order.length = 0;
+  assert.equal(await adapter.signal(4321, target(live.createdAt), 'SIGTERM'), true);
+  assert.deepEqual(host.order, ['pidfd 4321', 'inspect', 'pidfd SIGTERM'], 'pidfd first, then the check, never a plain kill');
+  assert.equal(closed, 0);
+});
+
+test('A1-5: a pidfd whose process is gone or fails the check sends nothing', async () => {
+  const host = fakeProcessHost();
+  const gone = createLinuxRuntimeAdapter({ ...host, pidfd: async () => ({ state: 'gone' }) });
+  assert.equal(await gone.signal(4321, target('x'), 'SIGTERM'), false);
+  assert.deepEqual(host.order, [], 'no inspection and no kill when the PID is already gone');
+
+  const other = fakeProcessHost({ argv: ['/core/cod4x18_dedrun', '+set', 'fs_homepath', '/srv/b', '+set', 'net_port', '28960'] });
+  let closed = 0, sent = 0;
+  const adapter = createLinuxRuntimeAdapter({ ...other, pidfd: async () => ({ state: 'ready', send: async () => { sent++; return true; }, close: () => { closed++; } }) });
+  const live = await adapter.inspectProcess(4321);
+  await assert.rejects(adapter.signal(4321, target(live.createdAt), 'SIGKILL'), { code: 'INSTANCE_PROCESS_IDENTITY_BLOCKED' });
+  assert.equal(sent, 0);
+  assert.equal(closed, 1, 'the pidfd helper is closed after a refused check');
+  assert.equal(other.order.some(entry => entry.startsWith('kill')), false);
+});
+
+test('A1-5: without pidfd support the check-then-kill fallback is used and reported', async () => {
+  const host = fakeProcessHost();
+  const reasons = [];
+  const adapter = createLinuxRuntimeAdapter({ ...host, pidfd: async () => ({ state: 'unsupported', reason: 'ENOENT' }), onPidfdFallback: reason => reasons.push(reason) });
+  const live = await adapter.inspectProcess(4321);
+  host.order.length = 0;
+  assert.equal(await adapter.signal(4321, target(live.createdAt), 'SIGTERM'), true);
+  assert.deepEqual(host.order, ['inspect', 'kill SIGTERM']);
+  assert.deepEqual(reasons, ['ENOENT']);
+});
+
+test('A1-5: a child CONTROL spawned itself is signalled through its own handle', async () => {
+  const host = fakeProcessHost();
+  let opened = 0;
+  const adapter = createLinuxRuntimeAdapter({ ...host, pidfd: async () => { opened++; return { state: 'gone' }; } });
+  const live = await adapter.inspectProcess(4321);
+  host.order.length = 0;
+  const signals = [];
+  const child = { pid: 4321, exitCode: null, signalCode: null, kill: signalName => { signals.push(signalName); return true; } };
+  assert.equal(await adapter.signal(4321, target(live.createdAt), 'SIGTERM', { child }), true);
+  assert.deepEqual(signals, ['SIGTERM']);
+  assert.equal(opened, 0, 'no pidfd for the own child');
+  assert.deepEqual(host.order, ['inspect'], 'the identity is still checked, the plain kill is not used');
+  // reaped meanwhile: Node's handle is gone, so kill returns false and nothing else is hit
+  assert.equal(await adapter.signal(4321, target(live.createdAt), 'SIGKILL', { child: { ...child, kill: () => false } }), false);
+  // a child of another PID or one that already exited is not trusted
+  assert.equal(await adapter.signal(4321, target(live.createdAt), 'SIGTERM', { child: { ...child, exitCode: 0 } }), false);
+  assert.equal(opened, 1);
+});
