@@ -33,6 +33,12 @@ Found, not changed:
 - Backend error texts are mostly German (e.g. "cod4x18_dedrun wurde am ausgewählten Server-Core-Pfad nicht gefunden.", rate-limit message); a blocked B3 start shows only the code `B3_DEPENDENCIES_BLOCKED`.
 - The single-instance lock and the backend log file were checked in the source only: the Electron binary is not installed in the cloud container.
 
+## Review findings on #64
+
+- Wrong password when turning off the second factor no longer logs you out: the backend marks a missing session with `code: "AUTH_REQUIRED"`, and only that 401 ends the session in the UI (`PASSWORD_INVALID` keeps it).
+- `backend.log` stays capped while the backend runs: its output goes through a pipe into `lib/capped-log.cjs`, which moves the file to `backend.log.1` before it would pass 2 MB (before, the size was checked only at start).
+- Real-Docker test lock: a stale lock is taken over under an exclusively created `<lock>.takeover` file, which re-checks the owner, so two workers can no longer both remove it and run Docker at once.
+
 ## Not changed
 
 - The phone web app (`/remote/`, `lib/remote-app.jsx`) is still German only.
@@ -49,3 +55,4 @@ Found, not changed:
 
 - `test/ui-language.test.mjs` (new): English default and stored choice, every menu item described in both languages, overview and Remote Linux rendered in both languages, no inline layout styles left on the Remote Linux page.
 - `scripts/preflight-4.18.31.mjs` runs it together with `test/remote-hosts.test.mjs`.
+- `test/review-4.18.31.test.mjs` (new, also in the preflight): capped log rotation, stale lock taken over by exactly one of 30 workers (fails with the old lock), a live lock left alone.

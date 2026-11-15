@@ -13,6 +13,7 @@ const DESKTOP_CLIENT_TOKEN=crypto.randomBytes(32).toString('hex');
 // Security audit 4.18.26 (A6-1): windows show only the app page, links open in the system
 // browser, the desktop header and the IPC handlers serve only the main window's app page.
 const {isAppPage,externalUrlAllowed,desktopHeaderAllowed,permissionAllowed,rememberedLoginBackendAllowed}=require('./lib/electron-navigation-policy.cjs');
+const {openCappedLog}=require('./lib/capped-log.cjs');
 const APP_INDEX=path.join(__dirname,'dist','index.html');
 // Debug phase (4.18.31): one CONTROL per user session. A second launch started a second backend that
 // failed on the busy port (dialog "exited with code 1") while its window talked to the first
@@ -125,22 +126,17 @@ handle('clear-remembered-login', async () => {
 });
 
 // Debug phase (4.18.31): the backend's own output (start errors such as a busy port, crashes) goes to
-// <userData>/logs/backend.log instead of nowhere; the file is kept below 2 MB.
+// <userData>/logs/backend.log instead of nowhere. The output runs through a pipe into a capped log, so
+// the file stays below 2 MB (plus one rotation, backend.log.1) also while a long session keeps logging.
 let backendReady=false; // until then a failed start is reported once, by createWindow
 const BACKEND_LOG=()=>path.join(app.getPath('userData'),'logs','backend.log');
-function backendLogFd(){
-  const fs=require('fs');
-  try{
-    fs.mkdirSync(path.dirname(BACKEND_LOG()),{recursive:true,mode:0o700});
-    try{ if(fs.statSync(BACKEND_LOG()).size>2*1024*1024) fs.renameSync(BACKEND_LOG(),BACKEND_LOG()+'.1'); }catch{}
-    return fs.openSync(BACKEND_LOG(),'a',0o600);
-  }catch{ return 'ignore'; }
-}
 function startBackend(){
   const serverPath=path.join(__dirname,'installer-server.mjs');
-  const log=backendLogFd();
-  server=spawn(process.execPath,[serverPath],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',PORT:String(PORT),HOST,COD4X_DATA_ROOT:app.getPath('userData'),COD4X_RUNTIME_MODE:'interactive',COD4X_DESKTOP_CLIENT_TOKEN:DESKTOP_CLIENT_TOKEN},cwd:app.getPath('userData'),stdio:['ignore',log,log]});
-  if(typeof log==='number') require('fs').closeSync(log);
+  const log=openCappedLog(BACKEND_LOG(),{maxBytes:2*1024*1024});
+  server=spawn(process.execPath,[serverPath],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',PORT:String(PORT),HOST,COD4X_DATA_ROOT:app.getPath('userData'),COD4X_RUNTIME_MODE:'interactive',COD4X_DESKTOP_CLIENT_TOKEN:DESKTOP_CLIENT_TOKEN},cwd:app.getPath('userData'),stdio:['ignore','pipe','pipe']});
+  server.stdout.on('data',chunk=>log.write(chunk));
+  server.stderr.on('data',chunk=>log.write(chunk));
+  server.on('close',()=>log.close());
   server.on('exit',code=>{if(code && !app.isQuitting && backendReady){dialog.showErrorBox('COD4X CONTROL','The local backend stopped (exit code '+code+'). Details: '+BACKEND_LOG());}});
 }
 function waitForBackend(retries=40){

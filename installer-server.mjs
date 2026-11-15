@@ -275,7 +275,7 @@ setInterval(() => {
 
 function requireAuth(req, res, next) {
   const session = getAuthSession(req);
-  if (!session) return res.status(401).json({ ok: false, error: "Authentication required" });
+  if (!session) return res.status(401).json({ ok: false, code: "AUTH_REQUIRED", error: "Authentication required" });
   req.auth = session;
   next();
 }
@@ -331,7 +331,7 @@ function hasPermission(role, permission) {
 function requirePermission(permission, { quietAllowed = false } = {}) {
   return (req, res, next) => {
     const session = getAuthSession(req);
-    if (!session) return res.status(401).json({ ok: false, error: "Authentication required" });
+    if (!session) return res.status(401).json({ ok: false, code: "AUTH_REQUIRED", error: "Authentication required" });
     const allowed = hasPermission(session.role, permission);
     if (!allowed || !quietAllowed) audit(allowed ? "info" : "warn", "rbac.permission.checked", {
       username: session.username,

@@ -27,7 +27,7 @@ if (regression.status !== 0) {
 // overview explains every menu item in both languages; Remote Linux uses the shared look.
 // Debug phase: the faults found by playing the app through (blank app after Tools, session loss,
 // audit noise, vault passphrase, permission texts, Electron single instance, Docker refusal text).
-const uiLanguage = spawnSync(process.execPath, ["--test", "test/ui-language.test.mjs", "test/remote-hosts.test.mjs", "test/debug-phase-4.18.31.test.mjs"], { encoding: "utf8" });
+const uiLanguage = spawnSync(process.execPath, ["--test", "test/ui-language.test.mjs", "test/remote-hosts.test.mjs", "test/debug-phase-4.18.31.test.mjs", "test/review-4.18.31.test.mjs"], { encoding: "utf8" });
 process.stdout.write(uiLanguage.stdout || "");
 process.stderr.write(uiLanguage.stderr || "");
 if (uiLanguage.status !== 0) {

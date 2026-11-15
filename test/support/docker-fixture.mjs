@@ -237,22 +237,43 @@ export async function realDockerAvailable() {
 // image tag and started containers on the same daemon at once, and the Linux release job went red
 // now and then (REMOTE_START_FAILED from a refused `docker run`, getinfo timeouts). A directory
 // lock in the temp folder; the owner's PID in it lets a lock of a killed run be taken over.
+//
+// Taking over a stale lock is serialised by a second, exclusively created file (<lock>.takeover): only
+// its holder may remove the lock directory, and it checks the owner again first. Without it, two workers
+// that both saw the same dead owner could both remove the lock, the second one deleting the lock the
+// first had just taken, and both would run Docker at once (review on #64). A takeover file is only held
+// for a few milliseconds; one older than a minute belongs to a killed process and is removed.
 const REAL_DOCKER_LOCK = path.join(os.tmpdir(), 'cod4x-control-real-docker.lock');
-async function lockRealDocker({ timeoutMs = 30 * 60_000 } = {}) {
+const processAlive = pid => { if (pid === process.pid) return true; try { process.kill(pid, 0); return true; } catch (probe) { return probe.code === 'EPERM'; } };
+const lockOwner = async lock => Number(await fs.readFile(path.join(lock, 'pid'), 'utf8').catch(() => '0'));
+async function takeOverStaleLock(lock, staleOwner) {
+  const guard = `${lock}.takeover`;
+  let handle;
+  try { handle = await fs.open(guard, 'wx'); } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    const age = await fs.stat(guard).then(stat => Date.now() - stat.mtimeMs, () => 0);
+    if (age > 60_000) await fs.rm(guard, { force: true });
+    else await delay(20);
+    return;
+  }
+  try {
+    // Under the guard: remove the lock only if it still belongs to the dead owner seen before.
+    if (await lockOwner(lock) === staleOwner && !processAlive(staleOwner)) await fs.rm(lock, { recursive: true, force: true });
+  } finally { await handle.close(); await fs.rm(guard, { force: true }); }
+}
+export async function lockRealDocker({ timeoutMs = 30 * 60_000, lock = REAL_DOCKER_LOCK, pollMs = 250 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
-      await fs.mkdir(REAL_DOCKER_LOCK);
-      await fs.writeFile(path.join(REAL_DOCKER_LOCK, 'pid'), String(process.pid));
-      return async () => { await fs.rm(REAL_DOCKER_LOCK, { recursive: true, force: true }); };
+      await fs.mkdir(lock);
+      await fs.writeFile(path.join(lock, 'pid'), String(process.pid));
+      return async () => { await fs.rm(lock, { recursive: true, force: true }); };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      const owner = Number(await fs.readFile(path.join(REAL_DOCKER_LOCK, 'pid'), 'utf8').catch(() => '0'));
-      let alive = owner === process.pid;
-      if (owner > 0 && !alive) { try { process.kill(owner, 0); alive = true; } catch (probe) { alive = probe.code === 'EPERM'; } }
-      if (owner > 0 && !alive) { await fs.rm(REAL_DOCKER_LOCK, { recursive: true, force: true }); continue; }
-      if (Date.now() > deadline) throw new Error(`real Docker lock ${REAL_DOCKER_LOCK} not released (owner ${owner || 'unknown'})`);
-      await delay(250);
+      const owner = await lockOwner(lock);
+      if (owner > 0 && !processAlive(owner)) { await takeOverStaleLock(lock, owner); continue; }
+      if (Date.now() > deadline) throw new Error(`real Docker lock ${lock} not released (owner ${owner || 'unknown'})`);
+      await delay(pollMs);
     }
   }
 }

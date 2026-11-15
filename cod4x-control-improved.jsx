@@ -39,12 +39,17 @@ function authHeaders(extra={}){ const token=localStorage.getItem("cod4x.auth.tok
 // Debug phase (4.18.31): a 401 on a request that carried a session token means the session is gone
 // (expired, revoked, or the backend restarted). The token is dropped and the login screen is shown,
 // instead of every panel polling on with "Authentication required".
+// Only the backend's AUTH_REQUIRED answer (no valid session) counts: other 401s, such as a wrong
+// password when turning off the second factor (PASSWORD_INVALID), leave the session as it is.
 export const SESSION_EXPIRED_EVENT="cod4x:session-expired";
 const AUTH_ROUTES=/\/api\/auth\/(?:login|init|status|logout)\b/;
+async function sessionGone(response){
+  try{ const body=await response.clone().json(); return body?.code==="AUTH_REQUIRED"; }catch{ return false; }
+}
 export function apiFetch(input, init={}){
   const headers=authHeaders(init.headers || {});
-  return fetch(input,{...init,headers}).then(response=>{
-    if(response.status===401&&headers.Authorization&&!AUTH_ROUTES.test(String(input))&&headers.Authorization===`Bearer ${localStorage.getItem("cod4x.auth.token")}`){
+  return fetch(input,{...init,headers}).then(async response=>{
+    if(response.status===401&&headers.Authorization&&!AUTH_ROUTES.test(String(input))&&await sessionGone(response)&&headers.Authorization===`Bearer ${localStorage.getItem("cod4x.auth.token")}`){
       localStorage.removeItem("cod4x.auth.token"); localStorage.removeItem("cod4x.auth.expiresAt"); localStorage.removeItem("cod4x.auth.sessionId");
       try{ window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)); }catch{}
     }
