@@ -12,7 +12,7 @@ Base: 4.18.30 (release candidate, not tagged yet).
 ## Security (issue #40, last Low findings of the 4.18.26 audit)
 
 - **A1-5, Linux stop without a PID-reuse race.** A server CONTROL started itself is signalled through its own child handle: until Node has reaped it the PID stays reserved, and Node drops the handle in the same step as the reap. A server adopted after a CONTROL restart is signalled through a pidfd that a small python3 helper (`lib/pidfd-signal.mjs`, Python 3.9+, Linux 5.3+) opens *before* the identity check; if the process ends in between, the signal fails with ESRCH instead of hitting a new owner of the PID. Without python3 or pidfd support CONTROL keeps the previous check-then-kill and writes the audit entry `runtime.pidfd_unavailable` once. Remote Linux hosts still signal over SSH with the identity check right before (unchanged).
-- **A1-3, Windows administrator warning.** CONTROL now also warns (console and audit entry `control.running_as_admin`) when it runs elevated on Windows (`net session` succeeds only there). Root on Linux was already reported since 4.18.29.
+- **A1-3, Windows administrator warning.** CONTROL now also warns (console and audit entry `control.running_as_admin`) when it runs elevated on Windows (integrity level High or System in the process token, read with `whoami /groups`; no Windows service needed). Root on Linux was already reported since 4.18.29.
 - Issue #21 (minimatch in electron-builder) stays open: electron-builder 26.18.0 is still the latest version and still requires minimatch ^10.2.5 (checked 2026-11-15).
 
 ## Not changed
