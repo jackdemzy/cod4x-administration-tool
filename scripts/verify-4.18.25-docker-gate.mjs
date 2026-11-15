@@ -57,14 +57,14 @@ if (!complete) { process.stdout.write(run.stdout); process.stderr.write(run.stde
 // The roadmap gate itself: once with the scripted docker (always on Linux), once against a real daemon.
 const gate = spawnSync(process.execPath, ["--test", "--test-reporter=tap", "test/remote-docker-gate.test.mjs", "test/remote-docker-real.test.mjs"], { encoding: "utf8" });
 const result = name => { const match = new RegExp(`^(not ok|ok) \\d+ - ${name}( # SKIP ?(.*))?$`, "m").exec(gate.stdout); return !match ? "MISSING" : match[1] !== "ok" ? "FAIL" : match[2] ? `SKIP ${match[3] || ""}`.trim() : "PASS"; };
-const scripted = result("gate: Container Restart ohne Datenverlust \\(scripted docker\\)");
-const real = result("gate: Container Restart ohne Datenverlust \\(real Docker daemon\\)");
+const scripted = result("gate: Container restart without data loss \\(scripted docker\\)");
+const real = result("gate: Container restart without data loss \\(real Docker daemon\\)");
 const gateSummary = summaryOf(gate);
 if (gate.status !== 0 || gateSummary.fail !== 0 || (process.platform === "linux" ? scripted !== "PASS" : !/^(PASS|SKIP)/.test(scripted)) || !/^(PASS|SKIP)/.test(real)) {
   process.stdout.write(gate.stdout); process.stderr.write(gate.stderr);
-  console.log(`FAIL Container Restart ohne Datenverlust (scripted docker: ${scripted}, real daemon: ${real})`);
+  console.log(`FAIL Container restart without data loss (scripted docker: ${scripted}, real daemon: ${real})`);
   process.exit(1);
 }
-console.log(scripted === "PASS" ? "Container Restart ohne Datenverlust PASS (scripted docker, stand-in core)" : `Container Restart ohne Datenverlust ${scripted}`);
+console.log(scripted === "PASS" ? "Container restart without data loss PASS (scripted docker, stand-in core)" : `Container restart without data loss ${scripted}`);
 console.log(real === "PASS" ? `REAL DOCKER PASS (local daemon, stand-in core)` : `REAL DOCKER SKIP (${real.replace(/^SKIP ?/, "") || "no Docker daemon"})`);
 console.log("4.18.25 Docker deployment gate PASS (the run against a real sshd, daemon and core is scripts/verify-4.18.25-docker-native.mjs)");

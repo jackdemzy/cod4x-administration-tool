@@ -53,4 +53,4 @@ try {
 
 for (const [name, ok] of checks) console.log(`${ok ? "PASS" : "FAIL"} ${name}`);
 if (checks.some(([, ok]) => !ok)) process.exit(1);
-console.log("4.18.6 Lokaler Serverbetrieb unabhängig von Master-Registration gate PASS (test double; real master registration remains open)");
+console.log("4.18.6 local server operation independent of master registration gate PASS (test double; real master registration remains open)");

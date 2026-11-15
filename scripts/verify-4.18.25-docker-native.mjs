@@ -14,7 +14,7 @@ import { assertDockerMountPath, CONTAINER_CORE } from "../lib/docker-commands.mj
 import { IMAGE_TAG } from "../lib/docker-image.mjs";
 
 // Native Block 19 check: a real sshd, a real Docker daemon on that server, a real CoD4x Linux core and a base
-// game that already exists on the server. It runs the roadmap gate "Container Restart ohne Datenverlust"
+// game that already exists on the server. It runs the roadmap gate "Container restart without data loss"
 // through the same classes the application uses; only the vault is replaced by a reader for the test key file.
 // Usage (on the control machine, non-root):
 //   REMOTE_TEST_HOST=server.example.org REMOTE_TEST_USER=cod4x REMOTE_TEST_KEY=~/.ssh/id_ed25519 \
@@ -148,4 +148,4 @@ try {
 if (checks.some(([, ok]) => !ok)) { console.log(`Leftover on the server for inspection: ${root}`); process.exit(1); }
 if (skipped) { console.log(`SKIP native Docker check: ${skipped}`); process.exit(0); }
 console.log(`Server directories created by this check: ${root} (not deleted automatically). The image ${IMAGE_TAG} stays on the server.`);
-console.log("Container Restart ohne Datenverlust PASS (real sshd, real Docker, real core)");
+console.log("Container restart without data loss PASS (real sshd, real Docker, real core)");

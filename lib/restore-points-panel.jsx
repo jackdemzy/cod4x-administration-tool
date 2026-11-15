@@ -3,7 +3,7 @@ import { useState } from 'react';
 // Block 21 (4.18.27): restore points of one subject (a local instance or the standard server).
 // basePath: "/api/instances/<id>" or "/api/runtime". Server error text is never shown, only a fixed
 // message and the code. The B3 database is only reset with the checkbox and the exact confirmation text.
-export const B3_DATABASE_CONFIRMATION = 'B3-DATENBANK ZURÜCKSETZEN';
+export const B3_DATABASE_CONFIRMATION = 'RESET B3 DATABASE';
 const text = (de, german, english) => (de ? german : english);
 const MESSAGES = {
   RECOVERY_REQUIRED: ['Ein Rollback ist gescheitert. Bitte einen Wiederherstellungspunkt einspielen; bis dahin startet nichts.', 'A rollback failed. Restore a point; until then nothing starts.'],

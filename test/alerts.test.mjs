@@ -120,7 +120,7 @@ test('alert rules: validation and the repeat brake', async () => {
   assert.deepEqual(validateAlertRules({}), ALERT_DEFAULTS);
   for (const input of [{ enabled: 'yes' }, { diskFreeGb: -1 }, { playersAtLeast: 1.5 }, { repeatMinutes: 1 }, { repeatMinutes: null }]) assert.throws(() => validateAlertRules(input), { code: 'ALERT_SETTINGS_INVALID' }, JSON.stringify(input));
   assert.equal(validateAlertRules({ playersAtLeast: '' }).playersAtLeast, null);
-  assert.deepEqual([formatDuration(20e3), formatDuration(5 * 60e3), formatDuration(125 * 60e3)], ['unter 1 min', '5 min', '2 h 5 min']);
+  assert.deepEqual([formatDuration(20e3), formatDuration(5 * 60e3), formatDuration(125 * 60e3)], ['under 1 min', '5 min', '2 h 5 min']);
 
   let now = 0, rules = { ...ALERT_DEFAULTS, enabled: true };
   const sent = [];
@@ -128,9 +128,9 @@ test('alert rules: validation and the repeat brake', async () => {
   const live = { id: 'a', name: 'Promod', up: false, down: true, downSince: 0, players: [], b3: null };
   const crash = { kind: 'down', id: 'a', cause: { kind: 'crash', hint: ['Speicherfehler.', 'Memory error.'] } };
   await alerts.handleEvent(crash, live);
-  assert.deepEqual(sent.map(item => [item.type, item.title, item.body]), [['down', 'Promod ist ausgefallen', 'Ursache: Absturz. Speicherfehler.']]);
+  assert.deepEqual(sent.map(item => [item.type, item.title, item.body]), [['down', 'Promod is down', 'Cause: crash. Memory error.']]);
   now = 60e3; await alerts.handleEvent({ kind: 'up', id: 'a', downMs: 60e3 }, live);
-  assert.deepEqual(sent.at(-1).body, 'Ausfalldauer: 1 min');
+  assert.deepEqual(sent.at(-1).body, 'Downtime: 1 min');
   now = 120e3; await alerts.handleEvent({ kind: 'up', id: 'a', downMs: 1 }, live);
   assert.equal(sent.length, 2, 'the all-clear goes out exactly once');
   // Down again inside the brake: held back, then sent when the brake ends if still down.
@@ -140,9 +140,9 @@ test('alert rules: validation and the repeat brake', async () => {
   now = 20 * 60e3; await alerts.handleTick({ instances: [{ ...live, downSince: 5 * 60e3 }] });
   assert.equal(sent.length, 2, 'still braked');
   now = 31 * 60e3; await alerts.handleTick({ instances: [{ ...live, downSince: 5 * 60e3 }] });
-  assert.deepEqual([sent.length, sent.at(-1).type, sent.at(-1).body], [3, 'down', 'Ursache: keine Antwort (seit 26 min)']);
+  assert.deepEqual([sent.length, sent.at(-1).type, sent.at(-1).body], [3, 'down', 'Cause: no response (for 26 min)']);
   now = 32 * 60e3; await alerts.handleEvent({ kind: 'up', id: 'a', downMs: 27 * 60e3 }, live);
-  assert.equal(sent.at(-1).body, 'Ausfalldauer: 27 min');
+  assert.equal(sent.at(-1).body, 'Downtime: 27 min');
   // A recovery inside the brake sends nothing at all.
   now = 33 * 60e3; await alerts.handleEvent({ kind: 'down', id: 'a', cause: { kind: 'crash' } }, live);
   now = 34 * 60e3; await alerts.handleEvent({ kind: 'up', id: 'a', downMs: 60e3 }, live);
@@ -152,7 +152,7 @@ test('alert rules: validation and the repeat brake', async () => {
   now = 100 * 60e3; await alerts.handleEvent({ kind: 'down', id: 'b', cause: { kind: 'stopped' } }, live);
   assert.equal(sent.length, 4);
   rules = { ...rules, onPlannedStop: true }; await alerts.handleEvent({ kind: 'down', id: 'b', cause: { kind: 'stopped' } }, { ...live, name: 'Zwei' });
-  assert.equal(sent.at(-1).body, 'Ursache: gestoppt');
+  assert.equal(sent.at(-1).body, 'Cause: stopped');
   rules = { ...rules, enabled: false }; await alerts.handleEvent({ kind: 'down', id: 'c', cause: { kind: 'crash' } }, live);
   assert.equal(sent.length, 5);
 });
@@ -166,18 +166,18 @@ test('alert rules: disk space, B3 and player thresholds', async () => {
   const tick = (freeGb, instance = {}) => alerts.handleTick({ host: { disks: [{ path: '/srv', freeBytes: freeGb * GB }] }, instances: [{ id: 'a', name: 'Promod', up: true, b3: null, players: [], ...instance }] });
   await tick(4);
   await tick(3);
-  assert.deepEqual(sent.map(item => [item.type, item.body]), [['disk', '/srv: noch 4,0 GB frei (Schwelle 5 GB)']], 'low disk is reported once while low');
+  assert.deepEqual(sent.map(item => [item.type, item.body]), [['disk', '/srv: 4.0 GB free (threshold 5 GB)']], 'low disk is reported once while low');
   await tick(5.2); assert.equal(sent.length, 1, 'hysteresis: 5.2 GB is not yet clear');
   await tick(6); assert.equal(sent.at(-1).type, 'disk-ok');
   // B3 never seen running: no alert. Seen running, then stopped while the server answers: alert.
   await tick(50, { b3: false }); assert.equal(sent.length, 2);
   await tick(50, { b3: true }); await tick(50, { b3: false });
-  assert.equal(sent.at(-1).title, 'B3 auf Promod ist gestoppt');
+  assert.equal(sent.at(-1).title, 'B3 on Promod stopped');
   await tick(50, { b3: true }); assert.equal(sent.at(-1).type, 'b3-ok');
   // Player threshold fires on crossing, re-arms below it, respects the brake.
   const players = n => Array.from({ length: n }, (_, i) => ({ name: `p${i}` }));
   await tick(50, { b3: true, players: players(10), map: 'mp_crash' });
-  assert.deepEqual([sent.at(-1).type, sent.at(-1).title, sent.at(-1).body], ['players', 'Promod: 10 Spieler online', 'Schwelle 10 erreicht (Map mp_crash)']);
+  assert.deepEqual([sent.at(-1).type, sent.at(-1).title, sent.at(-1).body], ['players', 'Promod: 10 players online', 'Threshold 10 reached (Map mp_crash)']);
   const count = sent.length;
   await tick(50, { b3: true, players: players(12) }); assert.equal(sent.length, count, 'not again while above');
   await tick(50, { b3: true, players: players(3) }); await tick(50, { b3: true, players: players(11) });

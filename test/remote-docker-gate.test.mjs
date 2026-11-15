@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import { createDockerFixture, realDockerAvailable } from './support/docker-fixture.mjs';
 import { loopbackAvailable } from './support/loopback-transport.mjs';
 
-// Block 19 gate, "Container Restart ohne Datenverlust": the whole sequence of the roadmap gate on one instance.
+// Block 19 gate, "Container restart without data loss": the whole sequence of the roadmap gate on one instance.
 // Run once against the scripted docker of the fixture and once against a real daemon (skipped where none answers).
 const linux = (await loopbackAvailable()) ? false : 'needs Linux, a non-root user, gcc and setsid';
 const real = linux || ((await realDockerAvailable()) ? false : 'no Docker daemon');
@@ -56,5 +56,5 @@ async function sequence(t, options) {
   assert.equal(f.closes.length, f.connects.length, 'every connection was closed');
 }
 
-test('gate: Container Restart ohne Datenverlust (scripted docker)', { skip: linux }, t => sequence(t, {}));
-test('gate: Container Restart ohne Datenverlust (real Docker daemon)', { skip: real, timeout: 600_000 }, t => sequence(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } }));
+test('gate: Container restart without data loss (scripted docker)', { skip: linux }, t => sequence(t, {}));
+test('gate: Container restart without data loss (real Docker daemon)', { skip: real, timeout: 600_000 }, t => sequence(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } }));

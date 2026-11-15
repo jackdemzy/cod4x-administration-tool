@@ -13,7 +13,7 @@ Write-Host ''
 
 function Require-Command($name) {
   if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
-    throw "$name wurde nicht gefunden. Bitte Node.js 22.12+ (empfohlen 24 LTS) installieren und das Terminal neu starten."
+    throw "$name was not found. Install Node.js 22.12+ (24 LTS recommended) and restart the terminal."
   }
 }
 
@@ -22,7 +22,7 @@ Require-Command npm
 
 # Electron 45 needs Node.js >= 22.12 to install; Node 20 is end-of-life since 2026-04-30.
 $nodeOk = (node -p "const [a,b]=process.versions.node.split('.').map(Number); a>22||(a===22&&b>=12)").Trim()
-if ($nodeOk -ne 'true') { throw "Node.js 22.12+ erforderlich (empfohlen 24 LTS). Gefunden: $(node --version)" }
+if ($nodeOk -ne 'true') { throw "Node.js 22.12+ required (24 LTS recommended). Found: $(node --version)" }
 
 Write-Host "Node: $(node --version)"
 Write-Host "npm : $(npm --version)"
@@ -30,20 +30,20 @@ Write-Host ''
 
 # Dependencies come first: the preflight runs the test suite, and those tests import
 # npm packages (tar, express, ssh2). On a fresh source folder they are not there yet.
-Write-Host '[1/5] Installiere Dependencies ...'
+Write-Host '[1/5] Installing dependencies ...'
 $lockfile = Join-Path $PSScriptRoot 'package-lock.json'
 if (Test-Path $lockfile) {
-  Write-Host 'package-lock.json gefunden -> npm ci'
+  Write-Host 'package-lock.json found -> npm ci'
   npm ci --no-audit --no-fund
-  if ($LASTEXITCODE -ne 0) { throw "npm ci fehlgeschlagen (ExitCode $LASTEXITCODE)." }
+  if ($LASTEXITCODE -ne 0) { throw "npm ci failed (exit code $LASTEXITCODE)." }
 } else {
   # Older source bundles were shipped without a lockfile. npm ci cannot run in
   # that state, so create a lockfile with a normal install and continue.
-  Write-Host 'package-lock.json fehlt -> verwende npm install und erzeuge den Lockfile.' -ForegroundColor Yellow
+  Write-Host 'package-lock.json missing -> using npm install and creating the lockfile.' -ForegroundColor Yellow
   npm install --no-audit --no-fund
-  if ($LASTEXITCODE -ne 0) { throw "npm install fehlgeschlagen (ExitCode $LASTEXITCODE)." }
+  if ($LASTEXITCODE -ne 0) { throw "npm install failed (exit code $LASTEXITCODE)." }
   if (-not (Test-Path $lockfile)) {
-    throw "npm install wurde ausgefuehrt, aber package-lock.json wurde nicht erzeugt."
+    throw "npm install ran, but package-lock.json was not created."
   }
 }
 
@@ -51,41 +51,41 @@ if (Test-Path $lockfile) {
 # Some npm/node_modules states can leave the package incomplete even though the dependency install succeeds.
 $stdUtils = Join-Path $PSScriptRoot 'node_modules\app-builder-lib\templates\nsis\include\StdUtils.nsh'
 if (-not (Test-Path $stdUtils)) {
-  Write-Host 'NSIS helper StdUtils.nsh fehlt. Repariere app-builder-lib ...' -ForegroundColor Yellow
+  Write-Host 'NSIS helper StdUtils.nsh missing. Repairing app-builder-lib ...' -ForegroundColor Yellow
   npm install --no-save --no-audit --no-fund --ignore-scripts --prefer-online 'app-builder-lib@26.15.3'
-  if ($LASTEXITCODE -ne 0) { throw "Reparatur von app-builder-lib fehlgeschlagen (ExitCode $LASTEXITCODE)." }
+  if ($LASTEXITCODE -ne 0) { throw "Repairing app-builder-lib failed (exit code $LASTEXITCODE)." }
 }
 if (-not (Test-Path $stdUtils)) {
-  throw "NSIS-Abhängigkeit unvollständig: StdUtils.nsh fehlt weiterhin unter $stdUtils"
+  throw "NSIS dependency incomplete: StdUtils.nsh still missing at $stdUtils"
 }
-Write-Host 'NSIS-Abhängigkeit OK: StdUtils.nsh vorhanden.' -ForegroundColor Green
+Write-Host 'NSIS dependency OK: StdUtils.nsh present.' -ForegroundColor Green
 
-Write-Host '[2/5] Prüfe Source ...'
+Write-Host '[2/5] Checking source ...'
 npm run preflight
-if ($LASTEXITCODE -ne 0) { throw "Preflight fehlgeschlagen (ExitCode $LASTEXITCODE)." }
+if ($LASTEXITCODE -ne 0) { throw "Preflight failed (exit code $LASTEXITCODE)." }
 
-Write-Host '[3/5] Baue React/Vite ...'
+Write-Host '[3/5] Building React/Vite ...'
 npm run build
-if ($LASTEXITCODE -ne 0) { throw "Vite-Build fehlgeschlagen (ExitCode $LASTEXITCODE). Installer wird nicht gebaut." }
+if ($LASTEXITCODE -ne 0) { throw "Vite build failed (exit code $LASTEXITCODE). The installer is not built." }
 
-Write-Host '[4/5] Erzeuge Electron/NSIS Installer und Portable-EXE ...'
+Write-Host '[4/5] Creating Electron/NSIS installer and portable EXE ...'
 npx electron-builder --win nsis portable --publish never
-if ($LASTEXITCODE -ne 0) { throw "Electron/NSIS-Build fehlgeschlagen (ExitCode $LASTEXITCODE)." }
+if ($LASTEXITCODE -ne 0) { throw "Electron/NSIS build failed (exit code $LASTEXITCODE)." }
 
 $installer = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Setup-4.18.31-x64.exe'
 $portable = Join-Path $PSScriptRoot 'dist-installer\COD4X-CONTROL-Portable-4.18.31-x64.exe'
 foreach ($artifact in @($installer, $portable)) {
-  if (-not (Test-Path $artifact)) { throw "Build beendet, aber erwartete EXE wurde nicht gefunden: $artifact" }
+  if (-not (Test-Path $artifact)) { throw "Build finished, but the expected EXE was not found: $artifact" }
 }
 
 # Block 23: SHA-256 and artifact verification (expected files, app.asar content), writes
 # dist-installer\SHA256SUMS and dist-installer\release-manifest.json.
-Write-Host '[5/5] Pruefe Artefakte und schreibe SHA-256 ...'
+Write-Host '[5/5] Checking artifacts and writing SHA-256 ...'
 node scripts/release-verify.mjs --platform win
-if ($LASTEXITCODE -ne 0) { throw "Artefaktpruefung fehlgeschlagen (ExitCode $LASTEXITCODE)." }
+if ($LASTEXITCODE -ne 0) { throw "Artifact check failed (exit code $LASTEXITCODE)." }
 
 Write-Host ''
-Write-Host 'BUILD ERFOLGREICH' -ForegroundColor Green
+Write-Host 'BUILD SUCCEEDED' -ForegroundColor Green
 Write-Host "Installer: $installer"
 Write-Host "Portable : $portable"
 Write-Host "SHA-256  : $(Join-Path $PSScriptRoot 'dist-installer\SHA256SUMS')"

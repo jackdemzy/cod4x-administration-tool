@@ -14,7 +14,7 @@ const skip = !(await loopbackAvailable()) ? 'needs Linux, a non-root user, gcc a
 const docker = (...args) => run('docker', args).then(result => result.stdout);
 const hash = async file => (await run('sha256sum', [file])).stdout.split(' ')[0];
 
-test('Container Restart ohne Datenverlust: restart, and stop + start, keep every file; the container is restricted', { skip, timeout: 600_000 }, async t => {
+test('Container restart without data loss: restart, and stop + start, keep every file; the container is restricted', { skip, timeout: 600_000 }, async t => {
   const f = await createDockerFixture(t, { real: true, timing: { stopGraceMs: 2000, startConfirmMs: 10_000, startSettleMs: 1000 } });
   const instance = await f.install('real-01', { port: 28990 });
   const first = (await f.manager.start('real-01')).runtime;
