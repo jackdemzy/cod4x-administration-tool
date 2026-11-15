@@ -44,6 +44,11 @@ Found, not changed:
 - The Windows preflight and release jobs failed on the new lock test (`mkdir` EPERM on a directory Windows was still deleting). The real-Docker test lock is now a kernel lock (`flock`, util-linux) held by a helper process until its stdin closes; a killed test process releases it at once, so no PID file, takeover marker or stale-lock cleanup is left that could race (Codex findings on #65). The lock tests run on Linux only, like real Docker.
 - `lib/capped-log.cjs`: when the rotation cannot move `backend.log` (no rights, `backend.log.1` held open on Windows), the log starts over instead of growing past the limit.
 
+## CodeQL path alerts on #66 (lib/server-instance-store.mjs)
+
+- Two high `js/path-injection` alerts appeared because two lines got English texts. Traced: every path there is the managed root plus a server ID limited to `^[a-z][a-z0-9-]{0,47}$` (no reserved Windows names); home, config and save paths are always derived from it, a registry or restore record with other paths is refused, and `validatePaths` checks the real path against the root. A new test (hostile IDs such as `../outside`, `/etc`, `a\..\..\outside`, a tampered registry, a foreign restore record) passes with the old and the new code: the alerts were false positives.
+- Still hardened: `noLink` and the config check resolve the path and require it under the managed root right before the file system call.
+
 ## English backend texts, alerts and build output
 
 - Backend error texts (login, users, profiles, preflight/diagnostics checks, runtime, instance store, config validator, B3 plugin list) are English. Texts that already come in German and English pairs (B3 messages, overview guide, monitor hints, credential warnings) are unchanged.

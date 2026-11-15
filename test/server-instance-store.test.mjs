@@ -175,3 +175,35 @@ test('Block 21: setCore accepts only the platform core file and keeps the record
   await assert.rejects(store.setCore('public-01', { executablePath: path.join(root, 'missing', 'cod4x18_dedrun.exe'), version: '21.5' }), { code: 'ENOENT' });
   assert.equal(store.get('public-01').serverCore.executablePath, other);
 });
+
+// CodeQL js/path-injection on #66 (lines with noLink and the config stat): every path the store
+// touches comes from the managed root plus a checked server ID. Hostile IDs, a tampered registry
+// and a restore record with another home never reach the file system outside the root.
+test('hostile server IDs, a tampered registry and a foreign restore record never leave the managed root', async t => {
+  const { root, store, input, options } = await fixture(t);
+  const outside = path.join(root, 'outside');
+  for (const id of ['../outside', '..', '.', '/etc', 'C:\\Windows', 'a/../../outside', 'a\\..\\..\\outside', 'public-01/../../outside', 'Public', 'con', 'aux', 'lpt1', '', ' public', 'public%2f..', 'x'.repeat(49), 'a\u0000b', 1, null]) {
+    await assert.rejects(store.create({ ...input, id }), { code: 'INSTANCE_ID_INVALID' }, String(id));
+  }
+  await assert.rejects(store.create({ ...input, homePath: outside }), { code: 'INSTANCE_HOME_INVALID' });
+  await assert.rejects(fs.stat(outside), { code: 'ENOENT' });
+  assert.deepEqual(store.list(), []);
+  const instance = await store.create(input);
+  assert.equal(instance.homePath, path.join(options.root, 'public-01'));
+  assert.equal(instance.configPath, path.join(instance.homePath, 'main', 'server.cfg'));
+  // A registry edited by hand to point the home or the config elsewhere does not load.
+  const raw = JSON.parse(await fs.readFile(options.registryFile, 'utf8'));
+  for (const patch of [{ homePath: outside }, { configPath: path.join(outside, 'server.cfg') }, { savePath: outside }, { id: '../outside' }]) {
+    await fs.writeFile(options.registryFile, JSON.stringify({ ...raw, instances: [{ ...raw.instances[0], ...patch }] }));
+    const loaded = new ServerInstanceStore(options);
+    await assert.rejects(loaded.load(), { code: /INSTANCE_REGISTRY_INVALID|INSTANCE_ID_INVALID|INSTANCE_HOME_INVALID/ }, JSON.stringify(patch));
+  }
+  // A restore record must name the same home.
+  await assert.rejects(store.checkRecord('public-01', { ...instance, homePath: outside }), { code: 'INSTANCE_RECORD_INVALID' });
+  // A config path in the record is ignored: it is always derived from the home again.
+  const replaced = await store.replaceRecord('public-01', { ...instance, configPath: path.join(outside, 'server.cfg') });
+  assert.equal(replaced.configPath, instance.configPath);
+  // Even an instance object that skipped the model checks is stopped right at the file system call.
+  await fs.mkdir(path.join(outside, 'main'), { recursive: true });
+  await assert.rejects(store.validatePaths({ ...instance, homePath: outside, configPath: path.join(outside, 'main', 'server.cfg') }), { code: /INSTANCE_PATH_ALIAS_BLOCKED/ });
+});
