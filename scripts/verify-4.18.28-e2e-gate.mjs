@@ -16,7 +16,7 @@ const tests = [
   "E2E failures: ten intentional faults, CONTROL and the reference server keep running",
 ];
 const flowSteps = ["Install: adopt the core", "Detect Core: preflight reports a verified core and a valid base game", "Create Server", "Config: server.cfg and RCON password", "Start", "Map: rcon map mp_crash", "RCON: status", "Master List: controlled state, no crash", "B3: controlled state without Python, game server keeps running", "Client Join: CONTROL sees the player", "Stop", "Restart: same port, new process", "Backend restart: instance, config and credentials survive"];
-const faults = ["falscher Core", "fehlende main-Datei", "fehlende zone-Datei", "falscher Port", "falscher RCON", "fehlender Master Token", "falsche DB", "B3 down", "Server crash", "Plugin fehlt"];
+const faults = ["wrong core", "missing main file", "missing zone file", "wrong port", "wrong RCON", "missing master token", "wrong DB", "B3 down", "Server crash", "plugin missing"];
 
 for (const file of files) if (!fs.existsSync(file)) { console.error(`FAIL missing ${file}`); process.exit(1); }
 const gcc = process.platform === "linux" && spawnSync("gcc", ["--version"], { encoding: "utf8" }).status === 0;

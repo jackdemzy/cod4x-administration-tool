@@ -111,7 +111,7 @@ test('manual restore: code parts need server.code, the B3 database needs the con
   const result = await manager.restoreRestorePoint('alpha', pointId, {}, { canCode: true });
   assert.equal(dumped, false);
   assert.match(result.safetyPointId, /Z-[0-9a-f]{8}$/);
-  assert.equal(B3_DATABASE_CONFIRMATION, 'B3-DATENBANK ZURÜCKSETZEN');
+  assert.equal(B3_DATABASE_CONFIRMATION, 'RESET B3 DATABASE');
   const integrity = await manager.restorePointIntegrity('alpha', pointId);
   assert.equal(integrity.valid, true);
 });

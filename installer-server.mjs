@@ -112,14 +112,14 @@ function normalizeAuthUser(raw) {
 
 function validateAuthUsername(username) {
   const value = String(username ?? "").trim();
-  if (!AUTH_USERNAME_RE.test(value)) return "Benutzername: 3–32 Zeichen, nur Buchstaben, Zahlen, '.', '_' und '-' erlaubt.";
+  if (!AUTH_USERNAME_RE.test(value)) return "Username: 3–32 characters, only letters, digits, '.', '_' and '-'.";
   return "";
 }
 
 function validateAuthPassword(password) {
   const value = String(password ?? "");
-  if (value.length < AUTH_MIN_PASSWORD) return `Passwort: mindestens ${AUTH_MIN_PASSWORD} Zeichen erforderlich.`;
-  if (value.length > 256) return "Passwort: maximal 256 Zeichen erlaubt.";
+  if (value.length < AUTH_MIN_PASSWORD) return `Password: at least ${AUTH_MIN_PASSWORD} characters required.`;
+  if (value.length > 256) return "Password: at most 256 characters.";
   return "";
 }
 
@@ -223,7 +223,7 @@ function sanitizeUserMetadata(user) {
 
 async function saveAuthUser(next) {
   const normalized = normalizeAuthUser(next);
-  if (!normalized) throw new Error("Ungültiger Benutzer-Datensatz");
+  if (!normalized) throw new Error("Invalid user record");
   const dir = path.dirname(AUTH_USER_FILE);
   await fs.mkdir(dir, { recursive: true });
   const tmp = `${AUTH_USER_FILE}.tmp-${process.pid}`;
@@ -283,20 +283,20 @@ function requireAuth(req, res, next) {
 // ─── 4.11.4 Fine-Grained RBAC & Permissions ──────────────────────────────────
 const RBAC_ROLES = ["admin", "operator", "auditor", "viewer", "monitor"];
 const RBAC_PERMISSIONS = [
-  { id: "installation.manage", label: "Installation", description: "Installations- und Installationsvorgänge verwalten." },
-  { id: "install.execute", label: "Installation ausführen", description: "Verbindliche Installationsausführung autorisieren." },
-  { id: "updates.manage", label: "Updates", description: "Versionen und Update-Vorgänge verwalten." },
-  { id: "update.execute", label: "Updates ausführen", description: "Verbindliche Update-Ausführung autorisieren." },
-  { id: "server.manage", label: "Serververwaltung", description: "Serverinstanzen und Betriebssteuerung verwalten." },
-  { id: "config.manage", label: "Konfiguration", description: "Serverkonfiguration und Profile verwalten." },
-  { id: "diagnostics.read", label: "Diagnostics", description: "Diagnose- und Health-Daten lesen." },
-  { id: "audit.read", label: "Audit", description: "Audit-Trail und persistente Audit-Daten lesen." },
-  { id: "user.manage", label: "Benutzerverwaltung", description: "Benutzer, Rollen und Benutzer-Sessions verwalten." },
-  { id: "monitor.read", label: "Monitoring", description: "Serverstatus, Spielerzahlen, Verlauf und Ausfälle lesen (Block 24)." },
+  { id: "installation.manage", label: "Installation", description: "Manage installations and installation runs." },
+  { id: "install.execute", label: "Run installation", description: "Authorize binding installation runs." },
+  { id: "updates.manage", label: "Updates", description: "Manage versions and update runs." },
+  { id: "update.execute", label: "Run updates", description: "Authorize binding update runs." },
+  { id: "server.manage", label: "Server management", description: "Manage server instances and operation." },
+  { id: "config.manage", label: "Configuration", description: "Manage server configuration and profiles." },
+  { id: "diagnostics.read", label: "Diagnostics", description: "Read diagnostics and health data." },
+  { id: "audit.read", label: "Audit", description: "Read the audit trail and stored audit data." },
+  { id: "user.manage", label: "User management", description: "Manage users, roles and user sessions." },
+  { id: "monitor.read", label: "Monitoring", description: "Read server status, player counts, history and outages (Block 24)." },
   // Block 16b: custom B3 plugin code runs as the B3 process user; admin only.
-  { id: "b3.plugins.code", label: "B3-Plugin-Code", description: "Eigene B3-Plugins anlegen, hochladen und bearbeiten." },
+  { id: "b3.plugins.code", label: "B3 plugin code", description: "Create, upload and edit custom B3 plugins." },
   // Security audit 4.18.26 (A1-1): code CONTROL runs as its own user; admin only.
-  { id: "server.code", label: "Server-Programmcode", description: "Server-Core wählen und übernehmen, CoD4x-Plugins installieren, freie Startargumente." },
+  { id: "server.code", label: "Server program code", description: "Choose and apply the server core, install CoD4x plugins, free start arguments." },
 ];
 const RBAC_PERMISSION_IDS = RBAC_PERMISSIONS.map(p => p.id);
 const RBAC_MATRIX = Object.freeze({
@@ -553,8 +553,8 @@ function normalizeSafeRelativePath(value) {
 
 function normalizeRuntimePath(value) {
   const raw = String(value ?? "").trim();
-  if (!raw) throw new Error("Runtime-Pfad ist erforderlich");
-  if (raw.includes("\0")) throw new Error("Ungültiger Runtime-Pfad");
+  if (!raw) throw new Error("Runtime path is required");
+  if (raw.includes("\0")) throw new Error("Invalid runtime path");
   if (process.platform === "linux" && raw.startsWith("/")) return path.normalize(raw);
   if (/^(?:[A-Za-z]:[\\/]|\\\\)/.test(raw)) return path.normalize(raw);
   return normalizeSafeRelativePath(raw || "./server");
@@ -677,11 +677,11 @@ function serverCoreDefinition(platform) {
 function normalizeRuntimeExecutablePath(value, platform = process.platform === "win32" ? "windows" : "linux") {
   const raw=String(value??"").trim();
   const core=serverCoreDefinition(platform);
-  if(!raw||raw.includes("\0")) throw new Error("Dedicated-Server-Core-Pfad ist erforderlich");
+  if(!raw||raw.includes("\0")) throw new Error("Dedicated server core path is required");
   const normalized=path.normalize(raw);
-  if(!path.isAbsolute(normalized)) throw new Error("Dedicated-Server-Core muss als absoluter Pfad angegeben werden");
+  if(!path.isAbsolute(normalized)) throw new Error("The dedicated server core must be given as an absolute path");
   if((platform === "linux" ? path.basename(normalized) : path.basename(normalized).toLowerCase())!==core.executable) {
-    throw new Error(`Der Dedicated-Server-Core muss ${core.executable} sein`);
+    throw new Error(`The dedicated server core must be ${core.executable}`);
   }
   return normalized;
 }
@@ -691,9 +691,9 @@ async function resolveRuntimeExecutable({target,executablePath,platform = proces
   const exe=executablePath?normalizeRuntimeExecutablePath(executablePath, platform):assertSafeChildPath(target,core.executable);
   let stats;
   try { stats = await fs.stat(exe); } catch {
-    throw new Error(`${core.executable} wurde am ausgewählten Server-Core-Pfad nicht gefunden.`);
+    throw new Error(`${core.executable} was not found at the selected server core path.`);
   }
-  if (!stats.isFile()) throw new Error(`Der ausgewählte ${core.executable}-Pfad ist keine Datei.`);
+  if (!stats.isFile()) throw new Error(`The selected ${core.executable} path is not a file.`);
   return exe;
 }
 
@@ -787,7 +787,7 @@ async function verifiedCoreStatus(target, expectedCod4x = "", platform = process
   let corePresent = false;
   let manifestValid = false;
   const reasons = [];
-  try { await fs.access(exe); corePresent = true; } catch { reasons.push(`${core.executable} fehlt`); }
+  try { await fs.access(exe); corePresent = true; } catch { reasons.push(`${core.executable} missing`); }
   if (manifest) {
     const allowed = policyState.security.allowedCod4xVersions.includes(String(manifest.cod4x));
     const expected = !expectedCod4x || String(manifest.cod4x) === expectedCod4x;
@@ -798,12 +798,12 @@ async function verifiedCoreStatus(target, expectedCod4x = "", platform = process
       try { fingerprintValid = (await sha256(exe)).toLowerCase() === fingerprint; } catch {}
     }
     manifestValid = Boolean(allowed && expected && executableMatches && fingerprintValid);
-    if (!allowed) reasons.push("Manifest enthält keine erlaubte CoD4x-Version");
-    else if (!expected) reasons.push(`Manifest-Version ${manifest.cod4x} stimmt nicht mit ${expectedCod4x} überein`);
-    if (!executableMatches) reasons.push(`Manifest referenziert nicht ${core.executable}`);
-    if (!fingerprintValid) reasons.push(`SHA-256-Fingerprint stimmt nicht mit ${core.executable} überein`);
+    if (!allowed) reasons.push("Manifest has no allowed CoD4x version");
+    else if (!expected) reasons.push(`Manifest version ${manifest.cod4x} does not match ${expectedCod4x}`);
+    if (!executableMatches) reasons.push(`Manifest does not reference ${core.executable}`);
+    if (!fingerprintValid) reasons.push(`SHA-256 fingerprint does not match ${core.executable}`);
   } else {
-    reasons.push("Kein gültiger Core-Nachweis gefunden");
+    reasons.push("No valid core proof found");
   }
   return {
     verified: corePresent && manifestValid,
@@ -846,8 +846,8 @@ async function adoptExistingRuntimeExecutable({executablePath,cod4x,fpsPromod="c
   const core=serverCoreDefinition(platform);
   const exe=normalizeRuntimeExecutablePath(executablePath, platform);
   let stats;
-  try { stats = await fs.stat(exe); } catch { throw new Error(`${core.executable} wurde am ausgewählten Server-Core-Pfad nicht gefunden.`); }
-  if (!stats.isFile()) throw new Error(`Der ausgewählte ${core.executable}-Pfad ist keine Datei.`);
+  try { stats = await fs.stat(exe); } catch { throw new Error(`${core.executable} was not found at the selected server core path.`); }
+  if (!stats.isFile()) throw new Error(`The selected ${core.executable} path is not a file.`);
   const executableSha256=await sha256(exe);
   const manifest={installedAt:new Date().toISOString(),target:path.dirname(exe),cod4x:String(cod4x),fpsPromod:String(fpsPromod||"custom"),mod:"vanilla",antiCheat:"none",antiCheatMode:"balanced",verification:"operator-adopted",platform,executable:core.executable,executableSha256};
   await fs.mkdir(RUNTIME_CORE_REGISTRY_DIR,{recursive:true}); const registryPath=runtimeCoreRegistryFile(path.dirname(exe)); await fs.writeFile(registryPath,JSON.stringify(manifest,null,2)+"\n","utf8");
@@ -926,7 +926,7 @@ app.get("/api/auth/status", (_req, res) => {
 
 app.post("/api/auth/init", async (req, res) => {
   try {
-    if (authUser) return res.status(409).json({ ok: false, error: "Administrator ist bereits initialisiert." });
+    if (authUser) return res.status(409).json({ ok: false, error: "Administrator is already initialized." });
     const username = String(req.body?.username || "").trim();
     const password = String(req.body?.password || "");
     const usernameError = validateAuthUsername(username);
@@ -950,7 +950,7 @@ app.post("/api/auth/init", async (req, res) => {
 const loginThrottle = new LoginThrottle();
 app.post("/api/auth/login", async (req, res) => {
   try {
-    if (!authUser) return res.status(428).json({ ok: false, error: "First-Run-Initialisierung erforderlich." });
+    if (!authUser) return res.status(428).json({ ok: false, error: "First-run initialization required." });
     const username = String(req.body?.username || "").trim();
     const password = String(req.body?.password || "");
     const throttleKey = LoginThrottle.key(loginClient(req.socket.remoteAddress), username);
@@ -958,7 +958,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (lock.locked) {
       audit({ level: "warn", event: "auth.login_locked", details: { username } });
       res.setHeader("Retry-After", String(Math.ceil(lock.retryAfterMs / 1000)));
-      return res.status(429).json({ ok: false, code: "LOGIN_LOCKED", retryAfterMs: lock.retryAfterMs, error: `Zu viele Fehlversuche. Erneut möglich in ${Math.ceil(lock.retryAfterMs / 60000)} min.` });
+      return res.status(429).json({ ok: false, code: "LOGIN_LOCKED", retryAfterMs: lock.retryAfterMs, error: `Too many failed attempts. Try again in ${Math.ceil(lock.retryAfterMs / 60000)} min.` });
     }
     const candidate = findAuthUser(username);
     const userA = crypto.createHash("sha256").update(username).digest();
@@ -969,7 +969,7 @@ app.post("/api/auth/login", async (req, res) => {
       const locked = loginThrottle.fail(throttleKey);
       audit({ level: "warn", event: locked ? "auth.login_locked" : "auth.login_failed", details: { username } });
       // A5-2: only the right password may learn that the account is disabled.
-      return res.status(401).json({ ok: false, error: candidate?.disabled && validUser && validPassword ? "Benutzer ist deaktiviert." : "Benutzername oder Passwort ungültig." });
+      return res.status(401).json({ ok: false, error: candidate?.disabled && validUser && validPassword ? "User is disabled." : "Invalid username or password." });
     }
     loginThrottle.succeed(throttleKey);
     const session = createAuthSession(candidate.username, candidate.role);
@@ -1000,8 +1000,8 @@ const remoteSessions = new RemoteSessions();
 const TOTP_PENDING_MS = 10 * 60e3;
 app.post("/api/auth/totp/setup", requireAuth, (req, res) => {
   const user = findAuthUser(req.auth.username);
-  if (!user) return res.status(404).json({ ok: false, code: "USER_NOT_FOUND", error: "Benutzer nicht gefunden." });
-  if (user.totp) return res.status(409).json({ ok: false, code: "TOTP_ALREADY_ENABLED", error: "Zweiter Faktor ist bereits eingerichtet. Zuerst ausschalten." });
+  if (!user) return res.status(404).json({ ok: false, code: "USER_NOT_FOUND", error: "User not found." });
+  if (user.totp) return res.status(409).json({ ok: false, code: "TOTP_ALREADY_ENABLED", error: "Second factor is already set up. Turn it off first." });
   const secret = generateTotpSecret();
   totpPending.set(user.username.toLowerCase(), { secret, expiresAt: Date.now() + TOTP_PENDING_MS });
   audit("info", "auth.totp.setup_started", { username: user.username });
@@ -1011,7 +1011,7 @@ app.post("/api/auth/totp/confirm", requireAuth, async (req, res) => {
   const user = findAuthUser(req.auth.username), key = String(req.auth.username).toLowerCase(), pending = totpPending.get(key);
   if (!user || !pending || pending.expiresAt <= Date.now()) { totpPending.delete(key); return res.status(409).json({ ok: false, code: "TOTP_SETUP_EXPIRED", error: "Einrichtung abgelaufen. Bitte neu starten." }); }
   const step = verifyTotp(pending.secret, req.body?.code);
-  if (step === null) { audit("warn", "auth.totp.confirm_failed", { username: user.username }); return res.status(400).json({ ok: false, code: "TOTP_INVALID", error: "Code ungültig. Uhrzeit von Handy und Rechner prüfen." }); }
+  if (step === null) { audit("warn", "auth.totp.confirm_failed", { username: user.username }); return res.status(400).json({ ok: false, code: "TOTP_INVALID", error: "Invalid code. Check the clock on the phone and the computer." }); }
   const codes = generateRecoveryCodes();
   user.totp = { secret: pending.secret, lastStep: step, enabledAt: new Date().toISOString() };
   user.recovery = codes.map(hashRecoveryCode);
@@ -1024,7 +1024,7 @@ app.post("/api/auth/totp/confirm", requireAuth, async (req, res) => {
 app.post("/api/auth/totp/disable", requireAuth, async (req, res) => {
   const user = findAuthUser(req.auth.username);
   if (!user?.totp) return res.status(409).json({ ok: false, code: "TOTP_NOT_ENABLED", error: "Kein zweiter Faktor eingerichtet." });
-  if (!verifyAuthPassword(String(req.body?.password || ""), user.passwordHash)) { audit("warn", "auth.totp.disable_failed", { username: user.username }); return res.status(401).json({ ok: false, code: "PASSWORD_INVALID", error: "Passwort ungültig." }); }
+  if (!verifyAuthPassword(String(req.body?.password || ""), user.passwordHash)) { audit("warn", "auth.totp.disable_failed", { username: user.username }); return res.status(401).json({ ok: false, code: "PASSWORD_INVALID", error: "Invalid password." }); }
   user.totp = null; user.recovery = []; user.updatedAt = new Date().toISOString();
   await saveAuthUsers();
   const revoked = remoteSessions.revokeUser(user.username);
@@ -1079,9 +1079,9 @@ app.post("/api/users", requirePermission("user.manage"), async (req, res) => {
     if (usernameError) return res.status(400).json({ ok: false, error: usernameError });
     const passwordError = validateAuthPassword(password);
     if (passwordError) return res.status(400).json({ ok: false, error: passwordError });
-    if (!role) return res.status(400).json({ ok: false, error: "Ungültige Rolle." });
-    if (authUsers.has(username.toLowerCase())) return res.status(409).json({ ok: false, error: "Benutzer existiert bereits." });
-    if (authUsers.size >= 100) return res.status(409).json({ ok: false, error: "Maximal 100 Benutzer erlaubt." });
+    if (!role) return res.status(400).json({ ok: false, error: "Invalid role." });
+    if (authUsers.has(username.toLowerCase())) return res.status(409).json({ ok: false, error: "User already exists." });
+    if (authUsers.size >= 100) return res.status(409).json({ ok: false, error: "At most 100 users allowed." });
     const now = new Date().toISOString();
     const user = { version: 1, username, role, passwordHash: hashAuthPassword(password), disabled: false, createdAt: now, updatedAt: now };
     authUsers.set(username.toLowerCase(), user);
@@ -1096,13 +1096,13 @@ app.post("/api/users", requirePermission("user.manage"), async (req, res) => {
 app.patch("/api/users/:username", requirePermission("user.manage"), async (req, res) => {
   try {
     const target = findAuthUser(req.params.username);
-    if (!target) return res.status(404).json({ ok: false, error: "Benutzer nicht gefunden." });
+    if (!target) return res.status(404).json({ ok: false, error: "User not found." });
     const nextRole = req.body?.role === undefined ? target.role : normalizeRole(req.body.role);
-    if (!nextRole) return res.status(400).json({ ok: false, error: "Ungültige Rolle." });
-    if (target.username.toLowerCase() === req.auth.username.toLowerCase() && nextRole !== "admin") return res.status(400).json({ ok: false, error: "Der eigene Admin-Account kann nicht auf eine niedrigere Rolle gesetzt werden." });
-    if (req.body?.disabled === true && target.username.toLowerCase() === req.auth.username.toLowerCase()) return res.status(400).json({ ok: false, error: "Der eigene Admin-Account kann nicht deaktiviert werden." });
-    if (req.body?.remoteAccess !== undefined && typeof req.body.remoteAccess !== "boolean") return res.status(400).json({ ok: false, error: "remoteAccess muss true oder false sein." });
-    if (req.body?.remoteActions !== undefined && typeof req.body.remoteActions !== "boolean") return res.status(400).json({ ok: false, error: "remoteActions muss true oder false sein." });
+    if (!nextRole) return res.status(400).json({ ok: false, error: "Invalid role." });
+    if (target.username.toLowerCase() === req.auth.username.toLowerCase() && nextRole !== "admin") return res.status(400).json({ ok: false, error: "Your own admin account cannot be set to a lower role." });
+    if (req.body?.disabled === true && target.username.toLowerCase() === req.auth.username.toLowerCase()) return res.status(400).json({ ok: false, error: "Your own admin account cannot be disabled." });
+    if (req.body?.remoteAccess !== undefined && typeof req.body.remoteAccess !== "boolean") return res.status(400).json({ ok: false, error: "remoteAccess must be true or false." });
+    if (req.body?.remoteActions !== undefined && typeof req.body.remoteActions !== "boolean") return res.status(400).json({ ok: false, error: "remoteActions must be true or false." });
     const roleChanged = target.role !== nextRole;
     target.role = nextRole;
     if (req.body?.disabled !== undefined) target.disabled = Boolean(req.body.disabled);
@@ -1135,7 +1135,7 @@ app.patch("/api/users/:username", requirePermission("user.manage"), async (req, 
 
 app.post("/api/users/:username/revoke", requirePermission("user.manage"), (req, res) => {
   const target = findAuthUser(req.params.username);
-  if (!target) return res.status(404).json({ ok: false, error: "Benutzer nicht gefunden." });
+  if (!target) return res.status(404).json({ ok: false, error: "User not found." });
   let revoked = 0;
   for (const [token, session] of authSessions) {
     if (session.username.toLowerCase() === target.username.toLowerCase()) { authSessions.delete(token); revoked++; }
@@ -1412,21 +1412,21 @@ function normalizeProfileStore(raw) {
 
 function validateProfileName(name) {
   const value = String(name ?? "").trim();
-  if (!PROFILE_NAME_RE.test(value)) return "Profilname: 1–48 Zeichen, nur Buchstaben, Zahlen, Leerzeichen, '.', '_' und '-' erlaubt.";
+  if (!PROFILE_NAME_RE.test(value)) return "Profile name: 1–48 characters, only letters, digits, spaces, '.', '_' and '-'.";
   return "";
 }
 
 function validateProfileConfig(config) {
   const errors = [];
-  if (!config || typeof config !== "object" || Array.isArray(config)) return ["Profil-Konfiguration muss ein Objekt sein."];
-  if (Object.keys(config).length > 200) errors.push("Profil-Konfiguration darf maximal 200 Keys enthalten.");
+  if (!config || typeof config !== "object" || Array.isArray(config)) return ["Profile configuration must be an object."];
+  if (Object.keys(config).length > 200) errors.push("Profile configuration may hold at most 200 keys.");
   const hostname = config.sv_hostname;
-  if (hostname !== undefined && String(hostname).length > 128) errors.push("sv_hostname darf maximal 128 Zeichen enthalten.");
+  if (hostname !== undefined && String(hostname).length > 128) errors.push("sv_hostname may hold at most 128 characters.");
   const maxclients = config.sv_maxclients;
-  if (maxclients !== undefined && (!Number.isInteger(Number(maxclients)) || Number(maxclients) < 1 || Number(maxclients) > 64)) errors.push("sv_maxclients muss 1..64 sein.");
+  if (maxclients !== undefined && (!Number.isInteger(Number(maxclients)) || Number(maxclients) < 1 || Number(maxclients) > 64)) errors.push("sv_maxclients must be 1..64.");
   const port = config.net_port;
   if (port !== undefined && (!Number.isInteger(Number(port)) || Number(port) < policyState.security.portMin || Number(port) > policyState.security.portMax)) {
-    errors.push(`net_port muss ${policyState.security.portMin}..${policyState.security.portMax} sein.`);
+    errors.push(`net_port must be ${policyState.security.portMin}..${policyState.security.portMax}.`);
   }
   return errors;
 }
@@ -1464,7 +1464,7 @@ async function upsertProfile(name, config) {
   const configErrors = validateProfileConfig(config);
   if (configErrors.length) throw new Error(configErrors.join("; "));
   const profiles = profileState.profiles.filter(p => p.name !== name);
-  if (!profileState.profiles.some(p => p.name === name) && profiles.length >= MAX_PROFILES) throw new Error(`Maximal ${MAX_PROFILES} Profile erlaubt.`);
+  if (!profileState.profiles.some(p => p.name === name) && profiles.length >= MAX_PROFILES) throw new Error(`At most ${MAX_PROFILES} profiles allowed.`);
   profiles.push({ name: String(name).trim(), config: structuredClone(config) });
   profiles.sort((a,b) => a.name.localeCompare(b.name));
   return queueProfileWrite({ version: 1, active: profileState.active, profiles });
@@ -1473,7 +1473,7 @@ async function upsertProfile(name, config) {
 async function activateProfile(name) {
   const value = String(name ?? "").trim();
   const profile = profileState.profiles.find(p => p.name === value);
-  if (!profile) throw new Error("Profil nicht gefunden.");
+  if (!profile) throw new Error("Profile not found.");
   await queueProfileWrite({ version: 1, active: profile.name, profiles: profileState.profiles });
   return profile;
 }
@@ -1481,7 +1481,7 @@ async function activateProfile(name) {
 async function deleteProfile(name) {
   const value = String(name ?? "").trim();
   const profile = profileState.profiles.find(p => p.name === value);
-  if (!profile) throw new Error("Profil nicht gefunden.");
+  if (!profile) throw new Error("Profile not found.");
   const profiles = profileState.profiles.filter(p => p.name !== value);
   const active = profileState.active === value ? null : profileState.active;
   return queueProfileWrite({ version: 1, active, profiles });
@@ -1794,85 +1794,85 @@ app.get("/api/diagnostics", requirePermission("diagnostics.read"), async (req, r
   let target = null;
 
   try {
-    add("api", "Installer API", "pass", "Backend erreichbar.");
+    add("api", "Installer API", "pass", "Backend reachable.");
 
-    if (supportedCod4x.includes(cod4x)) add("cod4x-version", "CoD4x-Version", "pass", `Profil ${cod4x} ist unterstützt.`);
-    else add("cod4x-version", "CoD4x-Version", "fail", `Nicht unterstützte Version: ${cod4x}.`);
+    if (supportedCod4x.includes(cod4x)) add("cod4x-version", "CoD4x version", "pass", `Profile ${cod4x} is supported.`);
+    else add("cod4x-version", "CoD4x version", "fail", `Unsupported version: ${cod4x}.`);
 
     if (supportedCod4x.includes(cod4x) && supportedFps.includes(fps)) {
-      add("target-profile", "Client/Server-Ziel", "pass", `CoD4x ${cod4x} / FPS Promod ${fps}.`);
+      add("target-profile", "Client/server target", "pass", `CoD4x ${cod4x} / FPS Promod ${fps}.`);
     } else {
-      add("target-profile", "Client/Server-Ziel", "fail", "Versionen des Zielprofils sind nicht vollständig unterstützt.");
+      add("target-profile", "Client/server target", "fail", "The target profile versions are not fully supported.");
     }
 
     try {
       const relative = String(req.query.path || "./server").replaceAll("\\", "/").replace(/^\/+/, "");
       target = assertSafeChildPath(INSTALL_ROOT, relative);
-      add("install-path", "Installationspfad", "pass", target);
+      add("install-path", "Install path", "pass", target);
     } catch (e) {
-      add("install-path", "Installationspfad", "fail", e.message);
+      add("install-path", "Install path", "fail", e.message);
     }
 
     if (target) {
-      try { await fs.access(target); add("target-exists", "Installationsziel", "pass", "Verzeichnis ist vorhanden."); }
-      catch { add("target-exists", "Installationsziel", "warn", "Verzeichnis ist noch nicht vorhanden."); }
+      try { await fs.access(target); add("target-exists", "Install target", "pass", "Directory exists."); }
+      catch { add("target-exists", "Install target", "warn", "Directory does not exist yet."); }
 
       const exe = assertSafeChildPath(target, "iw3mp.exe");
-      try { await fs.access(exe); add("verified-core", "Verified-Core", "pass", "iw3mp.exe ist vorhanden."); }
-      catch { add("verified-core", "Verified-Core", "warn", "iw3mp.exe wurde nicht gefunden; eine Installation/Verifikation ist noch erforderlich."); }
+      try { await fs.access(exe); add("verified-core", "Verified-Core", "pass", "iw3mp.exe is present."); }
+      catch { add("verified-core", "Verified-Core", "warn", "iw3mp.exe was not found; an installation/verification is still required."); }
 
       const manifestPath = assertSafeChildPath(target, "cod4x-control-manifest.json");
       try {
         const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-        if (String(manifest.cod4x) === cod4x) add("manifest", "Core-Manifest", "pass", `Manifest für CoD4x ${manifest.cod4x} vorhanden.`);
-        else add("manifest", "Core-Manifest", "warn", `Manifest-Version ${manifest.cod4x || "unbekannt"} weicht vom Profil ${cod4x} ab.`);
-      } catch { add("manifest", "Core-Manifest", "warn", "Kein gültiges COD4X CONTROL Manifest im Ziel gefunden."); }
+        if (String(manifest.cod4x) === cod4x) add("manifest", "Core-Manifest", "pass", `Manifest for CoD4x ${manifest.cod4x} present.`);
+        else add("manifest", "Core-Manifest", "warn", `Manifest version ${manifest.cod4x || "unknown"} differs from profile ${cod4x}.`);
+      } catch { add("manifest", "Core-Manifest", "warn", "No valid COD4X CONTROL manifest found in the target."); }
 
       const cfgPath = assertSafeChildPath(target, "server.cfg");
       try {
         const cfg = await fs.readFile(cfgPath, "utf8");
-        add("config-file", "Konfigurationsdatei", "pass", "server.cfg ist vorhanden und lesbar.");
+        add("config-file", "Config file", "pass", "server.cfg is present and readable.");
         const hasHostname = /(?:^|\n)\s*set\s+sv_hostname\b/i.test(cfg);
         const hasPort = /(?:^|\n)\s*set\s+net_port\s+\"?\d+\"?/i.test(cfg);
-        if (hasHostname && hasPort) add("config", "Konfiguration", "pass", "Hostname und net_port sind vorhanden.");
-        else add("config", "Konfiguration", "warn", "Erwartete Basis-DVARs sv_hostname und/oder net_port fehlen.");
+        if (hasHostname && hasPort) add("config", "Configuration", "pass", "Hostname and net_port are present.");
+        else add("config", "Configuration", "warn", "Expected base dvars sv_hostname and/or net_port are missing.");
       } catch {
-        add("config-file", "Konfigurationsdatei", "warn", "server.cfg wurde nicht gefunden.");
-        add("config", "Konfiguration", "warn", "Konfigurationsprüfung nicht möglich.");
+        add("config-file", "Config file", "warn", "server.cfg was not found.");
+        add("config", "Configuration", "warn", "Configuration check not possible.");
       }
 
       const modsDir = assertSafeChildPath(target, "mods");
-      try { await fs.access(modsDir); add("modules", "Module", "pass", "mods/ Verzeichnis vorhanden."); }
-      catch { add("modules", "Module", "warn", "mods/ Verzeichnis wurde nicht gefunden."); }
+      try { await fs.access(modsDir); add("modules", "Modules", "pass", "mods/ directory present."); }
+      catch { add("modules", "Modules", "warn", "mods/ directory was not found."); }
 
-      if (!mod || mod === "vanilla") add("selected-mod", "Ausgewähltes Modul", "pass", "Vanilla / Basisspiel ausgewählt.");
+      if (!mod || mod === "vanilla") add("selected-mod", "Selected mod", "pass", "Vanilla / base game selected.");
       else {
         const modPath = assertSafeChildPath(target, mod);
-        try { await fs.access(modPath); add("selected-mod", "Ausgewähltes Modul", "pass", `${mod} vorhanden.`); }
-        catch { add("selected-mod", "Ausgewähltes Modul", "warn", `${mod} wurde im Installationsziel nicht gefunden.`); }
+        try { await fs.access(modPath); add("selected-mod", "Selected mod", "pass", `${mod} present.`); }
+        catch { add("selected-mod", "Selected mod", "warn", `${mod} was not found in the install target.`); }
       }
     } else {
-      add("target-exists", "Installationsziel", "fail", "Installationsziel konnte nicht validiert werden.");
-      add("verified-core", "Verified-Core", "fail", "Core-Prüfung übersprungen.");
-      add("manifest", "Core-Manifest", "fail", "Manifest-Prüfung übersprungen.");
-      add("config-file", "Konfigurationsdatei", "fail", "Dateiprüfung übersprungen.");
-      add("config", "Konfiguration", "fail", "Konfigurationsprüfung übersprungen.");
-      add("modules", "Module", "fail", "Modulprüfung übersprungen.");
-      add("selected-mod", "Ausgewähltes Modul", "fail", "Modulprüfung übersprungen.");
+      add("target-exists", "Install target", "fail", "Install target could not be validated.");
+      add("verified-core", "Verified-Core", "fail", "Core check skipped.");
+      add("manifest", "Core-Manifest", "fail", "Manifest check skipped.");
+      add("config-file", "Config file", "fail", "File check skipped.");
+      add("config", "Configuration", "fail", "Configuration check skipped.");
+      add("modules", "Modules", "fail", "Mod check skipped.");
+      add("selected-mod", "Selected mod", "fail", "Mod check skipped.");
     }
 
-    if (supportedFps.includes(fps)) add("fps-profile", "FPS Promod-Profil", "pass", `Profil ${fps} ist bekannt.`);
-    else add("fps-profile", "FPS Promod-Profil", "fail", `Unbekanntes FPS-Profil: ${fps}.`);
+    if (supportedFps.includes(fps)) add("fps-profile", "FPS Promod profile", "pass", `Profile ${fps} is known.`);
+    else add("fps-profile", "FPS Promod profile", "fail", `Unknown FPS profile: ${fps}.`);
 
     const hostOk = Boolean(rconHost) && !/[\u0000-\u001F\u007F]/.test(rconHost);
-    if (hostOk) add("rcon-host", "RCON Host", "pass", `Host ${rconHost} ist syntaktisch gültig.`);
-    else add("rcon-host", "RCON Host", "fail", "RCON Host ist leer oder enthält Steuerzeichen.");
-    if (Number.isInteger(rconPort) && rconPort >= 1 && rconPort <= 65535) add("rcon-port", "RCON Port", "pass", `Port ${rconPort} liegt im gültigen Bereich.`);
-    else add("rcon-port", "RCON Port", "fail", "RCON Port liegt außerhalb des gültigen Bereichs.");
+    if (hostOk) add("rcon-host", "RCON Host", "pass", `Host ${rconHost} is syntactically valid.`);
+    else add("rcon-host", "RCON Host", "fail", "RCON host is empty or contains control characters.");
+    if (Number.isInteger(rconPort) && rconPort >= 1 && rconPort <= 65535) add("rcon-port", "RCON Port", "pass", `Port ${rconPort} is in the valid range.`);
+    else add("rcon-port", "RCON Port", "fail", "RCON port is outside the valid range.");
 
     const networkPort = rconPort;
-    if (Number.isInteger(networkPort) && networkPort >= 1 && networkPort <= 65535) add("network-port", "Netzwerk-Port", "pass", `Port ${networkPort} liegt im gültigen Bereich 1–65535.`);
-    else add("network-port", "Netzwerk-Port", "fail", "Port liegt außerhalb des gültigen Bereichs.");
+    if (Number.isInteger(networkPort) && networkPort >= 1 && networkPort <= 65535) add("network-port", "Network port", "pass", `Port ${networkPort} is in the valid range 1–65535.`);
+    else add("network-port", "Network port", "fail", "Port is outside the valid range.");
 
     const hasFail = checks.some(c => c.status === "fail");
     const hasWarn = checks.some(c => c.status === "warn");
@@ -1972,11 +1972,11 @@ const RUNTIME_RECORD_FIELDS=["target","platform","resolvedTarget","runtimeRoot",
 // required=false: the change never reached the disk (its own write failed), so the file still holds the
 // old record and a failing write here leaves nothing to recover.
 async function restoreDefaultRuntimeRecord(record,{required=true}={}){if(!record||typeof record!=="object")throw Object.assign(new Error("RESTORE_POINT_INVALID"),{code:"RESTORE_POINT_INVALID"});for(const field of RUNTIME_RECORD_FIELDS)defaultRuntime.state[field]=record[field]??null;try{await persistRuntimeState();}catch(error){if(required)throw error;}}
-app.post("/api/runtime/config",requirePermission("server.code"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),executablePath=normalizeRuntimeExecutablePath(req.body?.executablePath||defaultRuntime.state.executablePath||"",platform);if(!policyState.security.allowedCod4xVersions.includes(cod4x))throw new Error(`Unsupported CoD4x version: ${cod4x}`);if(!(await pathExists(executablePath)))throw new Error(`${serverCoreDefinition(platform).executable} wurde am ausgewählten Server-Core-Pfad nicht gefunden.`);const baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.body?.baseGamePath,defaultRuntime.state));if(!baseGame.valid){const err=new Error(baseGame.reasons.map(item=>item.message).join("; "));err.code="BASEGAME_INVALID";throw err;}// Block 21: the core change of the standard server runs through a restore point of its runtime record.
+app.post("/api/runtime/config",requirePermission("server.code"),async(req,res)=>{const correlationId=crypto.randomUUID();try{await withRuntimeConfiguration(async()=>{const requested=normalizeRuntimePath(req.body?.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.body?.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.body?.cod4x||defaultRuntime.state.cod4x||"21.5"),executablePath=normalizeRuntimeExecutablePath(req.body?.executablePath||defaultRuntime.state.executablePath||"",platform);if(!policyState.security.allowedCod4xVersions.includes(cod4x))throw new Error(`Unsupported CoD4x version: ${cod4x}`);if(!(await pathExists(executablePath)))throw new Error(`${serverCoreDefinition(platform).executable} was not found at the selected server core path.`);const baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.body?.baseGamePath,defaultRuntime.state));if(!baseGame.valid){const err=new Error(baseGame.reasons.map(item=>item.message).join("; "));err.code="BASEGAME_INVALID";throw err;}// Block 21: the core change of the standard server runs through a restore point of its runtime record.
 let persisted=false;const{restorePointId}=await guardedChange({store:restorePoints,subject:DEFAULT_RUNTIME_SUBJECT,action:"core.change",actor:req.auth?.username||null,audit,
 capture:async()=>({data:{record:structuredClone(defaultRuntime.state)},parts:["record"]}),
 change:async()=>{defaultRuntime.state.baseGamePath=baseGame.baseGamePath;defaultRuntime.state.target=requested;defaultRuntime.state.platform=platform;defaultRuntime.state.resolvedTarget=null;defaultRuntime.state.runtimeRoot=null;defaultRuntime.state.executablePath=executablePath;defaultRuntime.state.executable=serverCoreDefinition(platform).executable;defaultRuntime.state.cod4x=cod4x;defaultRuntime.state.updatedAt=new Date().toISOString();await persistRuntimeState();persisted=true;},
-verify:async()=>{if(!(await pathExists(defaultRuntime.state.executablePath))||!policyState.security.allowedCod4xVersions.includes(defaultRuntime.state.cod4x)){const err=new Error("Server-Core-Änderung konnte nicht bestätigt werden.");err.code="RUNTIME_CORE_VERIFY_FAILED";throw err;}},
+verify:async()=>{if(!(await pathExists(defaultRuntime.state.executablePath))||!policyState.security.allowedCod4xVersions.includes(defaultRuntime.state.cod4x)){const err=new Error("Server core change could not be confirmed.");err.code="RUNTIME_CORE_VERIFY_FAILED";throw err;}},
 rollback:async point=>{await restoreDefaultRuntimeRecord(point.manifest.data.record,{required:persisted});}});
 runtimeEvent("runtime.configuration.saved",{correlationId,target:requested,platform,cod4x,executablePath,executable:defaultRuntime.state.executable,restorePointId});res.json({ok:true,correlationId,runtime:defaultRuntime.state,restorePointId});});}catch(err){audit("warn","runtime.configuration.blocked",{correlationId,error:err.message});res.status(400).json({ok:false,correlationId,error:err.message});}});
 app.get("/api/runtime/status",requirePermission("diagnostics.read",{quietAllowed:true}),async(_req,res)=>{try{await reconcileRuntimeState();res.json({ok:true,runtime:defaultRuntime.state,hostPlatform:process.platform,supportedServerPlatforms:Object.keys(SERVER_CORE_DEFINITIONS),nativeExecutable:defaultRuntime.state.executable,candidateRoots:runtimeCandidateRoots()});}catch(err){res.status(500).json({ok:false,error:err.message});}});
@@ -2285,7 +2285,7 @@ app.post("/api/backups/:id/restore", requirePermission("config.manage"), async (
     if (usersChange) {
       if (!hasPermission(req.auth.role, "user.manage")) {
         audit("warn", "backup.restore.blocked", {id:record.meta.id, correlationId, reason:"users_need_user_manage", actor:req.auth.username});
-        return res.status(403).json({ok:false,code:"BACKUP_RESTORE_USERS_FORBIDDEN",error:"Dieses Backup enthält andere Benutzerkonten; nur ein Administrator darf es wiederherstellen.",permission:"user.manage",correlationId});
+        return res.status(403).json({ok:false,code:"BACKUP_RESTORE_USERS_FORBIDDEN",error:"This backup holds other user accounts; only an administrator may restore it.",permission:"user.manage",correlationId});
       }
       if (!backupUsersHaveAdmin(usersPayload)) {
         audit("warn", "backup.restore.blocked", {id:record.meta.id, correlationId, reason:"no_enabled_admin", actor:req.auth.username});
@@ -2566,7 +2566,7 @@ registerRemoteLinuxRoutes({ app, requirePermission, audit, sessionPool: remoteSe
 runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
   const relative = path.relative(await resolveRealFuturePath(instanceRoot), await resolveRealFuturePath(filesystemHomePath));
   if (relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`))) {
-    const error = new Error("Verwaltete Instanzverzeichnisse dürfen nur über ihre Instanz-ID gestartet werden.");
+    const error = new Error("Managed instance directories may only be started through their instance ID.");
     error.code = "INSTANCE_LEGACY_HOME_BLOCKED";
     throw error;
   }
@@ -3074,8 +3074,8 @@ const remoteApp = createRemoteGateway({
     notify: (kind, details) => {
       if (!alertNotifier.rules().enabled || kind === "say") return;
       let name = details.instanceId; try { name = monitorInstance(details.instanceId).name || name; } catch { /* gone */ }
-      const title = kind === "restart" ? `${name}: Neustart von ${details.username}` : `${name}: Spieler gekickt von ${details.username}`;
-      return alertNotifier.send({ key: `action:${kind}:${details.instanceId}:${Date.now()}`, type: `action-${kind}`, instanceId: details.instanceId, severity: "info", title, body: "Aus der Ferne ausgelöst." });
+      const title = kind === "restart" ? `${name}: restart by ${details.username}` : `${name}: player kicked by ${details.username}`;
+      return alertNotifier.send({ key: `action:${kind}:${details.instanceId}:${Date.now()}`, type: `action-${kind}`, instanceId: details.instanceId, severity: "info", title, body: "Triggered remotely." });
     },
   },
   push: {

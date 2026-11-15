@@ -42,7 +42,7 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     });
   };
 
-  await fault('falscher Core: nicht übernommener und kaputter Core werden nicht gestartet', async () => {
+  await fault('wrong core: a core not adopted and a broken core are not started', async () => {
     const other = await buildE2eCore(path.join(root, 'cores', 'unadopted'));
     await createInstance(backend, { id: 'wrong-core', port: ports[2], hostname: 'Wrong Core', core: other, baseGame });
     refused(await request('/api/instances/wrong-core/start', {}), 'VERIFIED_CORE_BLOCKED', 400);
@@ -54,7 +54,7 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     assert.equal((await request('/api/instances', definition('text-core', ports[2], { serverCore: { executablePath: text, version: '21.2' } }))).status, 201);
     refused(await request('/api/instances/text-core/start', {}), 'VERIFIED_CORE_BLOCKED', 400);
   });
-  await fault('fehlende main-Datei: beim Anlegen und nachträglich gelöscht', async () => {
+  await fault('missing main file: at creation and deleted later', async () => {
     const missing = await copyBaseGame('game-no-main');
     await fs.rm(path.join(missing, 'main', 'iw_00.iwd'));
     refused(await request('/api/instances', definition('no-main', ports[3], { basePath: missing })), 'BASEGAME_INVALID', 400);
@@ -64,7 +64,7 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     refused(await request('/api/instances/later-main/start', {}), 'BASEGAME_INVALID', 400);
     assert.ok(await silent(ports[3], 1000));
   });
-  await fault('fehlende zone-Datei: beim Anlegen und nachträglich gelöscht', async () => {
+  await fault('missing zone file: at creation and deleted later', async () => {
     const missing = await copyBaseGame('game-no-zone');
     await fs.rm(path.join(missing, 'zone'), { recursive: true });
     refused(await request('/api/instances', definition('no-zone', ports[4], { basePath: missing })), 'BASEGAME_INVALID', 400);
@@ -73,7 +73,7 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     await fs.rm(path.join(later, 'zone'), { recursive: true });
     refused(await request('/api/instances/later-zone/start', {}), 'BASEGAME_INVALID', 400);
   });
-  await fault('falscher Port: außerhalb, doppelt, belegt beim Anlegen und beim Start', async () => {
+  await fault('wrong port: out of range, duplicate, taken at creation and at start', async () => {
     refused(await request('/api/instances', definition('port-range', 70000)), 'INSTANCE_PORT_INVALID', 400);
     refused(await request('/api/instances', definition('port-dup', reference.port)), 'INSTANCE_PORT_CONFLICT', 400);
     const squatter = dgram.createSocket('udp4');
@@ -85,7 +85,7 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     try { refused(await request(`/api/instances/${spare.id}/start`, {}), 'INSTANCE_PORT_UNAVAILABLE', 400); }
     finally { await new Promise(resolve => blocker.close(resolve)); }
   });
-  await fault('falscher RCON: ungültige Werte, veralteter Stand, Befehl an gestoppten Server', async () => {
+  await fault('wrong RCON: invalid values, stale state, command to a stopped server', async () => {
     const { sha256 } = (await request(`/api/instances/${spare.id}/credentials`)).json.credentials;
     refused(await request(`/api/instances/${spare.id}/credentials/rcon`, { expectedSha256: sha256, value: 'short' }), 'CREDENTIAL_INVALID', 400);
     refused(await request(`/api/instances/${spare.id}/credentials/rcon`, { expectedSha256: sha256, value: 'With+PlusSign12' }), 'CREDENTIAL_INVALID', 400);
@@ -93,14 +93,14 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     refused(await request(`/api/instances/${spare.id}/rcon/command`, { command: 'status' }), 'RCON_SERVER_NOT_RUNNING', 409);
     await assert.rejects(new RconClient({ port: reference.port, timeoutMs: 1500 }).execute(Buffer.from('WrongReference1'), 'serverinfo'), { code: 'RCON_AUTH_FAILED' });
   });
-  await fault('fehlender Master Token: Prüfung meldet NOT_CONFIGURED, Server läuft', async () => {
+  await fault('missing master token: the check reports NOT_CONFIGURED, the server keeps running', async () => {
     const verified = await request(`/api/instances/${reference.id}/master/verify`, {}, 'POST', { timeoutMs: 30000 });
     ok(verified, 'master verify');
     assert.equal(verified.json.master.state, 'NOT_CONFIGURED');
     assert.equal(verified.json.master.reason, 'MASTER_TOKEN_NOT_CONFIGURED');
     assert.equal(verified.json.master.verified, false);
   });
-  await fault('falsche DB: unerreichbares Ziel wird gespeichert, der Test meldet einen B3-Code', async () => {
+  await fault('wrong DB: an unreachable target is saved, the test reports a B3 code', async () => {
     const saved = await request(`/api/instances/${reference.id}/b3/database`, { host: '127.0.0.1', port: 1, database: 'b3', username: 'b3' });
     ok(saved, 'save database');
     assert.equal(saved.json.database.ready, false);
@@ -108,14 +108,14 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     // Without Python (CI): B3_PYTHON_NOT_CONFIGURED; with Python the connection error code.
     assert.ok(probe.status >= 400 && probe.status < 500 && /^B3_[A-Z_]+$/.test(probe.json?.code || ''), `HTTP ${probe.status} ${JSON.stringify(probe.json)}`);
   });
-  await fault('B3 down: Status DOWN, Stop ohne laufendes B3 ist harmlos', async () => {
+  await fault('B3 down: status DOWN, a stop without a running B3 is harmless', async () => {
     const status = await request(`/api/instances/${reference.id}/b3`);
     ok(status, 'b3 status');
     assert.equal(status.json.b3.health.status, 'DOWN');
     assert.equal(status.json.b3.runtime.running, false);
     ok(await request(`/api/instances/${reference.id}/b3/stop`, {}), 'b3 stop');
   });
-  await fault('Server crash: SIGKILL wird erkannt, Neustart klappt', async () => {
+  await fault('Server crash: SIGKILL is detected, the restart works', async () => {
     const crash = { id: 'crash', port: ports[6], hostname: 'E2E Crash', rcon: 'E2eCrashRcon1234' };
     await createInstance(backend, { ...crash, core, baseGame });
     const started = await request(`/api/instances/${crash.id}/start`, {});
@@ -131,7 +131,7 @@ test('E2E failures: ten intentional faults, CONTROL and the reference server kee
     assert.ok(await answers(crash.port));
     ok(await request(`/api/instances/${crash.id}/stop`, {}), 'stop crash');
   });
-  await fault('Plugin fehlt: nicht freigegeben, Datei nachträglich gelöscht', async () => {
+  await fault('plugin missing: not approved, file deleted later', async () => {
     refused(await request(`/api/instances/${spare.id}/plugins/missing/enable`, {}), 'PLUGIN_NOT_APPROVED', 400);
     const source = path.join(root, 'plugin-src', 'e2eplugin.so');
     await fs.mkdir(path.dirname(source), { recursive: true });

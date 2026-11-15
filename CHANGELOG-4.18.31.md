@@ -39,10 +39,27 @@ Found, not changed:
 - `backend.log` stays capped while the backend runs: its output goes through a pipe into `lib/capped-log.cjs`, which moves the file to `backend.log.1` before it would pass 2 MB (before, the size was checked only at start).
 - Real-Docker test lock: a stale lock is taken over under an exclusively created `<lock>.takeover` file, which re-checks the owner, so two workers can no longer both remove it and run Docker at once.
 
+## Review findings on #65 and the red Windows checks
+
+- The Windows preflight and release jobs failed on the new lock test (`mkdir` EPERM on a directory Windows was still deleting). The real-Docker test lock is now a kernel lock (`flock`, util-linux) held by a helper process until its stdin closes; a killed test process releases it at once, so no PID file, takeover marker or stale-lock cleanup is left that could race (Codex findings on #65). The lock tests run on Linux only, like real Docker.
+- `lib/capped-log.cjs`: when the rotation cannot move `backend.log` (no rights, `backend.log.1` held open on Windows), the log starts over instead of growing past the limit.
+
+## CodeQL path alerts on #66 (lib/server-instance-store.mjs)
+
+- Two high `js/path-injection` alerts appeared because two lines got English texts. Traced: every path there is the managed root plus a server ID limited to `^[a-z][a-z0-9-]{0,47}$` (no reserved Windows names); home, config and save paths are always derived from it, a registry or restore record with other paths is refused, and `validatePaths` checks the real path against the root. A new test (hostile IDs such as `../outside`, `/etc`, `a\..\..\outside`, a tampered registry, a foreign restore record) passes with the old and the new code: the alerts were false positives.
+- Still hardened: `noLink` and the config check resolve the path and require it under the managed root right before the file system call.
+
+## English backend texts, alerts and build output
+
+- Backend error texts (login, users, profiles, preflight/diagnostics checks, runtime, instance store, config validator, B3 plugin list) are English. Texts that already come in German and English pairs (B3 messages, overview guide, monitor hints, credential warnings) are unchanged.
+- Alerts (Discord and push): titles and bodies in English (`is down`, `Downtime`, disk space with a decimal point); the cause hint now uses the English line.
+- RCON command descriptions, `build.ps1` output, docker gate and E2E failure test names in English.
+- The B3 database restore confirmation phrase is now `RESET B3 DATABASE`.
+
 ## Not changed
 
 - The phone web app (`/remote/`, `lib/remote-app.jsx`) is still German only.
-- Backend error texts that the server sends as free text are shown as they come.
+- Backend error texts that the server sends as free text are shown as they come (now in English, also in the German UI).
 - `.github/workflows/release.yml` still lists `scripts/preflight-4.18.30.mjs` in its path filter (left alone to avoid a conflict with the open code-signing PR #59).
 
 ## Tests
@@ -55,4 +72,4 @@ Found, not changed:
 
 - `test/ui-language.test.mjs` (new): English default and stored choice, every menu item described in both languages, overview and Remote Linux rendered in both languages, no inline layout styles left on the Remote Linux page.
 - `scripts/preflight-4.18.31.mjs` runs it together with `test/remote-hosts.test.mjs`.
-- `test/review-4.18.31.test.mjs` (new, also in the preflight): capped log rotation, stale lock taken over by exactly one of 30 workers (fails with the old lock), a live lock left alone.
+- `test/review-4.18.31.test.mjs` (new, also in the preflight): capped log rotation (also when the move fails), real-Docker lock: one holder among 20 waiters, timeout, released when the holder is killed.

@@ -1,8 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRemoteFixture } from './remote-fixture.mjs';
 import { imageBuildCommand, parseDockerProbe, dockerProbeCommand } from '../../lib/docker-commands.mjs';
@@ -235,47 +234,30 @@ export async function realDockerAvailable() {
 // Debug phase (4.18.31): tests against the real daemon run one at a time, also across test files.
 // `node --test` runs files in parallel; remote-docker-real and remote-docker-gate then built the same
 // image tag and started containers on the same daemon at once, and the Linux release job went red
-// now and then (REMOTE_START_FAILED from a refused `docker run`, getinfo timeouts). A directory
-// lock in the temp folder; the owner's PID in it lets a lock of a killed run be taken over.
+// now and then (REMOTE_START_FAILED from a refused `docker run`, getinfo timeouts).
 //
-// Taking over a stale lock is serialised by a second, exclusively created file (<lock>.takeover): only
-// its holder may remove the lock directory, and it checks the owner again first. Without it, two workers
-// that both saw the same dead owner could both remove the lock, the second one deleting the lock the
-// first had just taken, and both would run Docker at once (review on #64). A takeover file is only held
-// for a few milliseconds; one older than a minute belongs to a killed process and is removed.
+// The lock is a kernel lock (flock(1), util-linux) held by a small helper process: `flock` takes the
+// lock, prints "locked" and keeps it until its stdin closes. Unlock closes stdin; when the test process
+// dies, even by SIGKILL, the pipe closes too and the kernel drops the lock with the helper. So there is
+// no stale lock to detect or take over (review on #64/#65: the earlier PID file and takeover marker
+// could race). Real Docker is Linux only, like flock.
 const REAL_DOCKER_LOCK = path.join(os.tmpdir(), 'cod4x-control-real-docker.lock');
-const processAlive = pid => { if (pid === process.pid) return true; try { process.kill(pid, 0); return true; } catch (probe) { return probe.code === 'EPERM'; } };
-const lockOwner = async lock => Number(await fs.readFile(path.join(lock, 'pid'), 'utf8').catch(() => '0'));
-async function takeOverStaleLock(lock, staleOwner) {
-  const guard = `${lock}.takeover`;
-  let handle;
-  try { handle = await fs.open(guard, 'wx'); } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-    const age = await fs.stat(guard).then(stat => Date.now() - stat.mtimeMs, () => 0);
-    if (age > 60_000) await fs.rm(guard, { force: true });
-    else await delay(20);
-    return;
-  }
-  try {
-    // Under the guard: remove the lock only if it still belongs to the dead owner seen before.
-    if (await lockOwner(lock) === staleOwner && !processAlive(staleOwner)) await fs.rm(lock, { recursive: true, force: true });
-  } finally { await handle.close(); await fs.rm(guard, { force: true }); }
-}
-export async function lockRealDocker({ timeoutMs = 30 * 60_000, lock = REAL_DOCKER_LOCK, pollMs = 250 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      await fs.mkdir(lock);
-      await fs.writeFile(path.join(lock, 'pid'), String(process.pid));
-      return async () => { await fs.rm(lock, { recursive: true, force: true }); };
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      const owner = await lockOwner(lock);
-      if (owner > 0 && !processAlive(owner)) { await takeOverStaleLock(lock, owner); continue; }
-      if (Date.now() > deadline) throw new Error(`real Docker lock ${lock} not released (owner ${owner || 'unknown'})`);
-      await delay(pollMs);
-    }
-  }
+export function lockRealDocker({ timeoutMs = 30 * 60_000, lock = REAL_DOCKER_LOCK } = {}) {
+  return new Promise((resolve, reject) => {
+    const seconds = String(Math.max(0.001, timeoutMs / 1000));
+    const helper = spawn('flock', ['-x', '-w', seconds, lock, 'sh', '-c', 'echo locked; exec cat >/dev/null'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let output = '', locked = false;
+    const exited = new Promise(done => helper.once('close', done));
+    helper.stdout.on('data', chunk => {
+      output += chunk;
+      if (locked || !output.includes('locked')) return;
+      locked = true;
+      resolve(async () => { helper.stdin.end(); await exited; });
+    });
+    helper.stderr.resume();
+    helper.once('error', error => reject(new Error(`real Docker lock needs flock (util-linux): ${error.message}`)));
+    helper.once('close', code => { if (!locked) reject(new Error(`real Docker lock ${lock} not released (flock exit ${code})`)); });
+  });
 }
 
 // The remote fixture with Docker on the "server": the scripted docker by default, the real daemon with
