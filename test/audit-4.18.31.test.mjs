@@ -236,4 +236,29 @@ test('W-6: the FPSAC download is always an attachment and listed with its real m
   assert.match(server, /routes: \["GET \/api\/fpschallenge\/anticheat\/download\/:version"\]/);
   assert.match(server, /"Content-Type":"application\/octet-stream","Content-Disposition":'attachment; filename="fpsac-9\.2\.0\.zip"',"X-Content-Type-Options":"nosniff"/);
   assert.doesNotMatch(server, /Zu viele Anfragen|Einrichtung abgelaufen/, 'backend texts are English');
+  assert.match(server, /await downloadTo\(allowedArtifact\(\{url\}\), file\);\n    await verifyArtifact\(file, \{sha256\}\);\n    res\.status\(200\)/, 'checked before anything is sent');
+});
+
+test('W-6: without FPSAC_SHA256 the FPSAC download is refused before any request goes out', { timeout: 60000 }, async t => {
+  const { call } = await backend(t, { FPSAC_URL: 'https://downloads.invalid/fpsac.zip' });
+  const admin = (await call('/api/auth/init', { body: { username: 'owner', password: password() } })).json.token;
+  const refused = await call('/api/fpschallenge/anticheat/download/9.2.0', { token: admin });
+  assert.equal(refused.status, 503);
+  assert.match(refused.json.error, /FPSAC_SHA256/);
+});
+
+test('I-2: player chat is never taken as the crash reason', async () => {
+  const { diagnoseConsole } = await import('../lib/monitor-diagnose.mjs');
+  assert.deepEqual(diagnoseConsole('Server running\nsay: Wolf: ERROR: fatal exception lol\n12:34 say;123;3;Wolf;assert this\n'), { reason: null, clean: false });
+  assert.equal(diagnoseConsole('say: Wolf: hi\nERROR: Hunk_Alloc failed\n').reason, 'ERROR: Hunk_Alloc failed');
+});
+
+test('A5-14: the legacy RCON route refuses line breaks and control bytes', { timeout: 60000 }, async t => {
+  const { call } = await backend(t);
+  const admin = (await call('/api/auth/init', { body: { username: 'owner', password: password() } })).json.token;
+  for (const command of ['status\nquit', 'status\rquit', 'say \u0000x']) {
+    const refused = await call('/api/rcon/execute', { body: { host: '127.0.0.1', port: 9, password: 'secret12', command }, token: admin });
+    assert.equal(refused.status, 400, JSON.stringify(command));
+    assert.match(refused.json.error, /not allowed/);
+  }
 });

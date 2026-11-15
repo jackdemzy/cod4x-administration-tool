@@ -2353,7 +2353,8 @@ function SecurityPanel({t,lang}){
         </Field>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
           <button style={buttonStyle} disabled={loading} onClick={loadCatalog}>{loading?(de?"Laden…":"Loading…"):(de?"FPSAC-Versionen laden":"Load FPSAC versions")}</button>
-          <a href={apiUrl("/api/fpschallenge/anticheat/download/9.2.0")} style={{...buttonStyle,textDecoration:"none"}}>{de?"FPSAC 9.2.0 herunterladen":"Download FPSAC 9.2.0"}</a>
+          {/* Audit 4.18.31 (W-6): a plain link carries no bearer token (401); fetch it and save the file. */}
+          <button style={buttonStyle} disabled={loading} onClick={async()=>{setStatus("");try{const r=await apiFetch(apiUrl("/api/fpschallenge/anticheat/download/9.2.0"));if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d?.error||`HTTP ${r.status}`);}const url=URL.createObjectURL(await r.blob());const link=document.createElement("a");link.href=url;link.download="fpsac-9.2.0.zip";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);}catch(e){setStatus(e.message);}}}>{de?"FPSAC 9.2.0 herunterladen":"Download FPSAC 9.2.0"}</button>
         </div>
         <div style={{display:"flex",gap:18,fontSize:11,color:C.muted}}>
           <label><input type="checkbox" checked={enforce} onChange={e=>setEnforce(e.target.checked)}/> Enforce</label>

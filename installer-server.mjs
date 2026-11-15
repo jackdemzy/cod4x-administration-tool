@@ -370,7 +370,7 @@ const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
-  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances/:id/core", "POST /api/runtime/restore-points/:pointId/restore", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
+  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances/:id/core", "POST /api/runtime/restore-points/:pointId/restore", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core, arguments or another folder)", "POST /api/runtime/restart (core, arguments or another folder)", "POST /api/server/start (core, arguments or another folder)", "POST /api/instances/:id/clone (core or BaseGame)", "GET /api/runtime/preflight (chosen paths)", "POST /api/b3/environment"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   ...REMOTE_LINUX_BINDINGS,
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "GET /api/audit/persistent", "POST /api/audit/persist", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
@@ -1185,15 +1185,22 @@ app.get("/api/fpschallenge/anticheat/download/:version", requirePermission("upda
   if (req.params.version !== "9.2.0") return res.status(404).json({ok:false,error:"Unsupported FPSAC version"});
   const url = process.env.FPSAC_URL;
   if (!url) return res.status(503).json({ok:false,error:"FPSAC 9.2.0 download is not configured on the server"});
+  // Audit 4.18.31 (W-6, F-4): pinned like every other artifact. The file is downloaded and checked
+  // against FPSAC_SHA256 first and only then handed out, always as a download, never as a page.
+  const sha256 = String(process.env.FPSAC_SHA256 || "").trim();
+  if (!/^[a-f0-9]{64}$/i.test(sha256)) return res.status(503).json({ok:false,error:"FPSAC 9.2.0 download needs FPSAC_SHA256 (64 hex characters) on the server"});
+  let directory = null;
   try {
-    const u = allowedArtifact({url});
-    const response = await fetch(u,{redirect:"error"});
-    if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`);
-    // Audit 4.18.31 (W-6): always a download, never rendered or sniffed as a page of this origin.
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), "cod4x-fpsac-"));
+    const file = path.join(directory, "fpsac-9.2.0.zip");
+    await downloadTo(allowedArtifact({url}), file);
+    await verifyArtifact(file, {sha256});
     res.status(200).set({"Content-Type":"application/octet-stream","Content-Disposition":'attachment; filename="fpsac-9.2.0.zip"',"X-Content-Type-Options":"nosniff"});
-    await pipeline(Readable.fromWeb(response.body),res);
+    await pipeline((await import("node:fs")).createReadStream(file),res);
   } catch(e) {
     if (!res.headersSent) res.status(400).json({ok:false,error:e.message});
+  } finally {
+    if (directory) await fs.rm(directory,{recursive:true,force:true}).catch(()=>{});
   }
 });
 
