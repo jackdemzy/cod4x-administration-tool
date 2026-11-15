@@ -57,12 +57,16 @@ test('a 401 on a request with the session token ends the session and tells the l
   globalThis.localStorage = { getItem: key => store.get(key) ?? null, setItem: (key, value) => store.set(key, String(value)), removeItem: key => store.delete(key) };
   globalThis.window = { dispatchEvent: event => events.push(event.type) };
   try {
-    let status = 200, seen = null;
-    globalThis.fetch = async (_input, init) => { seen = init.headers; return { status, ok: status < 400 }; };
+    let status = 200, body = { ok: true }, seen = null;
+    globalThis.fetch = async (_input, init) => { seen = init.headers; const answer = body; return { status, ok: status < 400, clone: () => ({ json: async () => answer }) }; };
     await apiFetch('http://127.0.0.1:8787/api/instances');
     assert.equal(seen.Authorization, 'Bearer tok');
     assert.deepEqual(events, []);
-    status = 401;
+    status = 401; body = { ok: false, code: 'PASSWORD_INVALID', error: 'Passwort ungültig.' };
+    await apiFetch('http://127.0.0.1:8787/api/auth/totp/disable', { method: 'POST' });
+    assert.deepEqual(events, [], 'a wrong password for turning off TOTP keeps the session');
+    assert.equal(store.get('cod4x.auth.token'), 'tok');
+    body = { ok: false, code: 'AUTH_REQUIRED', error: 'Authentication required' };
     await apiFetch('http://127.0.0.1:8787/api/auth/login', { method: 'POST' });
     assert.deepEqual(events, [], 'a failed login is no expired session');
     assert.equal(store.get('cod4x.auth.token'), 'tok');
@@ -73,6 +77,8 @@ test('a 401 on a request with the session token ends the session and tells the l
     assert.equal(events.length, 1, 'without a token a 401 is not reported again');
   } finally { Object.assign(globalThis, saved); }
   assert.match(ui, /window\.addEventListener\(SESSION_EXPIRED_EVENT,expired\)/);
+  const server = read('installer-server.mjs');
+  assert.equal((server.match(/status\(401\)\.json\(\{ ok: false, code: "AUTH_REQUIRED", error: "Authentication required" \}\)/g) || []).length, 2, 'both session checks mark a missing session');
   assert.match(ui, /if\(!status\.ok\|\|typeof d\.initialized!=="boolean"\) throw/, 'a refused status answer is an error, not the setup form');
   assert.match(ui, /"Erneut versuchen":"Try again"/);
 });
@@ -122,7 +128,9 @@ test('Electron: one instance per session, backend output in a log file, English 
   assert.match(main, /const SINGLE_INSTANCE=app\.requestSingleInstanceLock\(\);\nif\(!SINGLE_INSTANCE\) app\.quit\(\);/);
   assert.match(main, /app\.on\('second-instance'/);
   assert.match(main, /app\.whenReady\(\)\.then\(async\(\)=>\{if\(!SINGLE_INSTANCE\)return;/);
-  assert.match(main, /stdio:\['ignore',log,log\]/);
+  assert.match(main, /stdio:\['ignore','pipe','pipe'\]/);
+  assert.match(main, /server\.stdout\.on\('data',chunk=>log\.write\(chunk\)\);/);
+  assert.match(main, /server\.stderr\.on\('data',chunk=>log\.write\(chunk\)\);/);
   assert.doesNotMatch(main, /stdio:'ignore'/);
   assert.match(main, /if\(server&&\(server\.exitCode!==null\|\|server\.signalCode!==null\)\) return resolve\(false\);/, 'never talk to a backend that is not ours');
   assert.doesNotMatch(main, /auswählen|Übernehmen|konnte nicht gestartet/);

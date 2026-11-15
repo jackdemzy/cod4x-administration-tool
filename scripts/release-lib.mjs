@@ -81,7 +81,7 @@ export const manifest = ({ version, commit, platform, entries, node = process.ve
 // Packaged app content (paths as @electron/asar lists them, with a leading slash).
 export const REQUIRED_ENTRIES = [
   '/package.json', '/installer-server.mjs', '/electron-main.cjs', '/electron-preload.cjs', '/LICENSE',
-  '/dist/index.html', '/dist/remote/remote.html', '/lib/electron-navigation-policy.cjs',
+  '/dist/index.html', '/dist/remote/remote.html', '/lib/electron-navigation-policy.cjs', '/lib/capped-log.cjs',
   '/node_modules/express/package.json', '/node_modules/ssh2/package.json', '/node_modules/tar/package.json',
   '/node_modules/adm-zip/package.json', '/node_modules/express-rate-limit/package.json',
   '/node_modules/react/package.json', '/node_modules/react-dom/package.json',
