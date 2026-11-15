@@ -129,7 +129,7 @@ test('Electron: one instance per session, backend output in a log file, English 
   assert.match(main, /app\.on\('second-instance'/);
   assert.match(main, /app\.whenReady\(\)\.then\(async\(\)=>\{if\(!SINGLE_INSTANCE\)return;/);
   assert.match(main, /stdio:\['ignore','pipe','pipe'\]/);
-  assert.match(main, /server\.stdout\.on\('data',chunk=>log\.write\(chunk\)\);/);
+  assert.match(main, /server\.stdout\.on\('data',chunk=>\{log\.write\(chunk\);/);
   assert.match(main, /server\.stderr\.on\('data',chunk=>log\.write\(chunk\)\);/);
   assert.doesNotMatch(main, /stdio:'ignore'/);
   assert.match(main, /if\(server&&\(server\.exitCode!==null\|\|server\.signalCode!==null\)\) return resolve\(false\);/, 'never talk to a backend that is not ours');

@@ -100,11 +100,11 @@ test('notifications and reverse-proxy mode on the real backend', { timeout: 6000
   assert.deepEqual(proxy.json.remote.address, { host: '127.0.0.1', port: remotePort });
   assert.ok(proxy.json.remote.caddyfile.startsWith('monitor.example.org {') && proxy.json.remote.caddyfile.includes(`reverse_proxy 127.0.0.1:${remotePort}`) && proxy.json.remote.caddyfile.includes('Strict-Transport-Security') && proxy.json.remote.caddyfile.includes('header_up -Tailscale-User-Login'));
   assert.equal((await remoteCall('/remote/api/me', null, before.cookie)).status, 401, 'changing the exposure ends remote sessions');
-  assert.equal((await remoteCall('/remote/api/login', { username: 'phone', password })).json.code, 'REMOTE_TOTP_SETUP_REQUIRED', 'viewer needs TOTP behind a public proxy');
+  assert.equal((await remoteCall('/remote/api/login', { username: 'phone', password })).json.code, 'REMOTE_LOGIN_INVALID', 'viewer needs TOTP behind a public proxy; the internet only sees a failed login (audit 4.18.31 W-5)');
   for (let i = 0; i < 5; i++) assert.equal((await remoteCall('/remote/api/login', { username: 'phone', password: 'wrong-password-123' }, null, { 'X-Forwarded-For': '203.0.113.7' })).status, 401);
   assert.equal((await remoteCall('/remote/api/login', { username: 'phone', password }, null, { 'X-Forwarded-For': '203.0.113.7' })).status, 429, 'locked after 5 failures');
-  assert.equal((await remoteCall('/remote/api/login', { username: 'phone', password }, null, { 'X-Forwarded-For': '203.0.113.8' })).json.code, 'REMOTE_TOTP_SETUP_REQUIRED', 'another client is not locked');
+  assert.equal((await remoteCall('/remote/api/login', { username: 'phone', password }, null, { 'X-Forwarded-For': '203.0.113.8' })).json.code, 'REMOTE_LOGIN_INVALID', 'another client is not locked');
   const audit = JSON.stringify((await call(admin, '/api/audit')).json);
-  for (const name of ['alert.configured', 'alert.push.subscribed', 'remote.login.locked']) assert.ok(audit.includes(name), name);
+  for (const name of ['alert.configured', 'alert.push.subscribed', 'remote.login.locked', 'REMOTE_TOTP_SETUP_REQUIRED']) assert.ok(audit.includes(name), name);
   assert.ok(!audit.includes('s'.repeat(20)) && !audit.includes(password), 'no webhook token or password in the audit');
 });

@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import * as redaction from '../lib/runtime-secret-redaction.mjs';
+import * as coreLaunchArgs from '../lib/core-launch-args.mjs';
 
 // Execute the production Runtime Manager; replace only OS/file I/O.
 // This is an audit harness, not proof of a native CoD4X lifecycle.
@@ -19,7 +20,7 @@ function harness({ queryFails = false, imagePath = 'C:\\core\\cod4x18_dedrun.exe
   let terminated = false;
   let firstStop = false;
   const context = vm.createContext({
-    stateFile: null, seedState: {}, fixedConfiguration: null, ownership: null, dependencies: {}, ...redaction,
+    stateFile: null, seedState: {}, fixedConfiguration: null, ownership: null, dependencies: {}, ...redaction, ...coreLaunchArgs,
     path: { ...path.win32, win32: path.win32 }, crypto, Buffer, console, setTimeout, process: { platform: 'win32', pid: 123, env: {} },
     SERVER_CORE_DEFINITIONS: { windows: { executable: 'cod4x18_dedrun.exe' } },
     dataPath: (...parts) => path.join('C:\\isolated-audit', ...parts),
