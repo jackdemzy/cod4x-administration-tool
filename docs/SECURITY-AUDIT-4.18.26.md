@@ -58,9 +58,9 @@ Checked without a finding: renderer isolation (`contextIsolation: true`, `nodeIn
 |----|-------|----------|-------|--------|----------|
 | A1-1 | An operator (`server.manage`) could make CONTROL run code of their choice: any executable as core (config, adopt, new instance, clone), plugins from any folder, free start arguments such as `+loadPlugin` | A2 | High | fixed | `test/security-runtime-code.test.mjs` |
 | A1-2 | A manifest file next to the core counted as proof of a verified core, and a Linux core or its folder could be writable by other users (swap after the hash check); group write is accepted only for the user's private group (umask 002) | A4 | High | fixed | `test/security-runtime-code.test.mjs` |
-| A1-3 | CONTROL itself is not refused as root/administrator; tar extraction as root keeps owners and setuid bits | A4 | Low | fixed | `test/archive-install.test.mjs` (4.18.29) |
+| A1-3 | CONTROL itself is not refused as root/administrator; tar extraction as root keeps owners and setuid bits | A4 | Low | fixed | `test/archive-install.test.mjs` (4.18.29), `test/elevation-check.test.mjs` (4.18.31, Windows administrator warning) |
 | A1-4 | Windows legacy runtime checks the PID without its creation time before stopping | A4 | Low | fixed | `test/windows-runtime-process-guard.test.mjs` (4.18.29) |
-| A1-5 | Linux stop: race between the identity check and the signal (PID reuse) | A4 | Low | issue #40 |  |
+| A1-5 | Linux stop: race between the identity check and the signal (PID reuse) | A4 | Low | fixed | `test/linux-runtime-adapter.test.mjs`, `test/pidfd-signal.test.mjs` (4.18.31; own child via its handle, adopted process via pidfd; without python3 3.9+/Linux 5.3 check-then-kill with an audit warning) |
 | A1-6 | Zip extraction follows symlinks already in the target and has no size limit | A5 | Low | fixed | `test/archive-install.test.mjs` (4.18.29) |
 | A1-7 | Artifact downloads allow `http:` (the SHA-256 pin still protects the content) and mod archives may overwrite core files in the target | A5 | Low | fixed | `test/archive-install.test.mjs` (4.18.29) |
 | A2-1 | RCON password and master token in the local core's command line, readable by every local user on Linux (`/proc/<pid>/cmdline`) | A4 | High | fixed | `test/security-local-launch-secrets.test.mjs` |
