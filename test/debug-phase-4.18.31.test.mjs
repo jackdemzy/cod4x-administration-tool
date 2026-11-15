@@ -109,7 +109,7 @@ test('every permission has an English and a German description in the UI', () =>
   assert.ok(ids.length >= 12);
   const table = ui.match(/export const RBAC_PERMISSION_TEXT=\{([\s\S]*?)\n\};/)[1];
   for (const id of ids) {
-    const row = table.match(new RegExp(`"${id.replace(/\./g, '\\.')}":\\["([^"]+)","([^"]+)"\\]`));
+    const row = table.match(new RegExp(`"${id.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}":\\["([^"]+)","([^"]+)"\\]`));
     assert.ok(row, id);
     assert.notEqual(row[1], row[2], id);
     assert.doesNotMatch(row[2], /[äöüß]| und | verwalten/, `${id}: English text`);
