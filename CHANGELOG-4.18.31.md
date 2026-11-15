@@ -15,6 +15,24 @@ Base: 4.18.30 (release candidate, not tagged yet).
 - **A1-3, Windows administrator warning.** CONTROL now also warns (console and audit entry `control.running_as_admin`) when it runs elevated on Windows (integrity level High or System in the process token, read with `whoami /groups`; no Windows service needed). Root on Linux was already reported since 4.18.29.
 - Issue #21 (minimatch in electron-builder) stays open: electron-builder 26.18.0 is still the latest version and still requires minimatch ^10.2.5 (checked 2026-11-15).
 
+## Debug phase (app started and played through)
+
+The desktop page (built `dist/`, loaded as file:// with the per-launch header, as Electron does) was driven against the real backend on Linux as a non-root user: all 12 menu items in English and German, core adopt, server create, vault, RCON (`status`, `map`, blocked `quit`), start / stop / restart, online players, master, plugins, B3 status and blocked B3 start, restore points, production backup (create, consistency, lifecycle, verify, restore), backend restart. Found and fixed:
+
+- **Blank app after leaving Tools (crash).** The GSC assistant's effect returned `scrollIntoView(...)`, which is a Promise in current Chromium; React called it as cleanup (`destroy_ is not a function`) and unmounted the whole app. The effect now returns nothing. Every page is wrapped in an error boundary: an error shows a message in that page, the menu stays usable.
+- **Session loss left the app polling with 401.** After a backend restart or an expired session every panel showed "Authentication required" and kept polling. A 401 on a request that carried the session token now drops the token and shows the login screen with a note.
+- **Audit log flooded by polling.** An open Runtime page wrote about one audit entry per second (`rbac.permission.checked` and `instance.operation` for reads), pushing real events out of the bounded log (500) and growing `audit.ndjson`. The polled reads (`/api/runtime/status`, `/api/runtime/preflight`, `/api/instances`, `/api/instances/:id/rcon`) audit denials only, and successful instance reads are no longer audited as operations. Changes and refusals are audited as before.
+- **Second app start.** There was no single-instance lock: a second start ran a second backend that failed on port 8787 ("exited with code 1") while its window talked to the first backend with the wrong per-launch secret, and the login page then showed the setup form for a new administrator. Now a second start focuses the first window; the login page treats a refused or broken status answer as an error with "Try again"; the app never talks to a backend that is not its own; the backend's output goes to `<userData>/logs/backend.log` (kept below 2 MB) instead of nowhere; the desktop dialogs are in English.
+- **Vault passphrase.** A new vault asks for the passphrase twice (it cannot be recovered) and is unlocked right after it is created; the status loads when the section is opened.
+- **Language.** Permission descriptions on the Audit page in English and German (the backend sends German only), "Registry consistency", the remember-login reason follows a later language switch, base game placeholder without doubled backslashes and with a Linux example, "Console log" instead of "Windows console log" (also shown for Linux servers).
+- **Docker tests in the Linux release job (sometimes red).** Tests against the real Docker daemon (`remote-docker-real`, `remote-docker-gate`) ran in parallel under `node --test` on the same daemon. They now run one at a time through a lock in the temp folder (`test/support/docker-fixture.mjs`). A refused `docker run` keeps Docker's reason (end of stderr, at most 2 KB, secrets blacked out) on `REMOTE_START_FAILED`; the API returns it as `output` and the Remote Linux page shows it. The getinfo wait of the scripted container test is 15 s instead of 5 s.
+
+Found, not changed:
+
+- `/api/runtime/preflight` answers HTTP 400 for a core that is not configured yet; the Runtime page asks every 2.5 s, so the browser console shows an error each time. The page handles it; changing the status code would change the API.
+- Backend error texts are mostly German (e.g. "cod4x18_dedrun wurde am ausgewählten Server-Core-Pfad nicht gefunden.", rate-limit message); a blocked B3 start shows only the code `B3_DEPENDENCIES_BLOCKED`.
+- The single-instance lock and the backend log file were checked in the source only: the Electron binary is not installed in the cloud container.
+
 ## Not changed
 
 - The phone web app (`/remote/`, `lib/remote-app.jsx`) is still German only.
@@ -22,6 +40,8 @@ Base: 4.18.30 (release candidate, not tagged yet).
 - `.github/workflows/release.yml` still lists `scripts/preflight-4.18.30.mjs` in its path filter (left alone to avoid a conflict with the open code-signing PR #59).
 
 ## Tests
+
+- `test/debug-phase-4.18.31.test.mjs` (new, also in the preflight): no effect returns an expression value, error boundary in English and German, 401 ends the session (not for a failed login), polled reads write no audit entries against the real backend (fails without the fix), vault passphrase twice, permission texts in both languages, Electron single instance and log file, Docker refusal text bounded and redacted, real-Docker lock.
 
 - `test/pidfd-signal.test.mjs` (new): the pidfd helper against the real kernel, including a pidfd held across the exit of its process (ESRCH, no signal to the PID).
 - `test/linux-runtime-adapter.test.mjs`: pidfd opened before the identity check, closed after a refused check, fallback reported, own child signalled through its handle.

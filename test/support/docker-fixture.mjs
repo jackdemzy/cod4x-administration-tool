@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRemoteFixture } from './remote-fixture.mjs';
@@ -230,16 +232,43 @@ export async function realDockerAvailable() {
   try { await run('docker', ['info', '--format', '{{.ServerVersion}}'], { timeout: 10_000 }); return true; } catch { return false; }
 }
 
+// Debug phase (4.18.31): tests against the real daemon run one at a time, also across test files.
+// `node --test` runs files in parallel; remote-docker-real and remote-docker-gate then built the same
+// image tag and started containers on the same daemon at once, and the Linux release job went red
+// now and then (REMOTE_START_FAILED from a refused `docker run`, getinfo timeouts). A directory
+// lock in the temp folder; the owner's PID in it lets a lock of a killed run be taken over.
+const REAL_DOCKER_LOCK = path.join(os.tmpdir(), 'cod4x-control-real-docker.lock');
+async function lockRealDocker({ timeoutMs = 30 * 60_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await fs.mkdir(REAL_DOCKER_LOCK);
+      await fs.writeFile(path.join(REAL_DOCKER_LOCK, 'pid'), String(process.pid));
+      return async () => { await fs.rm(REAL_DOCKER_LOCK, { recursive: true, force: true }); };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const owner = Number(await fs.readFile(path.join(REAL_DOCKER_LOCK, 'pid'), 'utf8').catch(() => '0'));
+      let alive = owner === process.pid;
+      if (owner > 0 && !alive) { try { process.kill(owner, 0); alive = true; } catch (probe) { alive = probe.code === 'EPERM'; } }
+      if (owner > 0 && !alive) { await fs.rm(REAL_DOCKER_LOCK, { recursive: true, force: true }); continue; }
+      if (Date.now() > deadline) throw new Error(`real Docker lock ${REAL_DOCKER_LOCK} not released (owner ${owner || 'unknown'})`);
+      await delay(250);
+    }
+  }
+}
+
 // The remote fixture with Docker on the "server": the scripted docker by default, the real daemon with
 // real: true. ready: the host is confirmed and the runtime image is built. install() installs as docker.
 export async function createDockerFixture(t, { mode = 'ROOTFUL', ready = true, real = false, ...options } = {}) {
+  const unlock = real ? await lockRealDocker() : null;
+  const used = new Set();
+  // Containers are removed before the lock is given to the next test.
+  if (real) t.after(async () => { try { for (const id of used) await run('docker', ['rm', '--force', `cod4x-${id}`]).catch(() => {}); } finally { await unlock(); } });
   const f = await createRemoteFixture(t, { buildCore: buildContainerCore, ...options });
   const fake = real ? null : await installFakeDocker(f.loopback, { mode });
   if (fake) f.control.session = fake.session;
   const session = f.control.session;
   const hostMode = real ? parseDockerProbe(await session.exec(dockerProbeCommand())).mode : mode;
-  const used = new Set();
-  if (real) t.after(async () => { for (const id of used) await run('docker', ['rm', '--force', `cod4x-${id}`]).catch(() => {}); });
   const buildImage = async () => {
     const result = await session.exec(imageBuildCommand({ tag: IMAGE_TAG, dockerfileSha256: DOCKERFILE_SHA256 }), { timeoutMs: 600_000, stdin: Buffer.from(DOCKERFILE) });
     if (result.code !== 0) throw new Error(`image build failed: ${result.stderr}`);

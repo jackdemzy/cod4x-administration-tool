@@ -5,13 +5,13 @@ import { sharedCredentialWarning } from './credential-warnings.mjs';
 const editors = new Set();
 const KINDS = ['rcon', 'master', 'join', 'b3db'];
 const ERROR_CODES = new Set(['VAULT_LOCKED', 'VAULT_CONFLICT', 'VAULT_EXISTS', 'VAULT_OPERATION_BUSY', 'VAULT_UNLOCK_FAILED',
-  'VAULT_PASSPHRASE_INVALID', 'CREDENTIAL_INVALID', 'INSTANCE_RUNTIME_BUSY', 'INSTANCE_OPERATION_BUSY']);
+  'VAULT_PASSPHRASE_INVALID', 'VAULT_PASSPHRASE_MISMATCH', 'CREDENTIAL_INVALID', 'INSTANCE_RUNTIME_BUSY', 'INSTANCE_OPERATION_BUSY']);
 
 // Block 18b: kinds and basePath for remote servers (rcon and b3db under /api/remote-instances/<id>).
 export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS, basePath = null, remote = false }) {
   const [credentials, setCredentials] = useState(null), [busy, setBusy] = useState(false);
   const [error, setError] = useState(''), [message, setMessage] = useState('');
-  const mounted = useRef(true), operation = useRef(false), passphrase = useRef(null);
+  const mounted = useRef(true), operation = useRef(false), passphrase = useRef(null), confirmation = useRef(null);
   const secrets = useRef({}), invalidation = useRef(null);
   const revision = useRef(0);
   const active = Boolean(instance.runtime?.pid || instance.runtime?.recoveryBlocked || ['STARTING', 'RUNNING', 'STOPPING'].includes(instance.runtime?.status));
@@ -19,6 +19,7 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
   const labels = { rcon: 'RCON', master: de ? 'Master-Token' : 'Master token', join: de ? 'Join-Passwort' : 'Join password', b3db: de ? 'B3-Datenbank-Passwort' : 'B3 database password' };
   function clearInputs() {
     if (passphrase.current) passphrase.current.value = '';
+    if (confirmation.current) confirmation.current.value = '';
     for (const input of Object.values(secrets.current)) if (input) input.value = '';
   }
   useEffect(() => {
@@ -48,10 +49,15 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
     // Uncontrolled password inputs are cleared immediately on submission. No
     // secret is placed in React state, localStorage, diagnostics or a message.
     let value = kind === 'initialize' || kind === 'unlock' ? passphrase.current?.value : secrets.current[credentialKind]?.value;
+    // Debug phase (4.18.31): the vault passphrase cannot be recovered, so a new vault asks for it twice.
+    const confirmed = kind !== 'initialize' || value === confirmation.current?.value;
     clearInputs();
     try {
+      if (!confirmed) throw Object.assign(new Error('Passphrases differ'), { code: 'VAULT_PASSPHRASE_MISMATCH' });
       if (kind !== 'load') {
         if (['initialize', 'unlock'].includes(kind)) await call(`/api/credentials/vault/${kind}`, { passphrase: value });
+        // A new vault is unlocked with the same passphrase right away instead of asking for it a third time.
+        if (kind === 'initialize') await call('/api/credentials/vault/unlock', { passphrase: value });
         else if (kind === 'lock') await call('/api/credentials/vault/lock', {});
         else {
           if (!unlocked || (active && credentialKind !== 'b3db') || !credentials.sha256) throw Object.assign(new Error('Credential operation blocked'), { code: unlocked ? 'INSTANCE_RUNTIME_BUSY' : 'VAULT_LOCKED' });
@@ -68,14 +74,14 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
       setCredentials(current);
       if ((kind === 'save' || kind === 'remove') && credentialKind === 'b3db') setMessage(de ? 'Verschlüsselt gespeichert. Die B3-Datenbank bitte erneut testen.' : 'Encrypted and saved. Please test the B3 database again.');
       else if (kind === 'save' || kind === 'remove') setMessage(de ? 'Verschlüsselt gespeichert und geprüft. Noch nicht im Server aktiv.' : 'Encrypted, saved and verified. Not active in the server yet.');
-      else if (kind === 'initialize') setMessage(de ? 'Tresor angelegt. Zum Bearbeiten entsperren.' : 'Vault created. Unlock to edit.');
+      else if (kind === 'initialize') setMessage(de ? 'Tresor angelegt und entsperrt.' : 'Vault created and unlocked.');
       else if (kind === 'unlock') setMessage(de ? 'Tresor entsperrt.' : 'Vault unlocked.');
       else if (kind === 'lock') setMessage(de ? 'Tresor gesperrt.' : 'Vault locked.');
     } catch (failure) {
       if (mounted.current) {
-        setCredentials(null);
         const code = ERROR_CODES.has(failure.code) ? failure.code : 'CREDENTIAL_OPERATION_FAILED';
-        setError((de ? 'Vorgang nicht bestätigt. Status neu laden. ' : 'Operation not confirmed. Refresh status. ') + code);
+        if (code !== 'VAULT_PASSPHRASE_MISMATCH') setCredentials(null); // nothing was sent: the status is still right
+        setError(code === 'VAULT_PASSPHRASE_MISMATCH' ? (de ? 'Die beiden Passwörter stimmen nicht überein. Nichts wurde angelegt.' : 'The two passphrases do not match. Nothing was created.') : (de ? 'Vorgang nicht bestätigt. Status neu laden. ' : 'Operation not confirmed. Refresh status. ') + code);
       }
     } finally {
       value = null; clearInputs(); operation.current = false;
@@ -83,7 +89,8 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
     }
   }
   function submit(event, kind, credentialKind) { event.preventDefault(); void action(kind, credentialKind); }
-  return <details style={{ marginTop: 12 }}>
+  // The status is loaded when the section is opened, so it never starts at "Status unknown".
+  return <details style={{ marginTop: 12 }} onToggle={event => { if (event.currentTarget.open && !credentials && !operation.current) void action('load'); }}>
     <summary>{de ? 'Zugangsdaten – verschlüsselter Tresor' : 'Credentials – encrypted vault'}</summary>
     {remote ? <p>{de ? 'Das RCON-Passwort geht beim nächsten Start als private Datei auf den Server (nur für den Server-Benutzer lesbar, Tresor muss entsperrt sein) und wird gelöscht, sobald der Core sie gelesen hat. Nur bei gestopptem Server ändern. Das B3-Datenbank-Passwort nutzt die B3-Verwaltung für die Datenbank auf dem Server.' : 'At the next start the RCON password goes to the server as a private file (readable only by the server user, the vault must be unlocked) and is deleted once the core has read it. Change it only with the server stopped. The B3 database password is used by B3 administration for the database on the server.'}</p> : <p>{de ? 'RCON-Passwort und Master-Token werden beim nächsten Start kurzlebig an den Dedicated Core übergeben (Tresor muss entsperrt sein). Der Master-Token ist optional und blockiert den Start nie. Das Join-Passwort ist noch nicht an die Runtime angebunden. „Gespeichert“ bedeutet nicht verbunden oder registriert.' : 'The RCON password and master token are passed briefly to the Dedicated Core on the next start (vault must be unlocked). The master token is optional and never blocks the start. The join password is not wired to the runtime yet. “Stored” does not mean connected or registered.'}</p>}
     <button disabled={busy} onClick={() => action('load')}>{de ? 'Status laden / aktualisieren' : 'Load / refresh status'}</button>
@@ -92,6 +99,7 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
     <p>{!credentials ? (de ? 'Status unbekannt – zuerst laden.' : 'Status unknown – load first.') : !credentials.initialized ? (de ? 'Tresor noch nicht eingerichtet.' : 'Vault not initialized.') : credentials.locked ? (de ? 'Tresor gesperrt.' : 'Vault locked.') : (de ? 'Tresor entsperrt.' : 'Vault unlocked.')}</p>
     <form onSubmit={event => submit(event, credentials?.initialized === false ? 'initialize' : 'unlock')}>
       <label>{de ? 'Separates Entsperrpasswort' : 'Separate unlock passphrase'} <input ref={passphrase} type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={busy || !credentials || unlocked} /></label>
+      {credentials?.initialized === false && <label> {de ? 'Passwort wiederholen' : 'Repeat passphrase'} <input ref={confirmation} type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={busy} /></label>}
       <button disabled={busy || !credentials || unlocked} type="submit">{credentials?.initialized === false ? (de ? 'Tresor einrichten' : 'Initialize vault') : (de ? 'Entsperren' : 'Unlock')}</button>
     </form>
     <p>{de ? 'Das Entsperrpasswort wird nicht gespeichert. Nach einem Backend-Neustart erneut entsperren. Ohne dieses Passwort ist keine Entschlüsselung möglich.' : 'The unlock passphrase is not saved. Unlock again after a backend restart. Without this passphrase the vault cannot be decrypted.'}</p>

@@ -25,7 +25,9 @@ if (regression.status !== 0) {
 }
 // 4.18.31: English is the default UI language, German stays selectable and is remembered; the
 // overview explains every menu item in both languages; Remote Linux uses the shared look.
-const uiLanguage = spawnSync(process.execPath, ["--test", "test/ui-language.test.mjs", "test/remote-hosts.test.mjs"], { encoding: "utf8" });
+// Debug phase: the faults found by playing the app through (blank app after Tools, session loss,
+// audit noise, vault passphrase, permission texts, Electron single instance, Docker refusal text).
+const uiLanguage = spawnSync(process.execPath, ["--test", "test/ui-language.test.mjs", "test/remote-hosts.test.mjs", "test/debug-phase-4.18.31.test.mjs"], { encoding: "utf8" });
 process.stdout.write(uiLanguage.stdout || "");
 process.stderr.write(uiLanguage.stderr || "");
 if (uiLanguage.status !== 0) {
