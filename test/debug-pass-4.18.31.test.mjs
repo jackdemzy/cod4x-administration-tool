@@ -118,3 +118,9 @@ test('B3: diagnostics and the security check judge the dedicated server core, no
   const security = await call('/api/security/status?platform=linux', { token: admin });
   assert.equal(security.status, 200);
 });
+
+test('B3 (Codex review): the stored runtime core only answers for its own installation and version', () => {
+  const server = read('installer-server.mjs');
+  assert.match(server, /if \(state\.executablePath && sameTarget && \(!state\.cod4x \|\| String\(state\.cod4x\) === String\(cod4x\)\)\) \{/);
+  assert.match(server, /return \{ \.\.\.await verifiedCoreStatus\(target, cod4x, platform\), platform, checked: "target" \};/);
+});

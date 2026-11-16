@@ -849,7 +849,11 @@ async function verifiedCoreStatus(target, expectedCod4x = "", platform = process
 // (stored executable, version and platform) instead of a Windows default and the client iw3mp.exe.
 async function configuredCoreStatus(target, cod4x, queryPlatform) {
   const state = defaultRuntime.state;
-  if (state.executablePath) {
+  // Codex review: the stored runtime core only answers for the installation and version it belongs to;
+  // another selected path or version is checked on its own.
+  const runtimeTarget = state.executablePath ? await resolveServerTarget(state.target || "./server").then(resolved => resolved.target, () => null) : null;
+  const sameTarget = runtimeTarget !== null && path.resolve(runtimeTarget) === path.resolve(target);
+  if (state.executablePath && sameTarget && (!state.cod4x || String(state.cod4x) === String(cod4x))) {
     const platform = normalizeServerPlatform(state.platform || queryPlatform || "windows");
     return { ...await verifiedRuntimeCoreStatus(state.executablePath, String(state.cod4x || cod4x), platform), platform, checked: "runtime" };
   }
