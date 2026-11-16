@@ -147,7 +147,8 @@ test('S-1: the desktop app waits for the ready line of its own backend, never fo
   assert.doesNotMatch(main, /require\('http'\)/);
   assert.match(main, /server\.stdout\.on\('data',chunk=>\{log\.write\(chunk\);if\(!backendListening&&readyWatcher\(chunk\)\)backendListening=true;\}\);/);
   assert.match(main, /if\(backendListening\) return resolve\(true\);/);
-  assert.match(main, /server\.on\('exit',\(code,signal\)=>\{backendListening=false;if\(!app\.isQuitting && backendReady\)\{[^\n]*app\.quit\(\);\}\}\);/, 'any end of the backend closes the app');
+  // issue #67: the backend is a utility process now ('exit' carries the code only)
+  assert.match(main, /server\.on\('exit',code=>\{serverExited=true;backendListening=false;log\.close\(\);\n[^\n]*\n    if\(!app\.isQuitting && backendReady\)\{[^\n]*app\.quit\(\);\}\}\);/, 'any end of the backend closes the app');
 });
 
 test('S-1: the backend prints the ready line after listening and exits when its port is taken', { timeout: 60000 }, async t => {

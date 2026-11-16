@@ -135,3 +135,97 @@ test('A2-7: the credential editor offers the passphrase change while the vault i
   assert.match(editor, /\{unlocked && <details/);
   assert.match(editor, /'VAULT_PASSPHRASE_UNCHANGED'\]\.includes\(code\)/);
 });
+
+import { capGameLogs, rotateGameLogs } from '../lib/game-log-rotation.mjs';
+import { gameLogsCommand } from '../lib/remote-commands.mjs';
+import { dockerCapLogsCommand } from '../lib/docker-commands.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const run = promisify(execFile);
+const TOKEN = '12345678-1234-4234-8234-123456789abc';
+
+async function home(t) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cod4x-logcap-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, 'main', 'logs'), { recursive: true });
+  return root;
+}
+
+test('A4-8: a running local server: a log above the limit is copied to .1 and emptied in place', async t => {
+  const root = await home(t), main = path.join(root, 'main');
+  await fs.writeFile(path.join(main, 'qconsole.log'), 'x'.repeat(4096));
+  await fs.writeFile(path.join(main, 'logs', 'games_mp.log'), 'small');
+  // the core keeps its handle open for appending
+  const core = await fs.open(path.join(main, 'qconsole.log'), 'a');
+  t.after(() => core.close());
+  assert.deepEqual(await capGameLogs(main, { limit: 1024 }), ['qconsole.log']);
+  await core.write('after the cap\n');
+  assert.equal(await fs.readFile(path.join(main, 'qconsole.log'), 'utf8'), 'after the cap\n', 'the core writes on at the new end');
+  assert.equal((await fs.stat(path.join(main, 'qconsole.log.1'))).size, 4096);
+  assert.equal(await fs.readFile(path.join(main, 'logs', 'games_mp.log'), 'utf8'), 'small');
+  assert.deepEqual((await fs.readdir(main)).filter(name => name.includes('.cap-')), []);
+  assert.deepEqual(await capGameLogs(main, { limit: 1024 }), [], 'below the limit nothing happens');
+});
+
+test('A4-8: the local cap never follows a link', { skip: process.platform === 'win32' ? 'symlinks need privileges on Windows' : false }, async t => {
+  const root = await home(t), main = path.join(root, 'main');
+  const outside = path.join(root, 'outside.txt');
+  await fs.writeFile(outside, 'y'.repeat(4096));
+  await fs.symlink(outside, path.join(main, 'qconsole.log'));
+  assert.deepEqual(await capGameLogs(main, { limit: 1024 }), []);
+  assert.equal((await fs.stat(outside)).size, 4096);
+  assert.equal(await fs.stat(path.join(main, 'qconsole.log.1')).catch(() => null), null);
+  assert.deepEqual(await rotateGameLogs(main, { limit: 1024 }), []);
+});
+
+test('A4-8: remote and Docker commands: fixed script, checked values, container cap runs inside the container', () => {
+  const native = gameLogsCommand('/srv/cod4/a1', 64 * 1024 * 1024, TOKEN);
+  assert.match(native, /^sh -c '[\s\S]+' sh '\/srv\/cod4\/a1\/main' 67108864 12345678-1234-4234-8234-123456789abc$/);
+  assert.match(gameLogsCommand('/srv/cod4/a1', 64 * 1024 * 1024, 'start'), / 67108864 start$/);
+  for (const bad of [['relative/home', 2048, TOKEN], ['/srv/x', 10, TOKEN], ['/srv/x', 2048, 'x; rm -rf /'], ['/srv/x', '2048', TOKEN]]) assert.throws(() => gameLogsCommand(...bad), { code: /REMOTE_(ARGUMENT|PATH)_INVALID/ });
+  const docker = dockerCapLogsCommand('a'.repeat(64), 64 * 1024 * 1024, TOKEN);
+  assert.match(docker, /^docker exec a{64} sh -c '[\s\S]+' sh \/cod4\/home\/main 67108864 /);
+  assert.throws(() => dockerCapLogsCommand('a'.repeat(64), 2048, 'start'), { code: 'REMOTE_ARGUMENT_INVALID' });
+  assert.throws(() => dockerCapLogsCommand('abc', 2048, TOKEN), { code: 'REMOTE_ARGUMENT_INVALID' });
+  // before each remote start (native and container); while running from the cap timer
+  assert.match(read('lib/remote-instance-manager.mjs'), /await session\.exec\(gameLogsCommand\(instance\.home, GAME_LOG_LIMIT_BYTES, 'start'\), \{ timeoutMs: 15_000 \}\);[^\n]*\n    if \(isDocker\(instance\)\) return this\.#launchContainer/);
+  const server = read('installer-server.mjs');
+  assert.match(server, /setInterval\(\(\) => \{ void capRunningGameLogs\(\); \}, GAME_LOG_CAP_INTERVAL_MS\)\.unref\(\);/);
+  assert.match(server, /await remoteMonitor\.capLogs\(instance\);/);
+  assert.match(server, /standard\?\.status === "RUNNING" && standard\.filesystemHomePath/);
+});
+
+test('A4-8: the remote script under sh: cap while running, rename at start, links untouched', { skip: process.platform === 'win32' ? 'POSIX sh' : false }, async t => {
+  const root = await home(t), main = path.join(root, 'main');
+  const sh = command => run('/bin/sh', ['-c', command]);
+  await fs.writeFile(path.join(main, 'qconsole.log'), 'x'.repeat(4096));
+  const core = await fs.open(path.join(main, 'qconsole.log'), 'a');
+  t.after(() => core.close());
+  await sh(gameLogsCommand(root, 1024, TOKEN));
+  await core.write('after');
+  assert.equal(await fs.readFile(path.join(main, 'qconsole.log'), 'utf8'), 'after');
+  assert.equal((await fs.stat(path.join(main, 'qconsole.log.1'))).size, 4096);
+  // a link in the home is never followed, in either mode
+  const secret = path.join(root, 'secret');
+  await fs.writeFile(secret, 's'.repeat(4096));
+  await fs.rm(path.join(main, 'qconsole.log'));
+  await fs.symlink(secret, path.join(main, 'qconsole.log'));
+  await sh(gameLogsCommand(root, 1024, '12345678-1234-4234-8234-123456789abd'));
+  await sh(gameLogsCommand(root, 1024, 'start'));
+  assert.equal((await fs.stat(secret)).size, 4096);
+  assert.equal((await fs.lstat(path.join(main, 'qconsole.log'))).isSymbolicLink(), true);
+  // a linked logs directory is skipped
+  await fs.rm(path.join(main, 'logs'), { recursive: true });
+  await fs.mkdir(path.join(root, 'other'));
+  await fs.writeFile(path.join(root, 'other', 'games_mp.log'), 'g'.repeat(4096));
+  await fs.symlink(path.join(root, 'other'), path.join(main, 'logs'));
+  await sh(gameLogsCommand(root, 1024, 'start'));
+  assert.equal((await fs.readdir(path.join(root, 'other'))).join(), 'games_mp.log');
+  // start: a big log is renamed
+  await fs.rm(path.join(main, 'qconsole.log'));
+  await fs.writeFile(path.join(main, 'qconsole.log'), 'x'.repeat(2048));
+  await sh(gameLogsCommand(root, 1024, 'start'));
+  assert.equal(await fs.stat(path.join(main, 'qconsole.log')).catch(() => null), null);
+  assert.equal((await fs.stat(path.join(main, 'qconsole.log.1'))).size, 2048);
+  assert.deepEqual((await fs.readdir(main)).filter(name => name.includes('.cap-')), []);
+});

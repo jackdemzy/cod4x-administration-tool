@@ -23,7 +23,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
-import { rotateGameLogs } from "./lib/game-log-rotation.mjs";
+import { rotateGameLogs, capGameLogs, GAME_LOG_CAP_INTERVAL_MS } from "./lib/game-log-rotation.mjs";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -3017,6 +3017,29 @@ const monitorCollector = new MonitorCollector({
   onTick: overview => monitorAlerts.handleTick(overview),
 });
 if (process.env.COD4X_MONITOR !== "off") monitorCollector.start();
+// Issue #67 (A4-8): the game logs of every running server (instances, the standard server, remote servers)
+// are capped while it keeps running, independent of monitoring. One pass at a time; a failure is logged only.
+let gameLogCapRunning = false;
+async function capRunningGameLogs() {
+  if (gameLogCapRunning) return;
+  gameLogCapRunning = true;
+  try {
+    const homes = [];
+    for (const instance of instanceStore.list()) {
+      try { if ((await instanceManager.runtime(instance.id)).state?.status === "RUNNING") homes.push(instance.homePath); } catch { /* next instance */ }
+    }
+    const standard = defaultRuntime.state;
+    if (standard?.status === "RUNNING" && standard.filesystemHomePath) homes.push(standard.filesystemHomePath);
+    for (const home of homes) {
+      const capped = await capGameLogs(path.join(home, "main")).catch(() => []);
+      if (capped.length) audit("info", "server.game_logs.capped", { logs: capped });
+    }
+    for (const instance of await remoteMonitor.listInstances().catch(() => [])) {
+      try { await remoteMonitor.capLogs(instance); } catch (error) { audit("warn", "remote.game_logs.cap_failed", { instanceId: instance.id, code: error.code || "REMOTE_COMMAND_FAILED" }); }
+    }
+  } finally { gameLogCapRunning = false; }
+}
+if (process.env.COD4X_LOG_CAP !== "off") setInterval(() => { void capRunningGameLogs(); }, GAME_LOG_CAP_INTERVAL_MS).unref();
 function monitorRoute(action) {
   return async (req, res) => {
     try { res.set("Cache-Control", "no-store").json({ ok: true, ...await action(req) }); }
