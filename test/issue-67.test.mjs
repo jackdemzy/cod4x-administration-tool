@@ -186,6 +186,15 @@ test('A4-8: the local cap never follows a link', { skip: process.platform === 'w
   assert.deepEqual(await rotateGameLogs(main, { limit: 1024 }), []);
   assert.deepEqual(await fs.readdir(elsewhere), ['games_mp.log']);
   assert.equal((await fs.stat(path.join(elsewhere, 'games_mp.log'))).size, 4096);
+  // Codex review: main itself as a link
+  const otherMain = path.join(root, 'other-main');
+  await fs.mkdir(otherMain);
+  await fs.writeFile(path.join(otherMain, 'qconsole.log'), 'q'.repeat(4096));
+  const linkedMain = path.join(root, 'linked-main');
+  await fs.symlink(otherMain, linkedMain);
+  assert.deepEqual(await capGameLogs(linkedMain, { limit: 1024 }), []);
+  assert.deepEqual(await rotateGameLogs(linkedMain, { limit: 1024 }), []);
+  assert.deepEqual(await fs.readdir(otherMain), ['qconsole.log']);
 });
 
 test('A4-8: remote and Docker commands: fixed script, checked values, container cap runs inside the container', () => {
@@ -200,7 +209,9 @@ test('A4-8: remote and Docker commands: fixed script, checked values, container 
   // before each remote start (native and container); while running from the cap timer
   assert.match(read('lib/remote-instance-manager.mjs'), /await session\.exec\(gameLogsCommand\(instance\.home, GAME_LOG_LIMIT_BYTES, 'start'\), \{ timeoutMs: 15_000 \}\);[^\n]*\n    if \(isDocker\(instance\)\) return this\.#launchContainer/);
   const server = read('installer-server.mjs');
-  assert.match(server, /setInterval\(\(\) => \{ void capRunningGameLogs\(\); \}, GAME_LOG_CAP_INTERVAL_MS\)\.unref\(\);/);
+  assert.match(server, /setInterval\(\(\) => \{ capRunningGameLogs\(\)\.catch\(error => audit\(/, 'a rejected pass never becomes an unhandled rejection');
+  assert.match(server, /try \{ local = instanceStore\.list\(\); \} catch \{ local = \[\]; \}/, 'an unready instance store does not stop the pass');
+  assert.match(read('lib/remote-commands.mjs'), /mv -f -T -- "\$f" "\$f\.1"/);
   assert.match(server, /await remoteMonitor\.capLogs\(instance\);/);
   assert.match(server, /standard\?\.status === "RUNNING" && standard\.filesystemHomePath/);
 });
@@ -224,6 +235,24 @@ test('A4-8: the remote script under sh: cap while running, rename at start, link
   await sh(gameLogsCommand(root, 1024, 'start'));
   assert.equal((await fs.stat(secret)).size, 4096);
   assert.equal((await fs.lstat(path.join(main, 'qconsole.log'))).isSymbolicLink(), true);
+  // Codex review: a .1 that links to a directory is replaced, the log never moves into that directory
+  const trap = path.join(root, 'trap');
+  await fs.mkdir(trap);
+  await fs.rm(path.join(main, 'qconsole.log'));
+  await fs.rm(path.join(main, 'qconsole.log.1'));
+  await fs.writeFile(path.join(main, 'qconsole.log'), 'x'.repeat(4096));
+  await fs.symlink(trap, path.join(main, 'qconsole.log.1'));
+  await sh(gameLogsCommand(root, 1024, '12345678-1234-4234-8234-123456789abe'));
+  assert.deepEqual(await fs.readdir(trap), []);
+  assert.equal((await fs.lstat(path.join(main, 'qconsole.log.1'))).isFile(), true);
+  await fs.rm(path.join(main, 'qconsole.log.1'));
+  await fs.symlink(trap, path.join(main, 'qconsole.log.1'));
+  await fs.writeFile(path.join(main, 'qconsole.log'), 'x'.repeat(4096));
+  await sh(gameLogsCommand(root, 1024, 'start'));
+  assert.deepEqual(await fs.readdir(trap), []);
+  assert.equal((await fs.lstat(path.join(main, 'qconsole.log.1'))).isFile(), true);
+  await fs.rm(path.join(main, 'qconsole.log.1'));
+  await fs.symlink(secret, path.join(main, 'qconsole.log'));
   // a linked logs directory is skipped
   await fs.rm(path.join(main, 'logs'), { recursive: true });
   await fs.mkdir(path.join(root, 'other'));

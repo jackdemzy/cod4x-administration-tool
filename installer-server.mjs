@@ -3025,7 +3025,10 @@ async function capRunningGameLogs() {
   gameLogCapRunning = true;
   try {
     const homes = [];
-    for (const instance of instanceStore.list()) {
+    // Codex review: an instance store that failed to load throws here; the timer must never die of it.
+    let local = [];
+    try { local = instanceStore.list(); } catch { local = []; }
+    for (const instance of local) {
       try { if ((await instanceManager.runtime(instance.id)).state?.status === "RUNNING") homes.push(instance.homePath); } catch { /* next instance */ }
     }
     const standard = defaultRuntime.state;
@@ -3039,7 +3042,7 @@ async function capRunningGameLogs() {
     }
   } finally { gameLogCapRunning = false; }
 }
-if (process.env.COD4X_LOG_CAP !== "off") setInterval(() => { void capRunningGameLogs(); }, GAME_LOG_CAP_INTERVAL_MS).unref();
+if (process.env.COD4X_LOG_CAP !== "off") setInterval(() => { capRunningGameLogs().catch(error => audit("warn", "server.game_logs.cap_failed", { code: error.code || "GAME_LOG_CAP_FAILED" })); }, GAME_LOG_CAP_INTERVAL_MS).unref();
 function monitorRoute(action) {
   return async (req, res) => {
     try { res.set("Cache-Control", "no-store").json({ ok: true, ...await action(req) }); }
