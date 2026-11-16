@@ -74,9 +74,14 @@ test('F-3: compiled Python files are removed from the B3 tree before a start, li
   await fs.writeFile(path.join(root, 'b3', 'parser.pyo'), 'evil');
   const outside = await tempDir(t);
   await fs.writeFile(path.join(outside, 'keep.pyc'), 'not ours');
-  if (process.platform !== 'win32') await fs.symlink(outside, path.join(root, 'linked'));
+  const links = process.platform !== 'win32';
+  if (links) {
+    await fs.symlink(outside, path.join(root, 'linked'));
+    // Codex review: a bytecode link is removed itself, its target stays.
+    await fs.symlink(path.join(outside, 'keep.pyc'), path.join(root, 'b3', 'forged.pyc'));
+  }
   const removed = (await removeCompiledPython(root)).map(file => file.split(path.sep).join('/')).sort();
-  assert.deepEqual(removed, ['b3/parser.pyo', 'b3/plugins/xlrstats/__init__.pyc']);
+  assert.deepEqual(removed, [...(links ? ['b3/forged.pyc'] : []), 'b3/parser.pyo', 'b3/plugins/xlrstats/__init__.pyc']);
   await fs.access(path.join(root, 'b3', 'plugins', 'xlrstats', '__init__.py'));
   await fs.access(path.join(outside, 'keep.pyc'));
   assert.deepEqual(await removeCompiledPython(path.join(root, 'missing')), []);
