@@ -2657,7 +2657,7 @@ function credentialRoute(action, status = 200) {
       const statusCode = code === "INSTANCE_NOT_FOUND" ? 404 : code === "VAULT_LOCKED" ? 423 : /CONFLICT|BUSY|VAULT_EXISTS/.test(code) ? 409 : 400;
       res.status(statusCode).json({ ok: false, correlationId, code, error: code });
     } finally {
-      if (req.body && typeof req.body === "object") { delete req.body.passphrase; delete req.body.value; }
+      if (req.body && typeof req.body === "object") { delete req.body.passphrase; delete req.body.newPassphrase; delete req.body.value; }
     }
   };
 }
@@ -2668,6 +2668,12 @@ function vaultPassphrase(req) {
 app.get("/api/credentials/vault", requirePermission("config.manage"), credentialRoute(async () => ({ vault: await credentialService.status() })));
 app.post("/api/credentials/vault/initialize", requirePermission("config.manage"), credentialRoute(async req => ({ vault: await credentialService.initialize(vaultPassphrase(req)) }), 201));
 app.post("/api/credentials/vault/unlock", requirePermission("config.manage"), credentialRoute(async req => ({ vault: await credentialService.unlock(vaultPassphrase(req)) })));
+// Issue #67 (A2-7): change the vault passphrase (re-encrypts the vault, deletes the backups under the old key).
+app.post("/api/credentials/vault/passphrase", requirePermission("config.manage"), credentialRoute(async req => {
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== "expectedSha256,newPassphrase,passphrase") throw Object.assign(new Error("CREDENTIAL_INVALID"), { code: "CREDENTIAL_INVALID" });
+  return { vault: await credentialService.changePassphrase(body) };
+}));
 app.post("/api/credentials/vault/lock", requirePermission("config.manage"), credentialRoute(async () => { credentialService.lock(); return { vault: await credentialService.status() }; }));
 app.get("/api/instances/:id/credentials", requirePermission("config.manage"), credentialRoute(async req => ({ credentials: await credentialService.instanceStatus(req.params.id) })));
 // Block 8 audit names for the master token; the generic credential event stays.

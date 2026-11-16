@@ -94,7 +94,7 @@ test('B7: B3 requirements that were not checked show "–", not a tick', { skip 
 test('B1/B4: an unlock does not fall into the save branch; a wrong passphrase keeps the status', () => {
   const editor = read('lib/instance-credential-editor.jsx');
   assert.match(editor, /else if \(kind !== 'unlock'\) \{/);
-  assert.match(editor, /\['VAULT_PASSPHRASE_MISMATCH', 'VAULT_UNLOCK_FAILED', 'VAULT_PASSPHRASE_INVALID'\]\.includes\(code\)/);
+  assert.match(editor, /\['VAULT_PASSPHRASE_MISMATCH', 'VAULT_UNLOCK_FAILED', 'VAULT_PASSPHRASE_INVALID'(?:, 'VAULT_PASSPHRASE_UNCHANGED')?\]\.includes\(code\)/);
   assert.match(editor, /Wrong unlock passphrase\. The vault stays locked\./);
 });
 
