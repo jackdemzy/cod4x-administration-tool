@@ -69,7 +69,7 @@ export function B3PluginsPanel({ data, permissions = {}, de, busy, editor, onTog
         const missing = needs.filter(need => !plugins.some(other => other.name === need && (other.source === 'fixed' || other.state === 'ENABLED')));
         return <tr key={plugin.name} style={fixed ? { opacity: 0.6 } : undefined}>
           <td>{plugin.name}</td>
-          <td>{plugin.source}</td>
+          <td>{({ fixed: de ? 'fest' : 'fixed', custom: de ? 'eigen' : 'custom', shipped: de ? 'mitgeliefert' : 'shipped' })[plugin.source] || plugin.source}</td>
           <td>{needs.length > 0 && <div>{REQUIRES[de ? 0 : 1]}: {needs.join(', ')}</div>}
             {modules.length > 0 && <div>Python: {modules.join(', ')} – {PY_NOTE[de ? 0 : 1]}</div>}
             {missing.length > 0 && <div role="alert">{b3PluginMessage('B3_PLUGIN_REQUIRES_PLUGIN', lang)} ({missing.join(', ')})</div>}</td>

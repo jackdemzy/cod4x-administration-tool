@@ -196,6 +196,7 @@ test('W-1: reading roles check the stored runtime only; probing chosen paths nee
     assert.equal(refused.json.permission, 'server.code');
   }
   assert.notEqual((await call('/api/runtime/preflight', { token: viewer })).status, 403, 'the stored runtime stays readable');
+  assert.notEqual((await call('/api/runtime/preflight?path=.%2Fserver&executablePath=&baseGamePath=&platform=linux', { token: viewer })).status, 403, 'the page\'s own default fields are no choice of a path');
   assert.notEqual((await call('/api/runtime/preflight?baseGamePath=/tmp', { token: admin })).status, 403, 'the admin may probe paths');
 });
 

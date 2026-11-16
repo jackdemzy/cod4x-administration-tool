@@ -15,6 +15,10 @@ const MESSAGES = {
   INSTANCE_RUNTIME_BUSY: ['Der Server läuft. Bitte zuerst stoppen.', 'The server is running. Stop it first.'],
   RUNTIME_CONFIGURATION_BUSY: ['Der Standard-Server läuft. Bitte zuerst stoppen.', 'The standard server is running. Stop it first.'],
   B3_RUNNING: ['B3 läuft. Bitte zuerst stoppen.', 'B3 is running. Stop it first.'],
+  // Debug pass 4.18.31 (B6): a point with the B3 database needs Python and a database setup.
+  B3_PYTHON_NOT_CONFIGURED: ['Für einen Punkt mit B3-Datenbank muss Python 2.7 unter „B3-Abhängigkeiten“ eingerichtet sein.', 'A point with the B3 database needs Python 2.7 set up under “B3 dependencies”.'],
+  B3_DATABASE_NOT_CONFIGURED: ['Für diesen Server sind noch keine B3-Datenbank-Einstellungen gespeichert.', 'No B3 database settings are saved for this server yet.'],
+  VAULT_LOCKED: ['Der Zugangsdaten-Tresor ist gesperrt. Bitte zuerst entsperren.', 'The credential vault is locked. Unlock it first.'],
 };
 const ACTIONS = {
   'config.change': ['Konfiguration', 'Configuration'], 'plugin.change': ['Plugins', 'Plugins'], 'b3.plugin.change': ['B3-Plugins', 'B3 plugins'],

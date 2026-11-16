@@ -10,6 +10,13 @@ const PROVISIONING = {
   de: { PROVISIONED: 'Passwort beim Start übergeben', NOT_CONFIGURED: 'Kein RCON-Passwort im Tresor', VAULT_LOCKED: 'Tresor war beim Start gesperrt', VAULT_UNAVAILABLE: 'Tresor nicht verfügbar', UNKNOWN: 'Übergabe unbekannt (Backend neu gestartet?)' },
   en: { PROVISIONED: 'Password passed at start', NOT_CONFIGURED: 'No RCON password in vault', VAULT_LOCKED: 'Vault was locked at start', VAULT_UNAVAILABLE: 'Vault unavailable', UNKNOWN: 'Transfer unknown (backend restarted?)' },
 };
+// Debug pass 4.18.31 (B6/B10): history codes were shown raw, and "transfer unknown" was shown
+// for a server that is not running.
+const HISTORY_CODES = {
+  de: { RCON_COMMAND_BLOCKED: 'gesperrt: dieser Befehl ist hier nicht erlaubt', RCON_TIMEOUT: 'keine Antwort', RCON_SERVER_NOT_RUNNING: 'Server läuft nicht', RCON_NOT_CONFIGURED: 'kein RCON-Passwort', RCON_UNAVAILABLE: 'RCON nicht verfügbar', RCON_PASSWORD_INVALID: 'Passwort abgelehnt' },
+  en: { RCON_COMMAND_BLOCKED: 'blocked: this command is not allowed here', RCON_TIMEOUT: 'no answer', RCON_SERVER_NOT_RUNNING: 'server not running', RCON_NOT_CONFIGURED: 'no RCON password', RCON_UNAVAILABLE: 'RCON unavailable', RCON_PASSWORD_INVALID: 'password rejected' },
+};
+export const rconHistoryNote = (code, lang) => HISTORY_CODES[lang]?.[code] ? `${HISTORY_CODES[lang][code]} (${code})` : code;
 const severity = line => /\b(?:error|fatal|failed|exception)\b/i.test(line) ? 'error' : /\b(?:warn(?:ing)?|bad rcon)\b/i.test(line) ? 'warn' : 'info';
 const COLORS = { error: '#ef4444', warn: '#f59e0b', info: 'inherit' };
 // "Clear" hides what was visible; the 64 KiB live window may have shifted since.
@@ -90,12 +97,12 @@ export function InstanceRconConsole({ instance, request, de, basePath = null, re
     for (const text of afterClear(String(instance.runtime?.output?.stdout || ''), cleared?.runtime).split('\n')) if (text) result.push({ source: 'runtime', at: null, text });
     for (const entry of [...(rcon?.history || [])].reverse()) {
       if (cleared && entry.at <= cleared.at) continue;
-      result.push({ source: 'rcon', at: entry.at, text: `> ${entry.command}${entry.ok ? '' : ` [${entry.code}]`}` });
+      result.push({ source: 'rcon', at: entry.at, text: `> ${entry.command}${entry.ok ? '' : ` [${rconHistoryNote(entry.code, lang)}]`}` });
       for (const text of String(entry.response || '').split('\n')) if (text) result.push({ source: 'rcon', at: entry.at, text });
     }
     const needle = filter.toLowerCase();
     return result.filter(line => (source === 'all' || line.source === source) && (!needle || line.text.toLowerCase().includes(needle)));
-  }, [instance.consoleLog?.text, instance.runtime?.output?.stdout, rcon?.history, filter, source, cleared]);
+  }, [instance.consoleLog?.text, instance.runtime?.output?.stdout, rcon?.history, filter, source, cleared, lang]);
   useEffect(() => { if (autoScroll && output.current) output.current.scrollTop = output.current.scrollHeight; }, [lines, autoScroll]);
   function exportLog() {
     const blob = new Blob([buildConsoleExport({ instance, rcon, lines })], { type: 'text/plain;charset=utf-8' });
@@ -107,7 +114,7 @@ export function InstanceRconConsole({ instance, request, de, basePath = null, re
   const status = rcon?.status || 'DISCONNECTED';
   return <details style={{ marginTop: 12 }}>
     <summary>{de ? 'Server-Konsole · RCON' : 'Server console · RCON'} · {STATUS_LABELS[lang][status] || status}</summary>
-    <p>{remote ? (de ? 'RCON über SSH auf dem Server, dort an 127.0.0.1:' : 'RCON over SSH on the server, there to 127.0.0.1:') : (de ? 'RCON nur über 127.0.0.1:' : 'RCON via 127.0.0.1:')}{instance.port}. {PROVISIONING[lang][rcon?.provisioning || 'UNKNOWN']}. {de ? 'Erlaubt sind nur kontrollierte Befehle; der Server läuft unabhängig von dieser Konsole weiter.' : 'Only controlled commands are allowed; the server keeps running independently of this console.'}</p>
+    <p>{remote ? (de ? 'RCON über SSH auf dem Server, dort an 127.0.0.1:' : 'RCON over SSH on the server, there to 127.0.0.1:') : (de ? 'RCON nur über 127.0.0.1:' : 'RCON via 127.0.0.1:')}{instance.port}. {running ? PROVISIONING[lang][rcon?.provisioning || 'UNKNOWN'] : STATUS_LABELS[lang].OFFLINE}. {de ? 'Erlaubt sind nur kontrollierte Befehle; der Server läuft unabhängig von dieser Konsole weiter.' : 'Only controlled commands are allowed; the server keeps running independently of this console.'}</p>
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
       <span role="status">{STATUS_LABELS[lang][status] || status}{rcon?.latencyMs != null ? ` · ${rcon.latencyMs} ms` : ''}{rcon?.failures ? ` · ${de ? 'Fehlversuche' : 'failures'} ${rcon.failures}` : ''}{rcon?.server?.mapname ? ` · ${rcon.server.mapname}` : ''}</span>
       <button type="button" disabled={busy || !running} onClick={connect}>{status === 'CONNECTED' ? (de ? 'Verbindung prüfen' : 'Check connection') : 'Reconnect'}</button>

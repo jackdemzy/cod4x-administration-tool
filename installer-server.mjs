@@ -843,6 +843,17 @@ async function verifiedCoreStatus(target, expectedCod4x = "", platform = process
  * Keep that path contract explicit so preflight, adoption and start all use
  * exactly the same verification target.
  */
+// Debug pass 4.18.31 (B3): the security check and diagnostics judge the core the runtime really uses
+// (stored executable, version and platform) instead of a Windows default and the client iw3mp.exe.
+async function configuredCoreStatus(target, cod4x, queryPlatform) {
+  const state = defaultRuntime.state;
+  if (state.executablePath) {
+    const platform = normalizeServerPlatform(state.platform || queryPlatform || "windows");
+    return { ...await verifiedRuntimeCoreStatus(state.executablePath, String(state.cod4x || cod4x), platform), platform, checked: "runtime" };
+  }
+  const platform = normalizeServerPlatform(queryPlatform || (process.platform === "win32" ? "windows" : "linux"));
+  return { ...await verifiedCoreStatus(target, cod4x, platform), platform, checked: "target" };
+}
 async function verifiedRuntimeCoreStatus(executablePath, expectedCod4x = "", platform = process.platform === "win32" ? "windows" : "linux") {
   const normalizedExecutable = normalizeRuntimeExecutablePath(executablePath, platform);
   const coreDirectory = path.dirname(normalizedExecutable);
@@ -1252,7 +1263,7 @@ app.get("/api/security/status", requirePermission("diagnostics.read"), async (re
     const pathInsideRoot = target === INSTALL_ROOT || target.startsWith(INSTALL_ROOT + path.sep);
     const versionAllowed = policyState.security.allowedCod4xVersions.includes(cod4x);
     const targetAllowed = policyState.security.targets.includes(targetType);
-    const core = await verifiedCoreStatus(target, cod4x, String(req.query.platform || "windows"));
+    const core = await configuredCoreStatus(target, cod4x, req.query.platform);
     const checks = [
       { id: "path", label: "Installation root boundary", pass: pathInsideRoot },
       { id: "traversal", label: "Path traversal protection", pass: true },
@@ -1833,9 +1844,12 @@ app.get("/api/diagnostics", requirePermission("diagnostics.read"), async (req, r
       try { await fs.access(target); add("target-exists", "Install target", "pass", "Directory exists."); }
       catch { add("target-exists", "Install target", "warn", "Directory does not exist yet."); }
 
-      const exe = assertSafeChildPath(target, "iw3mp.exe");
-      try { await fs.access(exe); add("verified-core", "Verified-Core", "pass", "iw3mp.exe is present."); }
-      catch { add("verified-core", "Verified-Core", "warn", "iw3mp.exe was not found; an installation/verification is still required."); }
+      // Debug pass 4.18.31 (B3): the dedicated core of the runtime, not the client iw3mp.exe.
+      try {
+        const core = await configuredCoreStatus(target, cod4x, req.query.platform);
+        if (core.verified) add("verified-core", "Verified-Core", "pass", `${serverCoreDefinition(core.platform).executable} is verified (CoD4x ${core.manifest?.cod4x || cod4x}).`);
+        else add("verified-core", "Verified-Core", "warn", `${serverCoreDefinition(core.platform).executable} is not verified yet${core.reasons?.length ? `: ${core.reasons.join("; ")}` : "."}`);
+      } catch (e) { add("verified-core", "Verified-Core", "warn", `Server core could not be checked: ${e.message}`); }
 
       const manifestPath = assertSafeChildPath(target, "cod4x-control-manifest.json");
       try {
@@ -1984,8 +1998,9 @@ app.get("/api/runtime/search",requirePermission("diagnostics.read"),async(_req,r
 // Audit 4.18.31 (W-1): reading roles check the stored runtime only. Probing chosen paths (which on
 // Windows may be UNC shares and hand the account's NTLM credentials to another host) needs server.code,
 // like saving them does.
-const RUNTIME_PREFLIGHT_PATH_PARAMS=["path","executablePath","baseGamePath"];
-app.get("/api/runtime/preflight",requirePermission("diagnostics.read",{quietAllowed:true}),async(req,res)=>{if(RUNTIME_PREFLIGHT_PATH_PARAMS.some(key=>req.query[key]!==undefined&&String(req.query[key]).trim()!=="")&&!hasPermission(req.auth?.role,"server.code")){audit("warn","rbac.permission.checked",{username:req.auth?.username,role:req.auth?.role,permission:"server.code",allowed:false});return res.status(403).json({ok:false,error:"Permission denied",permission:"server.code",role:req.auth?.role});}try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform}),core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);res.json({ok:core.verified&&baseGame.valid,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
+// The page always sends its fields; a value equal to the stored one is no choice of its own.
+const preflightChoosesPath=query=>choosesOtherPath(query.path,defaultRuntime.state.target||"./server")||choosesOtherPath(query.executablePath,defaultRuntime.state.executablePath)||choosesOtherPath(query.baseGamePath,defaultRuntime.state.baseGamePath);
+app.get("/api/runtime/preflight",requirePermission("diagnostics.read",{quietAllowed:true}),async(req,res)=>{if(preflightChoosesPath(req.query)&&!hasPermission(req.auth?.role,"server.code")){audit("warn","rbac.permission.checked",{username:req.auth?.username,role:req.auth?.role,permission:"server.code",allowed:false});return res.status(403).json({ok:false,error:"Permission denied",permission:"server.code",role:req.auth?.role});}try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform}),core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);res.json({ok:core.verified&&baseGame.valid,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
 // Puts the runtime record of a restore point back (only the configuration fields; process fields such
 // as status and pid stay as they are).
 const RUNTIME_RECORD_FIELDS=["target","platform","resolvedTarget","runtimeRoot","executablePath","executable","cod4x","baseGamePath","updatedAt"];

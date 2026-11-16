@@ -3,8 +3,23 @@ import { useEffect, useRef, useState } from 'react';
 const STATUS_TEXT = {
   OK: ['erfüllt', 'satisfied'], MISSING: ['fehlt', 'missing'], INCOMPATIBLE: ['inkompatibel', 'incompatible'],
   OPTIONAL_MISSING: ['optional, fehlt', 'optional, missing'], UNAUDITED: ['weicht vom geprüften Stand ab', 'differs from audited source'],
-  NOT_CHECKED: ['folgt in späterem Block', 'checked in a later block'], UNVERIFIED: ['nur nativ prüfbar', 'native test required'],
+  NOT_CHECKED: ['hier nicht geprüft', 'not checked here'], UNVERIFIED: ['nur nativ prüfbar', 'native test required'],
 };
+// Debug pass 4.18.31 (B6): codes in the Found/detail column and save errors were shown raw.
+export const B3_DEPENDENCY_MESSAGES = {
+  B3_PYTHON_PATH_INVALID: ['Ungültiger Python-Pfad: absoluter Pfad auf python, python2, python2.7 (bzw. .exe).', 'Invalid Python path: an absolute path to python, python2 or python2.7 (or .exe).'],
+  B3_PYTHON_NOT_FOUND: ['Unter diesem Pfad liegt keine Python-Datei.', 'There is no Python file at this path.'],
+  B3_PYTHON_PROBE_FAILED: ['Der Interpreter ließ sich nicht prüfen (startet nicht oder ist kein Python 2.7).', 'The interpreter could not be probed (does not start or is not Python 2.7).'],
+  B3_PYTHON_PROBE_INVALID: ['Der Interpreter gab keine verwertbare Antwort.', 'The interpreter gave no usable answer.'],
+  B3_PYTHON_NOT_CONFIGURED: ['Python 2.7 ist noch nicht eingerichtet.', 'Python 2.7 is not configured yet.'],
+  B3_SOURCE_PATH_INVALID: ['Ungültiger eBc-B3-Pfad (absoluter Pfad ohne Steuerzeichen).', 'Invalid eBc-B3 path (absolute path without control characters).'],
+  B3_SOURCE_NOT_FOUND: ['Das eBc-B3-Verzeichnis existiert nicht oder ist kein Ordner.', 'The eBc-B3 directory does not exist or is not a folder.'],
+  B3_SOURCE_NOT_CONFIGURED: ['Der eBc-B3-Pfad ist noch nicht eingerichtet.', 'The eBc-B3 path is not configured yet.'],
+  B3_PATH_WRITABLE_BY_OTHERS: ['Andere Benutzer dürfen in diesen Pfad schreiben. Rechte einschränken.', 'Other users may write to this path. Restrict its permissions.'],
+  B3_ENVIRONMENT_INVALID: ['Ungültige B3-Einstellungen.', 'Invalid B3 settings.'],
+  CHECKED_PER_INSTANCE: ['wird je Server unter „B3-Datenbank“ geprüft', 'checked per server under “B3 database”'],
+};
+export const b3DependencyMessage = (code, de) => (B3_DEPENDENCY_MESSAGES[code] ? B3_DEPENDENCY_MESSAGES[code][de ? 0 : 1] : code);
 const OVERALL_TEXT = {
   BLOCKED: ['Blockiert – B3 kann so nicht gestartet werden.', 'Blocked – B3 cannot be started like this.'],
   UNAUDITED: ['Quellstand weicht vom Audit ab – vor Nutzung erneut prüfen.', 'Source differs from the audit – review before use.'],
@@ -21,7 +36,7 @@ export function B3DependencyTable({ dependencies, de }) {
       <thead><tr><th>{de ? 'Komponente' : 'Component'}</th><th>{de ? 'Anforderung' : 'Requirement'}</th><th>{de ? 'Pflicht' : 'Required'}</th><th>{de ? 'Gefunden' : 'Found'}</th><th>Status</th></tr></thead>
       <tbody>{dependencies.results.map(item => <tr key={item.id}>
         <td>{item.component}</td><td>{item.requirement}</td><td>{item.required ? (de ? 'ja' : 'yes') : (de ? 'optional' : 'optional')}</td>
-        <td>{item.found || '–'}</td><td>{item.status} – {text(STATUS_TEXT, item.status)}{item.detail && <> ({item.detail})</>}</td>
+        <td>{item.found || '–'}</td><td>{item.status} – {text(STATUS_TEXT, item.status)}{item.detail && <> ({b3DependencyMessage(item.detail, de)})</>}</td>
       </tr>)}</tbody>
     </table>
     {dependencies.blockedSql?.length > 0 && <p>{de ? 'Nie automatisch ausgeführt (destruktives SQL)' : 'Never run automatically (destructive SQL)'}: {dependencies.blockedSql.join(', ')}</p>}
@@ -68,7 +83,7 @@ export function B3DependencyPanel({ request, de }) {
       <button disabled={busy} onClick={save}>{de ? 'Speichern' : 'Save'}</button>
       <button disabled={busy} onClick={check}>{de ? 'Abhängigkeiten prüfen' : 'Check dependencies'}</button>
     </>}
-    {error && <p role="alert">{error}</p>}
+    {error && <p role="alert">{b3DependencyMessage(error, de)}</p>}
     <B3DependencyTable dependencies={dependencies} de={de}/>
   </details>;
 }

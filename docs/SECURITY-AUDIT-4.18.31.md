@@ -76,7 +76,24 @@ One Medium and one Low finding fixed, one Low finding tracked in issue #67. `npm
 
 ## Debug pass
 
-See the pull request of this audit for the list of faults found while playing the app through and their fixes.
+The app was played through against the real backend in English and German, as admin and as operator, with a fake core: first run, login, TOTP, all menus, server lifecycle (create, start, restart, stop, clone, archive), config editor, RCON console, vault, backups, restore points, users, B3 panels, remote hosts, remote gateway and the mobile `/remote/` page at 390 px. No page crashed, no React error, no endless polling. Regression tests: `test/debug-pass-4.18.31.test.mjs` and `test/monitor.test.mjs`.
+
+| ID | Fault | Fix |
+|----|-------|-----|
+| B1 | Unlocking the vault in the instance credential editor ended with "VAULT_LOCKED": the unlock fell into the save branch | unlock ends after the unlock call |
+| B2 | A cleanly stopped server stayed "Not answering" in the monitor until the backend restarted | a planned stop clears the outage state |
+| B3 | Diagnostics and the security check judged the client `iw3mp.exe` and a Windows default instead of the stored dedicated core | both use the stored runtime core, version and platform |
+| B4 | A wrong unlock passphrase cleared the vault status and showed a raw code | status kept, clear message |
+| B5 | German UI showed English text (login errors, server config, security, master list, B3 plugin source) | translated in the frontend; backend messages stay English by design |
+| B6 | Raw codes without a message (remote hosts, B3 dependencies, restore points, RCON history, "PLANNED_BLOCK_14") | messages added; the MySQL rows now say they are checked per server |
+| B7 | B3 requirements showed a tick for checks that only run with hiding switched on | shown as "–" with a note |
+| B8 | Operators saw three audit panels that only said "Permission denied" | shown only to roles with `audit.read` |
+| B9 | The first runtime preflight went out with platform `windows` before the stored state loaded (400 for a Linux core) | the stored runtime is read first |
+| B10 | "UDP-Port" in English, RCON "transfer unknown" for a stopped server | fixed |
+
+Left open (cosmetic, no fault in function): the instance card in Runtime uses browser-default controls; remote host errors appear at the top of the page, far from the form; fs_homepath is shown both absolute and relative in the legacy block; "Mods" and "Version Manager" open the same view; creating a B3 plugin from the template shows no success message; `UserAdministrationPanel` holds unused lifecycle helpers; the Runtime page logs a console error every 2.5 s while no core is installed (accepted in the 4.18.31 debug phase).
+
+Not testable here: Windows, real Docker and SSH hosts, a real B3 with Python 2.7 and MySQL, kicking a live player, and the remote actions that need a running remote server.
 
 ## Native checks
 
