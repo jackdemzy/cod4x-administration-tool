@@ -24,9 +24,9 @@ registerRemoteLinuxRoutes({ app: fakeApp, requirePermission: permission => ({ pe
 const bound = new Map(REMOTE_LINUX_BINDINGS.flatMap(entry => entry.routes.map(route => [route, entry.permission])));
 const plain = registered.filter(entry => typeof entry.route === "string");
 const exec = remoteFiles.flatMap(file => [...code(file).matchAll(/\bsession\.exec\(\s*(\w+\()?/g)].map(match => [file, match[1] ? match[1].slice(0, -1) : "<not a builder>"]));
-const BUILDERS = ["probeCommand", "makeDirectoriesCommand", "startCoreCommand", "signalCommand", "getinfoProbeCommand", "diskFreeCommand", "statCommand", "recoverHomeCommand", "removeRconFilesCommand", "rconExchangeCommand", "getstatusProbeCommand", "consoleTailCommand"];
+const BUILDERS = ["probeCommand", "makeDirectoriesCommand", "startCoreCommand", "signalCommand", "getinfoProbeCommand", "diskFreeCommand", "statCommand", "recoverHomeCommand", "removeRconFilesCommand", "rconExchangeCommand", "getstatusProbeCommand", "consoleTailCommand", "gameLogsCommand"];
 // Block 19 (4.18.25): the docker command lines have their own builder module with the same rules.
-const DOCKER_BUILDERS = ["dockerProbeCommand", "imageInspectCommand", "imageBuildCommand", "runContainerCommand", "inspectContainerCommand", "stopContainerCommand", "removeContainerCommand", "containerLogsCommand"];
+const DOCKER_BUILDERS = ["dockerProbeCommand", "imageInspectCommand", "imageBuildCommand", "runContainerCommand", "inspectContainerCommand", "stopContainerCommand", "removeContainerCommand", "containerLogsCommand", "dockerCapLogsCommand"];
 const exported = (file, builder) => read(file).includes(`export function ${builder}`) || read(file).includes(`export const ${builder}`);
 const transport = code("lib/ssh-transport.mjs");
 const server = read("installer-server.mjs");
