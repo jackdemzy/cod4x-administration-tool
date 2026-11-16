@@ -176,6 +176,16 @@ test('A4-8: the local cap never follows a link', { skip: process.platform === 'w
   assert.equal((await fs.stat(outside)).size, 4096);
   assert.equal(await fs.stat(path.join(main, 'qconsole.log.1')).catch(() => null), null);
   assert.deepEqual(await rotateGameLogs(main, { limit: 1024 }), []);
+  // Codex review: a linked logs folder is not followed either (neither cap nor rename)
+  const elsewhere = path.join(root, 'elsewhere');
+  await fs.mkdir(elsewhere);
+  await fs.writeFile(path.join(elsewhere, 'games_mp.log'), 'g'.repeat(4096));
+  await fs.rm(path.join(main, 'logs'), { recursive: true });
+  await fs.symlink(elsewhere, path.join(main, 'logs'));
+  assert.deepEqual(await capGameLogs(main, { limit: 1024 }), []);
+  assert.deepEqual(await rotateGameLogs(main, { limit: 1024 }), []);
+  assert.deepEqual(await fs.readdir(elsewhere), ['games_mp.log']);
+  assert.equal((await fs.stat(path.join(elsewhere, 'games_mp.log'))).size, 4096);
 });
 
 test('A4-8: remote and Docker commands: fixed script, checked values, container cap runs inside the container', () => {
