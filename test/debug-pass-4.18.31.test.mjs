@@ -85,6 +85,10 @@ test('B7: B3 requirements that were not checked show "–", not a tick', { skip 
   assert.doesNotMatch(off, /✔ B3 auth plugin present/);
   const on = render(React.createElement(B3IntegrationPanel, { data: { ...data, settings: { ...data.settings, hideCommands: true }, plan: { blockers: [{ code: 'B3_AUTH_PLUGIN_MISSING' }], warnings: [] } }, canManage: true, de: false, busy: false, onSave() {}, onSetPassword() {} }));
   assert.match(on, /<li>✖ B3 auth plugin present<\/li>/);
+  // Codex review: with the auth plugin missing the prefix was never read, so no tick for it.
+  assert.match(on, /<li>– B3 command prefix is &quot;!&quot; \(plugin_admin\.ini\) \(not checked\)<\/li>/);
+  const read2 = render(React.createElement(B3IntegrationPanel, { data: { ...data, prefixChecked: true, settings: { ...data.settings, hideCommands: true } }, canManage: true, de: false, busy: false, onSave() {}, onSetPassword() {} }));
+  assert.match(read2, /<li>✔ B3 command prefix is &quot;!&quot; \(plugin_admin\.ini\)<\/li>/);
 });
 
 test('B1/B4: an unlock does not fall into the save branch; a wrong passphrase keeps the status', () => {

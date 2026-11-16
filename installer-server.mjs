@@ -23,6 +23,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
+import { rotateGameLogs } from "./lib/game-log-rotation.mjs";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -2616,6 +2617,8 @@ runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
     error.code = "INSTANCE_LEGACY_HOME_BLOCKED";
     throw error;
   }
+  // Codex review (A1-10): the standard server's game logs are rotated before each start too.
+  await rotateGameLogs(path.join(filesystemHomePath, "main"));
 };
 
 function instanceRoute(action, status = 200) {
@@ -2870,7 +2873,7 @@ async function b3IntegrationView(id, full = false) {
   const own = await credentialService.instanceStatus(id);
   const hints = restartHints({ plan: view.plan, credentialDigest: own.digest, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null, pluginsRevision: instanceStore.get(id).b3PluginsRevision });
   const status = await credentialService.instanceStatus(id);
-  return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: full ? vault.sha256 : null } };
+  return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, prefixChecked: view.prefixChecked === true, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: full ? vault.sha256 : null } };
 }
 app.get("/api/instances/:id/b3/integration", requirePermission("diagnostics.read"), instanceRoute(async req => ({ integration: await b3IntegrationView(req.params.id, hasPermission(req.auth.role, "config.manage")) })));
 app.post("/api/instances/:id/b3/integration", requirePermission("config.manage"), instanceRoute(async req => {

@@ -289,3 +289,8 @@ test('Codex review: the stored executable is no code change; the FPSAC download 
   assert.match(server, /if \(fpsacDownloadBusy\) return res\.status\(429\)/);
   assert.match(server, /done\(maxBytes && received > maxBytes \? new Error/);
 });
+
+test('Codex review: the standard server rotates its game logs before a start as well', () => {
+  const server = readFileSync(new URL('../installer-server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /runtimeDependencies\.beforeLaunch = async \(\{ filesystemHomePath \}\) => \{[\s\S]{0,700}await rotateGameLogs\(path\.join\(filesystemHomePath, "main"\)\);/);
+});
