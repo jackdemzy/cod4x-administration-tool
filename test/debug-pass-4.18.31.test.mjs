@@ -40,6 +40,10 @@ test('B6: B3 dependency errors and the MySQL rows are explained, not shown as co
   assert.ok(dependencies.results.every(item => !String(item.detail || '').startsWith('PLANNED_')), 'no developer wording such as PLANNED_BLOCK_14');
   const html = render(React.createElement(B3DependencyTable, { dependencies, de: false }));
   assert.match(html, /checked per server under “B3 database”/);
+  // Codex review: GSCLIB is checked nowhere, so it must not claim a per-server check.
+  assert.equal(dependencies.results.find(item => item.id === 'gsclib').detail, 'OPERATOR_DECISION');
+  assert.equal(dependencies.results.find(item => item.id === 'mysql-server').detail, 'CHECKED_PER_INSTANCE');
+  assert.equal(dependencies.results.find(item => item.id === 'rcon').detail, 'SET_UP_AT_B3_START');
   assert.doesNotMatch(html, /later block|PLANNED_/);
   assert.match(read('lib/b3-dependency-panel.jsx'), /<p role="alert">\{b3DependencyMessage\(error, de\)\}<\/p>/);
 });

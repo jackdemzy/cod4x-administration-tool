@@ -18,6 +18,8 @@ export const B3_DEPENDENCY_MESSAGES = {
   B3_PATH_WRITABLE_BY_OTHERS: ['Andere Benutzer dürfen in diesen Pfad schreiben. Rechte einschränken.', 'Other users may write to this path. Restrict its permissions.'],
   B3_ENVIRONMENT_INVALID: ['Ungültige B3-Einstellungen.', 'Invalid B3 settings.'],
   CHECKED_PER_INSTANCE: ['wird je Server unter „B3-Datenbank“ geprüft', 'checked per server under “B3 database”'],
+  SET_UP_AT_B3_START: ['wird je Server beim B3-Start eingerichtet', 'set up per server when B3 starts'],
+  OPERATOR_DECISION: ['nicht von CONTROL geprüft, eigene Entscheidung', 'not checked by CONTROL, your own decision'],
 };
 export const b3DependencyMessage = (code, de) => (B3_DEPENDENCY_MESSAGES[code] ? B3_DEPENDENCY_MESSAGES[code][de ? 0 : 1] : code);
 const OVERALL_TEXT = {

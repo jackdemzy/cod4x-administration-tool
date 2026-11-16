@@ -263,3 +263,20 @@ test('A5-14: the legacy RCON route refuses line breaks and control bytes', { tim
     assert.match(refused.json.error, /not allowed/);
   }
 });
+
+test('S-6 (Codex review): a stale-lock takeover never removes a live replacement', async t => {
+  const { takeOverStaleLock } = await import('../lib/credential-vault-storage.mjs');
+  const root = await tempDir(t);
+  const lock = path.join(root, '.operation.lock');
+  await fs.writeFile(lock, '999999', { mode: 0o600 });
+  const stale = await fs.stat(lock);
+  // Another process took the stale lock over first and holds a fresh one.
+  await fs.unlink(lock);
+  await fs.writeFile(lock, String(process.pid), { mode: 0o600 });
+  assert.equal(await takeOverStaleLock(lock, stale, 999999), false, 'the replacement is not the lock judged stale');
+  assert.equal(await fs.readFile(lock, 'utf8'), String(process.pid), 'the live lock is back in place');
+  assert.deepEqual((await fs.readdir(root)).sort(), ['.operation.lock'], 'nothing is left aside');
+  await fs.writeFile(lock, '999999');
+  assert.equal(await takeOverStaleLock(lock, await fs.stat(lock), 999999), true, 'the lock judged stale is removed');
+  assert.deepEqual(await fs.readdir(root), []);
+});
