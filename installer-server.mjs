@@ -22,7 +22,7 @@ import os from "node:os";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -358,7 +358,8 @@ function requireCodeWhen(bringsCode) {
 // Audit 4.18.31 (F-1): a server folder or BaseGame folder of the caller's choice brings code too (iwd/GSC
 // content, plugins next to it), so choosing one other than the stored one needs server.code.
 const choosesOtherPath = (value, stored) => value !== undefined && value !== null && String(value).trim() !== "" && String(value).trim() !== String(stored ?? "").trim();
-const runtimeBringsCode = body => Boolean(body.executablePath) || (body.args !== undefined && !(Array.isArray(body.args) && body.args.length === 0)) || choosesOtherPath(body.path, defaultRuntime.state.target) || choosesOtherPath(body.baseGamePath, defaultRuntime.state.baseGamePath);
+// Codex review: the page always sends the stored executable; only another one brings code.
+const runtimeBringsCode = body => choosesOtherPath(body.executablePath, defaultRuntime.state.executablePath) || (body.args !== undefined && !(Array.isArray(body.args) && body.args.length === 0)) || choosesOtherPath(body.path, defaultRuntime.state.target) || choosesOtherPath(body.baseGamePath, defaultRuntime.state.baseGamePath);
 const cloneBringsCode = body => body.serverCore !== undefined || body.basePath !== undefined;
 
 const RBAC_ENDPOINT_BINDINGS = Object.freeze([
@@ -912,10 +913,14 @@ async function sha256(file) {
 
 const allowedArtifact = artifactUrl; // https only (security audit 4.18.26, A1-7)
 
-async function downloadTo(url, target) {
-  const response = await fetch(url, { redirect: "error" });
+// maxBytes/timeoutMs (Codex review of audit 4.18.31): a download handed out through the API is bounded.
+async function downloadTo(url, target, { maxBytes = 0, timeoutMs = 0 } = {}) {
+  const response = await fetch(url, { redirect: "error", ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}) });
   if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`);
-  await pipeline(Readable.fromWeb(response.body), (await import("node:fs")).createWriteStream(target));
+  if (maxBytes && Number(response.headers.get("content-length") || 0) > maxBytes) throw new Error(`Download refused: larger than ${maxBytes} bytes`);
+  let received = 0;
+  const limit = new Transform({ transform(chunk, _encoding, done) { received += chunk.length; done(maxBytes && received > maxBytes ? new Error(`Download refused: larger than ${maxBytes} bytes`) : null, chunk); } });
+  await pipeline(Readable.fromWeb(response.body), limit, (await import("node:fs")).createWriteStream(target));
 }
 
 async function verifyArtifact(file, entry) {
@@ -1192,6 +1197,9 @@ app.get("/api/fpschallenge/anticheat/catalog", async (_req, res) => {
   });
 });
 
+// Codex review: one FPSAC download at a time, at most 128 MiB and 2 minutes.
+const FPSAC_MAX_BYTES = 128 * 1024 * 1024, FPSAC_TIMEOUT_MS = 120000;
+let fpsacDownloadBusy = false;
 app.get("/api/fpschallenge/anticheat/download/:version", requirePermission("update.execute"), async (req,res) => {
   if (req.params.version !== "9.2.0") return res.status(404).json({ok:false,error:"Unsupported FPSAC version"});
   const url = process.env.FPSAC_URL;
@@ -1200,17 +1208,20 @@ app.get("/api/fpschallenge/anticheat/download/:version", requirePermission("upda
   // against FPSAC_SHA256 first and only then handed out, always as a download, never as a page.
   const sha256 = String(process.env.FPSAC_SHA256 || "").trim();
   if (!/^[a-f0-9]{64}$/i.test(sha256)) return res.status(503).json({ok:false,error:"FPSAC 9.2.0 download needs FPSAC_SHA256 (64 hex characters) on the server"});
+  if (fpsacDownloadBusy) return res.status(429).json({ok:false,code:"FPSAC_DOWNLOAD_BUSY",error:"An FPSAC download is already running"});
+  fpsacDownloadBusy = true;
   let directory = null;
   try {
     directory = await fs.mkdtemp(path.join(os.tmpdir(), "cod4x-fpsac-"));
     const file = path.join(directory, "fpsac-9.2.0.zip");
-    await downloadTo(allowedArtifact({url}), file);
+    await downloadTo(allowedArtifact({url}), file, { maxBytes: FPSAC_MAX_BYTES, timeoutMs: FPSAC_TIMEOUT_MS });
     await verifyArtifact(file, {sha256});
     res.status(200).set({"Content-Type":"application/octet-stream","Content-Disposition":'attachment; filename="fpsac-9.2.0.zip"',"X-Content-Type-Options":"nosniff"});
     await pipeline((await import("node:fs")).createReadStream(file),res);
   } catch(e) {
     if (!res.headersSent) res.status(400).json({ok:false,error:e.message});
   } finally {
+    fpsacDownloadBusy = false;
     if (directory) await fs.rm(directory,{recursive:true,force:true}).catch(()=>{});
   }
 });

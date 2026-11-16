@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -237,7 +238,7 @@ test('W-6: the FPSAC download is always an attachment and listed with its real m
   assert.match(server, /routes: \["GET \/api\/fpschallenge\/anticheat\/download\/:version"\]/);
   assert.match(server, /"Content-Type":"application\/octet-stream","Content-Disposition":'attachment; filename="fpsac-9\.2\.0\.zip"',"X-Content-Type-Options":"nosniff"/);
   assert.doesNotMatch(server, /Zu viele Anfragen|Einrichtung abgelaufen/, 'backend texts are English');
-  assert.match(server, /await downloadTo\(allowedArtifact\(\{url\}\), file\);\n    await verifyArtifact\(file, \{sha256\}\);\n    res\.status\(200\)/, 'checked before anything is sent');
+  assert.match(server, /await downloadTo\(allowedArtifact\(\{url\}\), file, \{ maxBytes: FPSAC_MAX_BYTES, timeoutMs: FPSAC_TIMEOUT_MS \}\);\n    await verifyArtifact\(file, \{sha256\}\);\n    res\.status\(200\)/, 'checked before anything is sent');
 });
 
 test('W-6: without FPSAC_SHA256 the FPSAC download is refused before any request goes out', { timeout: 60000 }, async t => {
@@ -279,4 +280,12 @@ test('S-6 (Codex review): a stale-lock takeover never removes a live replacement
   await fs.writeFile(lock, '999999');
   assert.equal(await takeOverStaleLock(lock, await fs.stat(lock), 999999), true, 'the lock judged stale is removed');
   assert.deepEqual(await fs.readdir(root), []);
+});
+
+test('Codex review: the stored executable is no code change; the FPSAC download is bounded and single', () => {
+  const server = readFileSync(new URL('../installer-server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /const runtimeBringsCode = body => choosesOtherPath\(body\.executablePath, defaultRuntime\.state\.executablePath\) \|\|/);
+  assert.match(server, /await downloadTo\(allowedArtifact\(\{url\}\), file, \{ maxBytes: FPSAC_MAX_BYTES, timeoutMs: FPSAC_TIMEOUT_MS \}\);/);
+  assert.match(server, /if \(fpsacDownloadBusy\) return res\.status\(429\)/);
+  assert.match(server, /done\(maxBytes && received > maxBytes \? new Error/);
 });
