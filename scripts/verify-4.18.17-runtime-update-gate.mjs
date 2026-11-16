@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 // 4.18.17 gate: supported runtimes. Electron 42 left support on 2026-10-20
 // (releases.electronjs.org/schedule); the backend and the remote gateway run on
-// Electron's own Node (ELECTRON_RUN_AS_NODE), so the Electron line decides which
+// Electron's own Node (a utility process since issue #67, before ELECTRON_RUN_AS_NODE), so the Electron line decides which
 // Node and Chromium security fixes reach users. Node 20 left support on
 // 2026-04-30 (github.com/nodejs/Release). Checked from the lockfile and sources.
 const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
@@ -16,7 +16,7 @@ const locked = name => lock.packages?.[`node_modules/${name}`]?.version;
 
 const checks = [
   ["Electron is 45 or newer (42 is end-of-life since 2026-10-20)", major(locked("electron")) >= 45 && /^~45\.|^\^45\./.test(pkg.devDependencies?.electron || "")],
-  ["the backend still runs on Electron's own Node", main.includes("ELECTRON_RUN_AS_NODE:'1'") && main.includes("spawn(process.execPath,[serverPath]")],
+  ["the backend still runs on Electron's own Node (utility process since issue #67)", main.includes("utilityProcess.fork(serverPath,")],
   ["window keeps contextIsolation, sandbox and no nodeIntegration", main.includes("contextIsolation:true,nodeIntegration:false,sandbox:true")],
   ["remembered login uses the asynchronous safeStorage API only", ["isAsyncEncryptionAvailable()", "encryptStringAsync(", "decryptStringAsync("].every(text => main.includes(text)) && !/safeStorage\.(isEncryptionAvailable|encryptString|decryptString)\(/.test(main)],
   ["Node.js minimum is 22.12 (package engines and build.ps1)", pkg.engines?.node === ">=22.12" && build.includes("a>22||(a===22&&b>=12)") && !/Node\.js 20\+/.test(build)],

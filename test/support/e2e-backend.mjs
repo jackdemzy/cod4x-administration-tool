@@ -22,7 +22,7 @@ const freeTcpPort = async () => {
 };
 
 // server: { command, args, env } runs another backend build, e.g. the one packaged in a release
-// (Block 23 installer gate: the Electron binary with ELECTRON_RUN_AS_NODE and app.asar's script).
+// (Block 23 installer gate: the packaged binary with --cod4x-backend-only, issue #67).
 export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {}, server = null } = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   const port = await freeTcpPort();
@@ -39,7 +39,8 @@ export async function e2eBackend(t, { prefix = 'cod4x-e2e-', extraEnv = {}, serv
     for (const stream of [state.child.stdout, state.child.stderr]) stream.on('data', chunk => { state.diagnostics = (state.diagnostics + chunk.toString()).slice(-8000); });
     state.child.once('error', () => {});
     state.closed = new Promise(resolve => state.child.once('close', resolve));
-    for (let attempt = 0; attempt < 100 && state.child.exitCode === null; attempt++) {
+    // A packaged Electron binary needs longer to start than node: up to 30 s.
+    for (let attempt = 0; attempt < (server ? 300 : 100) && state.child.exitCode === null; attempt++) {
       try { if ((await fetch(`${url}/api/auth/status`, { signal: AbortSignal.timeout(500) })).ok) return; } catch {}
       await delay(100);
     }

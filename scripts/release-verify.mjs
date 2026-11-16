@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { PLATFORMS, WINDOWS_APP_EXE, asarPolicy, authenticodeOfFile, checkSums, formatSums, manifest, matchArtifacts, sha256File, unpackedDir } from './release-lib.mjs';
+import { PLATFORMS, WINDOWS_APP_EXE, asarPolicy, authenticodeOfFile, checkSums, formatSums, fuseFindings, manifest, matchArtifacts, sha256File, unpackedDir } from './release-lib.mjs';
 
 // Block 23 (4.18.30): artifact verification of a release build.
 //   node scripts/release-verify.mjs --platform win|linux [--dir dist-installer]
@@ -65,6 +65,13 @@ if (policy.missing.length) fail(`app.asar lacks: ${policy.missing.join(', ')}`);
 if (policy.forbidden.length) fail(`app.asar contains forbidden entries: ${policy.forbidden.slice(0, 20).join(', ')}`);
 if (!policy.versionOk) fail(`package.json in app.asar is not version ${version}`);
 console.log(`PASS app.asar content (${entries.length} entries, version ${version})`);
+
+// Issue #67 (A6-8): the packaged executable carries the release fuses.
+const appExe = path.join(dir, unpackedDir(platform), platform === 'win' ? WINDOWS_APP_EXE : pkg.build?.linux?.executableName || 'cod4x-control');
+if (!fs.existsSync(appExe)) fail(`${appExe} not found`);
+const fuses = fuseFindings(await createRequire(import.meta.url)('@electron/fuses').getCurrentFuseWire(appExe));
+if (fuses.length) fail(`Electron fuses of ${path.basename(appExe)}: ${fuses.join('; ')}`);
+console.log(`PASS Electron fuses of ${path.basename(appExe)} (RunAsNode, NODE_OPTIONS and --inspect off; asar integrity and only app.asar on)`);
 
 const entriesWithHash = files.map(name => ({ name, size: fs.statSync(path.join(dir, name)).size, sha256: sha256File(path.join(dir, name)) }));
 const commit = (spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout || '').trim() || process.env.GITHUB_SHA || null;

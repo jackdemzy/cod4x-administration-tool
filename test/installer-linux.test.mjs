@@ -13,7 +13,7 @@ import { matchArtifacts } from '../scripts/release-lib.mjs';
 // Block 23 (4.18.30) installer gate, Linux: Installation + First Run + Core Discovery + Server Start
 // against the backend packaged in the AppImage (not the source tree). The AppImage is unpacked
 // with --appimage-extract (no FUSE needed) and its backend runs the way electron-main.cjs starts it:
-// the packaged Electron binary with ELECTRON_RUN_AS_NODE=1 and resources/app.asar/installer-server.mjs.
+// in a utility process of the packaged binary (--cod4x-backend-only; the RunAsNode fuse is off, issue #67).
 // Runs only with COD4X_RELEASE_DIR; then a missing AppImage is a failure, not a skip.
 const run = promisify(execFile);
 const releaseDir = process.env.COD4X_RELEASE_DIR;
@@ -37,12 +37,11 @@ test('Linux AppImage: install, first run, core discovery, server start', { skip,
   await run(image, ['--appimage-extract'], { cwd: install, maxBuffer: 64 * 1024 * 1024 });
   const unpacked = path.join(install, 'squashfs-root');
   const binary = path.join(unpacked, 'cod4x-control');
-  const script = path.join(unpacked, 'resources', 'app.asar', 'installer-server.mjs');
   assert.ok(existsSync(binary), 'packaged executable cod4x-control missing');
   assert.ok(existsSync(path.join(unpacked, 'resources', 'app.asar')), 'app.asar missing');
 
   // First Run: the packaged backend starts with an empty data root; admin and vault are set up.
-  const backend = await e2eBackend(t, { prefix: 'cod4x-installer-', server: { command: binary, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } } });
+  const backend = await e2eBackend(t, { prefix: 'cod4x-installer-', server: { command: binary, args: ['--cod4x-backend-only', '--no-sandbox', '--ozone-platform=headless'] } });
   const { request, assertAlive, root } = backend;
   const health = await request('/api/installer/health');
   ok(health, 'health');

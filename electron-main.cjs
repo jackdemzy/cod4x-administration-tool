@@ -1,5 +1,4 @@
-const {app,BrowserWindow,dialog,ipcMain,safeStorage,shell} = require('electron');
-const {spawn} = require('child_process');
+const {app,BrowserWindow,dialog,ipcMain,safeStorage,shell,utilityProcess} = require('electron');
 const path=require('path');
 const crypto=require('crypto');
 let server=null;
@@ -18,7 +17,12 @@ const APP_INDEX=path.join(__dirname,'dist','index.html');
 // Debug phase (4.18.31): one CONTROL per user session. A second launch started a second backend that
 // failed on the busy port (dialog "exited with code 1") while its window talked to the first
 // backend with the wrong per-launch secret and was refused. Now the second launch focuses the first window.
-const SINGLE_INSTANCE=app.requestSingleInstanceLock();
+// Issue #67 (A6-8): --cod4x-backend-only runs only the packaged backend, with no window, its output on
+// this process's stdout and the environment as given (PORT, COD4X_DATA_ROOT, ...). The release
+// installer gate uses it, since the RunAsNode fuse is off and the binary no longer runs as plain Node.
+// It runs nothing but installer-server.mjs from the (integrity-checked) app.asar.
+const BACKEND_ONLY=process.argv.includes('--cod4x-backend-only');
+const SINGLE_INSTANCE=BACKEND_ONLY||app.requestSingleInstanceLock();
 if(!SINGLE_INSTANCE) app.quit();
 app.on('second-instance',()=>{const win=BrowserWindow.getAllWindows()[0]; if(win){ if(win.isMinimized()) win.restore(); win.focus(); }});
 let mainWebContentsId=null;
@@ -132,17 +136,24 @@ let backendReady=false; // until then a failed start is reported once, by create
 // Audit 4.18.31 (S-1): set only by the ready line on the stdout pipe of the backend we started.
 let backendListening=false;
 const BACKEND_LOG=()=>path.join(app.getPath('userData'),'logs','backend.log');
+// Issue #67 (A6-8): the backend runs in an Electron utility process (Node without a window) instead of
+// "electron.exe + ELECTRON_RUN_AS_NODE". So the RunAsNode fuse can be off, and the signed binary cannot
+// be made to run any script by setting one environment variable.
+let serverExited=false;
 function startBackend(){
   const serverPath=path.join(__dirname,'installer-server.mjs');
-  const log=openCappedLog(BACKEND_LOG(),{maxBytes:2*1024*1024});
-  server=spawn(process.execPath,[serverPath],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',PORT:String(PORT),HOST,COD4X_DATA_ROOT:app.getPath('userData'),COD4X_RUNTIME_MODE:'interactive',COD4X_DESKTOP_CLIENT_TOKEN:DESKTOP_CLIENT_TOKEN},cwd:app.getPath('userData'),stdio:['ignore','pipe','pipe']});
+  const log=BACKEND_ONLY?{write:chunk=>process.stdout.write(chunk),close(){}}:openCappedLog(BACKEND_LOG(),{maxBytes:2*1024*1024});
+  const env=BACKEND_ONLY?{...process.env}:{...process.env,PORT:String(PORT),HOST,COD4X_DATA_ROOT:app.getPath('userData'),COD4X_RUNTIME_MODE:'interactive',COD4X_DESKTOP_CLIENT_TOKEN:DESKTOP_CLIENT_TOKEN};
+  delete env.ELECTRON_RUN_AS_NODE;
+  server=utilityProcess.fork(serverPath,[],{env,cwd:BACKEND_ONLY?process.cwd():app.getPath('userData'),stdio:['ignore','pipe','pipe'],serviceName:'COD4X CONTROL backend'});
   const readyWatcher=createReadyWatcher();
   server.stdout.on('data',chunk=>{log.write(chunk);if(!backendListening&&readyWatcher(chunk))backendListening=true;});
-  server.stderr.on('data',chunk=>log.write(chunk));
-  server.on('close',()=>log.close());
+  server.stderr.on('data',chunk=>BACKEND_ONLY?process.stderr.write(chunk):log.write(chunk));
   // Audit 4.18.31 (S-1): any end of the backend (also exit code 0) closes the app, so the window
   // never keeps talking to the port after our backend is gone.
-  server.on('exit',(code,signal)=>{backendListening=false;if(!app.isQuitting && backendReady){dialog.showErrorBox('COD4X CONTROL','The local backend stopped (exit code '+(code??signal)+'). Details: '+BACKEND_LOG());app.quit();}});
+  server.on('exit',code=>{serverExited=true;backendListening=false;log.close();
+    if(BACKEND_ONLY){app.exit(code||0);return;}
+    if(!app.isQuitting && backendReady){dialog.showErrorBox('COD4X CONTROL','The local backend stopped (exit code '+code+'). Details: '+BACKEND_LOG());app.quit();}});
 }
 // Audit 4.18.31 (S-1): ready means our own child printed the ready line after it bound the port.
 // An HTTP answer on the port proves nothing: another program may have taken it first.
@@ -150,7 +161,7 @@ function waitForBackend(retries=200){
   return new Promise(resolve=>{
     const attempt=()=>{
       // Our backend ended (e.g. the port is taken by another program): never talk to whatever answers there.
-      if(server&&(server.exitCode!==null||server.signalCode!==null)) return resolve(false);
+      if(server&&serverExited) return resolve(false);
       if(backendListening) return resolve(true);
       if(--retries<=0) return resolve(false);
       setTimeout(attempt,100);
@@ -177,6 +188,7 @@ function restrictPermissions(session){
   session.setPermissionRequestHandler((contents,permission,callback)=>callback(permissionAllowed({permission,webContentsId:contents?.id,url:contents?.getURL?.()},mainWebContentsId,APP_INDEX)));
   session.setPermissionCheckHandler((contents,permission)=>permissionAllowed({permission,webContentsId:contents?.id,url:contents?.getURL?.()},mainWebContentsId,APP_INDEX));
 }
-app.whenReady().then(async()=>{if(!SINGLE_INSTANCE)return;restrictPermissions(require('electron').session.defaultSession);startBackend();await createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
+app.whenReady().then(async()=>{if(!SINGLE_INSTANCE)return;if(BACKEND_ONLY){startBackend();return;}restrictPermissions(require('electron').session.defaultSession);startBackend();await createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow();});});
 app.on('before-quit',()=>{app.isQuitting=true;if(server)server.kill();});
-app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit();});
+app.on('window-all-closed',()=>{if(!BACKEND_ONLY&&process.platform!=='darwin')app.quit();});
+if(BACKEND_ONLY) for(const signal of ['SIGTERM','SIGINT']) process.on(signal,()=>{app.isQuitting=true;if(server&&!serverExited)server.kill();else app.exit(0);});

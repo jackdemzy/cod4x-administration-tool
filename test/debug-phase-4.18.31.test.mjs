@@ -125,14 +125,15 @@ test('every permission has an English and a German description in the UI', () =>
 
 test('Electron: one instance per session, backend output in a log file, English dialogs', () => {
   const main = read('electron-main.cjs');
-  assert.match(main, /const SINGLE_INSTANCE=app\.requestSingleInstanceLock\(\);\nif\(!SINGLE_INSTANCE\) app\.quit\(\);/);
+  // Issue #67: --cod4x-backend-only (release gate) runs no window and takes no single-instance lock.
+  assert.match(main, /const SINGLE_INSTANCE=BACKEND_ONLY\|\|app\.requestSingleInstanceLock\(\);\nif\(!SINGLE_INSTANCE\) app\.quit\(\);/);
   assert.match(main, /app\.on\('second-instance'/);
   assert.match(main, /app\.whenReady\(\)\.then\(async\(\)=>\{if\(!SINGLE_INSTANCE\)return;/);
   assert.match(main, /stdio:\['ignore','pipe','pipe'\]/);
   assert.match(main, /server\.stdout\.on\('data',chunk=>\{log\.write\(chunk\);/);
-  assert.match(main, /server\.stderr\.on\('data',chunk=>log\.write\(chunk\)\);/);
+  assert.match(main, /server\.stderr\.on\('data',chunk=>BACKEND_ONLY\?process\.stderr\.write\(chunk\):log\.write\(chunk\)\);/);
   assert.doesNotMatch(main, /stdio:'ignore'/);
-  assert.match(main, /if\(server&&\(server\.exitCode!==null\|\|server\.signalCode!==null\)\) return resolve\(false\);/, 'never talk to a backend that is not ours');
+  assert.match(main, /if\(server&&serverExited\) return resolve\(false\);/, 'never talk to a backend that is not ours');
   assert.doesNotMatch(main, /auswählen|Übernehmen|konnte nicht gestartet/);
 });
 
