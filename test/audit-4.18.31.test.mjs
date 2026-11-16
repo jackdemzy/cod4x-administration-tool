@@ -47,7 +47,7 @@ test('F-1: BaseGame, remote paths and remote/Docker start commands refuse "+"', 
   const store = new ServerInstanceStore({ root: path.join(root, 'servers'), registryFile: path.join(root, 'instances.json'), checkPort: async () => {} });
   const definition = { id: 'evil', name: 'evil', platform: 'linux', port: 28961, serverCore: { executablePath: '/opt/core/cod4x18_dedrun', version: '21.5' } };
   assert.throws(() => store.model({ ...definition, basePath: '/tmp/b+loadPlugin evil' }), { code: 'INSTANCE_BASEPATH_INVALID' });
-  assert.equal(store.model({ ...definition, basePath: '/tmp/base game' }).basePath, '/tmp/base game');
+  assert.equal(store.model({ ...definition, basePath: path.resolve('/tmp/base game') }).basePath, path.resolve('/tmp/base game'));
   assert.throws(() => assertRemotePosixPath('/srv/b+loadPlugin evil'), { code: 'REMOTE_PATH_INVALID' });
   assert.equal(assertRemotePosixPath('/srv/cod4'), '/srv/cod4');
   const start = { core: '/srv/home/core/cod4x18_dedrun', cwd: '/srv/cod4', stdoutFile: '/srv/home/out.log', stderrFile: '/srv/home/err.log' };
