@@ -28,6 +28,7 @@
     "node": ">=22.12"
   },
   "devDependencies": {
+    "@electron/fuses": "^1.8.0",
     "@vitejs/plugin-react": "~6.1.2",
     "electron": "~45.2.3",
     "electron-builder": "^26.18.0",
@@ -76,9 +77,25 @@
       "category": "Utility",
       "executableName": "cod4x-control",
       "artifactName": "COD4X-CONTROL-${version}-${arch}.AppImage"
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
     }
   },
   "main": "electron-main.cjs",
   "description": "COD4X CONTROL — Windows and Linux Dedicated Server runtime with verified process lifecycle controls.",
-  "author": "COD4X CONTROL"
+  "author": "COD4X CONTROL",
+  "overrides": {
+    "app-builder-lib": {
+      "minimatch": "^11.0.8"
+    },
+    "@electron/universal": {
+      "minimatch": "^11.0.8"
+    }
+  }
 }

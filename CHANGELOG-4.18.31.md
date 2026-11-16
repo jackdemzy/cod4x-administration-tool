@@ -73,3 +73,11 @@ Found, not changed:
 - `test/ui-language.test.mjs` (new): English default and stored choice, every menu item described in both languages, overview and Remote Linux rendered in both languages, no inline layout styles left on the Remote Linux page.
 - `scripts/preflight-4.18.31.mjs` runs it together with `test/remote-hosts.test.mjs`.
 - `test/review-4.18.31.test.mjs` (new, also in the preflight): capped log rotation (also when the move fails), real-Docker lock: one holder among 20 waiters, timeout, released when the holder is killed.
+
+## Issue #67 and #21 (Low findings A2-7, A4-8, A6-8; Dependabot alert #90)
+
+- **A6-8 Electron fuses:** the release build sets RunAsNode, `NODE_OPTIONS` and `--inspect` off, cookie encryption, embedded asar integrity (checked by Electron on Windows) and only-app.asar on. The backend runs in an Electron utility process instead of `electron + ELECTRON_RUN_AS_NODE`. `--cod4x-backend-only` runs only the packaged backend (release installer gate, needs `--no-sandbox --ozone-platform=headless` on a Linux machine without a display). `scripts/release-verify.mjs` checks the fuse wire of the packaged executable.
+- **A2-7 vault passphrase change:** `POST /api/credentials/vault/passphrase` (`passphrase`, `newPassphrase`, `expectedSha256`) re-encrypts the vault under a new salt and key after proving the current passphrase, and deletes every vault backup sealed with the old key. The credential editor offers it while the vault is unlocked.
+- **A4-8 game logs:** logs above 64 MiB are renamed to `.1` before each remote start (SSH and Docker). While any server runs (local instances, the standard server, remote servers) a log above the limit is copied to `.1` and emptied every 5 minutes; a container's logs are capped inside the container. `COD4X_LOG_CAP=off` turns the timer off.
+- **#21 minimatch:** npm `overrides` lift the build-time `minimatch` of `app-builder-lib` and `@electron/universal` to 11.0.8 (GHSA-g3hv-75wg-m249). `npm audit`: 0 vulnerabilities.
+- Tests: `test/issue-67.test.mjs` (new).

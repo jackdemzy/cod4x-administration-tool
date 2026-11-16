@@ -10,8 +10,8 @@ import { e2eBackend } from './support/e2e-backend.mjs';
 import { matchArtifacts } from '../scripts/release-lib.mjs';
 
 // Block 23 (4.18.30) installer gate, Windows: silent NSIS install, first run of the installed
-// backend (the installed "COD4X CONTROL.exe" with ELECTRON_RUN_AS_NODE=1 and
-// resources\app.asar\installer-server.mjs, as electron-main.cjs starts it), silent uninstall.
+// backend (the installed "COD4X CONTROL.exe" with --cod4x-backend-only, which runs
+// resources\app.asar\installer-server.mjs in a utility process as electron-main.cjs does), silent uninstall.
 // Core discovery and server start need a real Windows core and stay manual (checklist).
 // Runs only on Windows with COD4X_RELEASE_DIR; then a missing installer is a failure.
 const releaseDir = process.env.COD4X_RELEASE_DIR;
@@ -43,7 +43,7 @@ test('Windows NSIS: silent install, first run, silent uninstall', { skip, timeou
   assert.ok(existsSync(path.join(target, UNINSTALLER)), 'uninstaller missing');
 
   // First Run of the installed backend with an empty data root.
-  const backend = await e2eBackend(t, { prefix: 'cod4x-nsis-run-', server: { command: exe, args: [path.join(asar, 'installer-server.mjs')], env: { ELECTRON_RUN_AS_NODE: '1' } } });
+  const backend = await e2eBackend(t, { prefix: 'cod4x-nsis-run-', server: { command: exe, args: ['--cod4x-backend-only'] } });
   const health = await backend.request('/api/installer/health');
   assert.equal(health.status, 200);
   assert.equal(health.json?.service, 'cod4x-control-installer');

@@ -28,7 +28,7 @@ One Low finding fixed (A3-9). Database helper (bound parameters, pinned SQL), `b
 
 Reviewed: yes
 
-The remote part of A1-8 (`basePath`/`remoteRoot` with `+`) is fixed in `assertRemotePosixPath`, `startCoreCommand` and `runContainerCommand`. One Low finding (A4-8, log rotation on remote homes) is tracked in issue #67. Shell quoting, host key pinning, SFTP limits and Docker hardening hold.
+The remote part of A1-8 (`basePath`/`remoteRoot` with `+`) is fixed in `assertRemotePosixPath`, `startCoreCommand` and `runContainerCommand`. One Low finding (A4-8, log rotation on remote homes) was tracked in issue #67 and is fixed: rotation before each remote start, and a cap while running (native on the host, a container inside the container). Shell quoting, host key pinning, SFTP limits and Docker hardening hold.
 
 ## Area 5 – Remote access and admin API
 
@@ -40,7 +40,7 @@ One Medium and five Low findings, all fixed. Every route still has an authorizat
 
 Reviewed: yes
 
-One Medium and one Low finding fixed, one Low finding tracked in issue #67. `npm audit --omit=dev`: 0 vulnerabilities. `npm audit` with dev dependencies: 6 moderate, all the build-time `minimatch` of `electron-builder` 26.18.0 (issue #21; electron-builder still requires `minimatch ^10.2.5`, the fix is in 11.0.1).
+One Medium and two Low findings fixed (A6-8 from issue #67: Electron fuses, the backend runs in a utility process). `npm audit --omit=dev`: 0 vulnerabilities. `npm audit` with dev dependencies: 0 vulnerabilities since npm `overrides` lift the build-time `minimatch` of `electron-builder` 26.18.0 to 11.0.8 (issue #21, GHSA-g3hv-75wg-m249; electron-builder itself still asks for `^10.2.5`); a Linux package built with it starts and passes the fuse check.
 
 ## Findings
 
@@ -48,12 +48,12 @@ One Medium and one Low finding fixed, one Low finding tracked in issue #67. `npm
 |----|-------|----------|-------|--------|----------|
 | A1-8 | An operator could inject core commands through a `+` in a BaseGame path (clone with `basePath`, needs only `server.manage`), a remote `basePath`/`remoteRoot` or the runtime path, e.g. `/srv/b+loadPlugin evil`, and so load a native plugin without `server.code` | A2 | High | fixed | `test/audit-4.18.31.test.mjs` |
 | A1-9 | The `fs_basepath`/`fs_homepath` override check matched only the exact token `+set`; `"+set fs_homepath /x"` in one argument got past it (admin only) | A2 | Low | fixed | `test/audit-4.18.31.test.mjs` |
-| A1-10 | `main/qconsole.log` and `main/logs/games_mp.log` of local instances grow without limit (chat spam fills the disk); now rotated above 64 MiB before each start of an instance and of the standard server. A cap while a server keeps running is part of issue #67 | A1 | Low | fixed | `test/audit-4.18.31.test.mjs` |
+| A1-10 | `main/qconsole.log` and `main/logs/games_mp.log` of local instances grow without limit (chat spam fills the disk); now rotated above 64 MiB before each start of an instance and of the standard server, and (issue #67) copied to `.1` and emptied every 5 minutes while the server runs | A1 | Low | fixed | `test/audit-4.18.31.test.mjs`, `test/issue-67.test.mjs` |
 | A2-6 | No final error handler on 8787: a malformed JSON body (login, init, users, alert settings with the Discord webhook) was printed by Express's default handler into `backend.log`, and callers got an HTML stack trace with install paths | A4 | Low | fixed | `test/audit-4.18.31.test.mjs` |
-| A2-7 | The vault passphrase cannot be changed; backups keep removed secrets under the same key | A4 | Low | issue #67 | |
+| A2-7 | The vault passphrase cannot be changed; backups keep removed secrets under the same key. Now `POST /api/credentials/vault/passphrase` (current passphrase required) re-encrypts the vault under a new salt and deletes every backup sealed with the old key | A4 | Low | fixed | `test/issue-67.test.mjs` |
 | A2-8 | A crash between creating and deleting `credential-vault/.operation.lock` blocked every later vault change for good; the lock now names its owner's PID and a dead owner's lock is taken over | A4 | Low | fixed | `test/audit-4.18.31.test.mjs` |
 | A3-9 | B3 module hashes ignore `.pyc`/`.pyo`, which Python 2.7 runs in place of a matching `.py`; compiled files are now removed from the B3 tree before every start | A5 | Low | fixed | `test/audit-4.18.31.test.mjs` |
-| A4-8 | Game logs on remote (SSH) and Docker homes are not rotated | A1 | Low | issue #67 | |
+| A4-8 | Game logs on remote (SSH) and Docker homes are not rotated. Now renamed above 64 MiB before each remote start and capped while running (a container's logs inside the container, so a planted link never reaches the host) | A1 | Low | fixed | `test/issue-67.test.mjs` |
 | A5-9 | A viewer could make CONTROL probe any path through `GET /api/runtime/preflight` (on Windows a UNC path hands the account's NTLM hash to another host; on Linux it shows whether any path exists and lists `main/*.iwd`) | A2 | Medium | fixed | `test/audit-4.18.31.test.mjs` |
 | A5-10 | The credential guard (local only, `no-store`, fixed parse error) could be bypassed by letter case (`/API/Credentials/...`), because Express routes ignore case | A2 | Low | fixed | `test/audit-4.18.31.test.mjs` |
 | A5-11 | Behind Tailscale or Caddy the gateway write limit was one bucket for all clients (one client could block every phone), and failed logins of strangers locked the step-up of a logged-in user | A1 | Low | fixed | `test/audit-4.18.31.test.mjs` |
@@ -62,7 +62,7 @@ One Medium and one Low finding fixed, one Low finding tracked in issue #67. `npm
 | A5-14 | The legacy `POST /api/rcon/execute` accepted line breaks and control bytes in the command (a second command after an allowed first word) | A2 | Low | fixed | `test/audit-4.18.31.test.mjs` |
 | A6-6 | The desktop app trusted any HTTP 200 on 127.0.0.1:8787 as its backend; a local user who took the port first received the saved admin login. The backend also kept running after a failed listen | A4 | Medium | fixed | `test/audit-4.18.31.test.mjs` |
 | A6-7 | CI actions, including the SignPath action that receives the signing token, were pinned by mutable tags; now pinned to commit SHAs, Dependabot updates the pins | A5 | Low | fixed | `test/release-signing.test.mjs` |
-| A6-8 | No Electron fuses; the backend needs `ELECTRON_RUN_AS_NODE`, and without asar integrity a changed `app.asar` runs under a valid signature | A4 | Low | issue #67 | |
+| A6-8 | No Electron fuses; the backend needs `ELECTRON_RUN_AS_NODE`, and without asar integrity a changed `app.asar` runs under a valid signature. Now the backend runs in a utility process, RunAsNode, `NODE_OPTIONS` and `--inspect` are off, asar integrity (Windows) and only-app.asar are on; `release-verify` checks the fuse wire | A4 | Low | fixed | `test/issue-67.test.mjs` |
 
 ## Rejected findings
 

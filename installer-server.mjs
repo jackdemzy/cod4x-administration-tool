@@ -23,7 +23,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
 import { Readable, Transform } from "node:stream";
-import { rotateGameLogs } from "./lib/game-log-rotation.mjs";
+import { rotateGameLogs, capGameLogs, GAME_LOG_CAP_INTERVAL_MS } from "./lib/game-log-rotation.mjs";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -2657,7 +2657,7 @@ function credentialRoute(action, status = 200) {
       const statusCode = code === "INSTANCE_NOT_FOUND" ? 404 : code === "VAULT_LOCKED" ? 423 : /CONFLICT|BUSY|VAULT_EXISTS/.test(code) ? 409 : 400;
       res.status(statusCode).json({ ok: false, correlationId, code, error: code });
     } finally {
-      if (req.body && typeof req.body === "object") { delete req.body.passphrase; delete req.body.value; }
+      if (req.body && typeof req.body === "object") { delete req.body.passphrase; delete req.body.newPassphrase; delete req.body.value; }
     }
   };
 }
@@ -2668,6 +2668,12 @@ function vaultPassphrase(req) {
 app.get("/api/credentials/vault", requirePermission("config.manage"), credentialRoute(async () => ({ vault: await credentialService.status() })));
 app.post("/api/credentials/vault/initialize", requirePermission("config.manage"), credentialRoute(async req => ({ vault: await credentialService.initialize(vaultPassphrase(req)) }), 201));
 app.post("/api/credentials/vault/unlock", requirePermission("config.manage"), credentialRoute(async req => ({ vault: await credentialService.unlock(vaultPassphrase(req)) })));
+// Issue #67 (A2-7): change the vault passphrase (re-encrypts the vault, deletes the backups under the old key).
+app.post("/api/credentials/vault/passphrase", requirePermission("config.manage"), credentialRoute(async req => {
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== "expectedSha256,newPassphrase,passphrase") throw Object.assign(new Error("CREDENTIAL_INVALID"), { code: "CREDENTIAL_INVALID" });
+  return { vault: await credentialService.changePassphrase(body) };
+}));
 app.post("/api/credentials/vault/lock", requirePermission("config.manage"), credentialRoute(async () => { credentialService.lock(); return { vault: await credentialService.status() }; }));
 app.get("/api/instances/:id/credentials", requirePermission("config.manage"), credentialRoute(async req => ({ credentials: await credentialService.instanceStatus(req.params.id) })));
 // Block 8 audit names for the master token; the generic credential event stays.
@@ -3011,6 +3017,32 @@ const monitorCollector = new MonitorCollector({
   onTick: overview => monitorAlerts.handleTick(overview),
 });
 if (process.env.COD4X_MONITOR !== "off") monitorCollector.start();
+// Issue #67 (A4-8): the game logs of every running server (instances, the standard server, remote servers)
+// are capped while it keeps running, independent of monitoring. One pass at a time; a failure is logged only.
+let gameLogCapRunning = false;
+async function capRunningGameLogs() {
+  if (gameLogCapRunning) return;
+  gameLogCapRunning = true;
+  try {
+    const homes = [];
+    // Codex review: an instance store that failed to load throws here; the timer must never die of it.
+    let local = [];
+    try { local = instanceStore.list(); } catch { local = []; }
+    for (const instance of local) {
+      try { if ((await instanceManager.runtime(instance.id)).state?.status === "RUNNING") homes.push(instance.homePath); } catch { /* next instance */ }
+    }
+    const standard = defaultRuntime.state;
+    if (standard?.status === "RUNNING" && standard.filesystemHomePath) homes.push(standard.filesystemHomePath);
+    for (const home of homes) {
+      const capped = await capGameLogs(path.join(home, "main")).catch(() => []);
+      if (capped.length) audit("info", "server.game_logs.capped", { logs: capped });
+    }
+    for (const instance of await remoteMonitor.listInstances().catch(() => [])) {
+      try { await remoteMonitor.capLogs(instance); } catch (error) { audit("warn", "remote.game_logs.cap_failed", { instanceId: instance.id, code: error.code || "REMOTE_COMMAND_FAILED" }); }
+    }
+  } finally { gameLogCapRunning = false; }
+}
+if (process.env.COD4X_LOG_CAP !== "off") setInterval(() => { capRunningGameLogs().catch(error => audit("warn", "server.game_logs.cap_failed", { code: error.code || "GAME_LOG_CAP_FAILED" })); }, GAME_LOG_CAP_INTERVAL_MS).unref();
 function monitorRoute(action) {
   return async (req, res) => {
     try { res.set("Cache-Control", "no-store").json({ ok: true, ...await action(req) }); }

@@ -5,13 +5,15 @@ import { sharedCredentialWarning } from './credential-warnings.mjs';
 const editors = new Set();
 const KINDS = ['rcon', 'master', 'join', 'b3db'];
 const ERROR_CODES = new Set(['VAULT_LOCKED', 'VAULT_CONFLICT', 'VAULT_EXISTS', 'VAULT_OPERATION_BUSY', 'VAULT_UNLOCK_FAILED',
-  'VAULT_PASSPHRASE_INVALID', 'VAULT_PASSPHRASE_MISMATCH', 'CREDENTIAL_INVALID', 'INSTANCE_RUNTIME_BUSY', 'INSTANCE_OPERATION_BUSY']);
+  'VAULT_PASSPHRASE_INVALID', 'VAULT_PASSPHRASE_MISMATCH', 'VAULT_PASSPHRASE_UNCHANGED', 'CREDENTIAL_INVALID', 'INSTANCE_RUNTIME_BUSY', 'INSTANCE_OPERATION_BUSY']);
 
 // Block 18b: kinds and basePath for remote servers (rcon and b3db under /api/remote-instances/<id>).
 export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS, basePath = null, remote = false }) {
   const [credentials, setCredentials] = useState(null), [busy, setBusy] = useState(false);
   const [error, setError] = useState(''), [message, setMessage] = useState('');
   const mounted = useRef(true), operation = useRef(false), passphrase = useRef(null), confirmation = useRef(null);
+  // Issue #67 (A2-7): fields of the passphrase change (uncontrolled, cleared on submit like the others).
+  const rekeyCurrent = useRef(null), rekeyNew = useRef(null), rekeyRepeat = useRef(null);
   const secrets = useRef({}), invalidation = useRef(null);
   const revision = useRef(0);
   const active = Boolean(instance.runtime?.pid || instance.runtime?.recoveryBlocked || ['STARTING', 'RUNNING', 'STOPPING'].includes(instance.runtime?.status));
@@ -20,6 +22,7 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
   function clearInputs() {
     if (passphrase.current) passphrase.current.value = '';
     if (confirmation.current) confirmation.current.value = '';
+    for (const input of [rekeyCurrent, rekeyNew, rekeyRepeat]) if (input.current) input.current.value = '';
     for (const input of Object.values(secrets.current)) if (input) input.value = '';
   }
   useEffect(() => {
@@ -48,9 +51,10 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
     const generation = revision.current;
     // Uncontrolled password inputs are cleared immediately on submission. No
     // secret is placed in React state, localStorage, diagnostics or a message.
-    let value = kind === 'initialize' || kind === 'unlock' ? passphrase.current?.value : secrets.current[credentialKind]?.value;
+    let value = kind === 'initialize' || kind === 'unlock' ? passphrase.current?.value : kind === 'rekey' ? rekeyCurrent.current?.value : secrets.current[credentialKind]?.value;
+    let newValue = kind === 'rekey' ? rekeyNew.current?.value : null;
     // Debug phase (4.18.31): the vault passphrase cannot be recovered, so a new vault asks for it twice.
-    const confirmed = kind !== 'initialize' || value === confirmation.current?.value;
+    const confirmed = kind === 'initialize' ? value === confirmation.current?.value : kind === 'rekey' ? newValue === rekeyRepeat.current?.value : true;
     clearInputs();
     try {
       if (!confirmed) throw Object.assign(new Error('Passphrases differ'), { code: 'VAULT_PASSPHRASE_MISMATCH' });
@@ -59,6 +63,10 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
         // A new vault is unlocked with the same passphrase right away instead of asking for it a third time.
         if (kind === 'initialize') await call('/api/credentials/vault/unlock', { passphrase: value });
         else if (kind === 'lock') await call('/api/credentials/vault/lock', {});
+        else if (kind === 'rekey') {
+          if (!unlocked || !credentials.sha256) throw Object.assign(new Error('Credential operation blocked'), { code: 'VAULT_LOCKED' });
+          await call('/api/credentials/vault/passphrase', { passphrase: value, newPassphrase: newValue, expectedSha256: credentials.sha256 });
+        }
         // Audit 4.18.31 debug pass (B1): an unlock is complete here; it used to fall into the save
         // branch below, which refused with VAULT_LOCKED although the vault had just been unlocked.
         else if (kind !== 'unlock') {
@@ -68,7 +76,7 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
           await call(`${route}/${credentialKind}${kind === 'remove' ? '/remove' : ''}`, body);
           delete body.value;
         }
-        value = null;
+        value = null; newValue = null;
         for (const editor of editors) if (editor !== invalidation.current) editor();
       }
       const current = (await call(route)).credentials;
@@ -79,19 +87,21 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
       else if (kind === 'initialize') setMessage(de ? 'Tresor angelegt und entsperrt.' : 'Vault created and unlocked.');
       else if (kind === 'unlock') setMessage(de ? 'Tresor entsperrt.' : 'Vault unlocked.');
       else if (kind === 'lock') setMessage(de ? 'Tresor gesperrt.' : 'Vault locked.');
+      else if (kind === 'rekey') setMessage(de ? 'Entsperrpasswort geändert. Der Tresor ist neu verschlüsselt, alte Sicherungen sind gelöscht.' : 'Unlock passphrase changed. The vault is re-encrypted and old backups are deleted.');
     } catch (failure) {
       if (mounted.current) {
         const code = ERROR_CODES.has(failure.code) ? failure.code : 'CREDENTIAL_OPERATION_FAILED';
         // Debug pass (B4): a refused passphrase changed nothing, so the status stays and the field stays usable.
-        const unchanged = ['VAULT_PASSPHRASE_MISMATCH', 'VAULT_UNLOCK_FAILED', 'VAULT_PASSPHRASE_INVALID'].includes(code);
+        const unchanged = ['VAULT_PASSPHRASE_MISMATCH', 'VAULT_UNLOCK_FAILED', 'VAULT_PASSPHRASE_INVALID', 'VAULT_PASSPHRASE_UNCHANGED'].includes(code);
         if (!unchanged) setCredentials(null); // nothing was sent: the status is still right
-        setError(code === 'VAULT_PASSPHRASE_MISMATCH' ? (de ? 'Die beiden Passwörter stimmen nicht überein. Nichts wurde angelegt.' : 'The two passphrases do not match. Nothing was created.')
-          : code === 'VAULT_UNLOCK_FAILED' ? (de ? 'Falsches Entsperrpasswort. Der Tresor bleibt gesperrt.' : 'Wrong unlock passphrase. The vault stays locked.')
+        setError(code === 'VAULT_PASSPHRASE_MISMATCH' ? (kind === 'rekey' ? (de ? 'Die beiden neuen Passwörter stimmen nicht überein. Nichts wurde geändert.' : 'The two new passphrases do not match. Nothing was changed.') : (de ? 'Die beiden Passwörter stimmen nicht überein. Nichts wurde angelegt.' : 'The two passphrases do not match. Nothing was created.'))
+          : code === 'VAULT_UNLOCK_FAILED' ? (kind === 'rekey' ? (de ? 'Das aktuelle Entsperrpasswort ist falsch. Nichts wurde geändert.' : 'The current unlock passphrase is wrong. Nothing was changed.') : (de ? 'Falsches Entsperrpasswort. Der Tresor bleibt gesperrt.' : 'Wrong unlock passphrase. The vault stays locked.'))
+          : code === 'VAULT_PASSPHRASE_UNCHANGED' ? (de ? 'Das neue Entsperrpasswort ist dasselbe wie das aktuelle.' : 'The new unlock passphrase is the same as the current one.')
           : code === 'VAULT_PASSPHRASE_INVALID' ? (de ? 'Das Entsperrpasswort muss 12 bis 1024 Zeichen lang sein.' : 'The unlock passphrase must be 12 to 1024 characters long.')
           : (de ? 'Vorgang nicht bestätigt. Status neu laden. ' : 'Operation not confirmed. Refresh status. ') + code);
       }
     } finally {
-      value = null; clearInputs(); operation.current = false;
+      value = null; newValue = null; clearInputs(); operation.current = false;
       if (mounted.current) setBusy(false);
     }
   }
@@ -111,6 +121,16 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
     </form>
     <p>{de ? 'Das Entsperrpasswort wird nicht gespeichert. Nach einem Backend-Neustart erneut entsperren. Ohne dieses Passwort ist keine Entschlüsselung möglich.' : 'The unlock passphrase is not saved. Unlock again after a backend restart. Without this passphrase the vault cannot be decrypted.'}</p>
     <button disabled={busy || !unlocked} onClick={() => action('lock')}>{de ? 'Tresor sperren' : 'Lock vault'}</button>
+    {unlocked && <details style={{ marginTop: 8 }}>
+      <summary>{de ? 'Entsperrpasswort ändern' : 'Change unlock passphrase'}</summary>
+      <p>{de ? 'Verschlüsselt den Tresor neu. Alle Tresor-Sicherungen mit dem alten Passwort werden gelöscht, damit entfernte Zugangsdaten nicht darin überleben.' : 'Re-encrypts the vault. All vault backups under the old passphrase are deleted, so removed credentials do not survive in them.'}</p>
+      <form onSubmit={event => submit(event, 'rekey')}>
+        <label>{de ? 'Aktuelles Entsperrpasswort' : 'Current unlock passphrase'} <input ref={rekeyCurrent} type="password" autoComplete="current-password" minLength={12} maxLength={1024} required disabled={busy} /></label>
+        <label> {de ? 'Neues Entsperrpasswort' : 'New unlock passphrase'} <input ref={rekeyNew} type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={busy} /></label>
+        <label> {de ? 'Neues Passwort wiederholen' : 'Repeat new passphrase'} <input ref={rekeyRepeat} type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={busy} /></label>
+        <button type="submit" disabled={busy}>{de ? 'Passwort ändern' : 'Change passphrase'}</button>
+      </form>
+    </details>}
     {active && remote && <p>{de ? 'Das RCON-Passwort nur bei gestopptem Server ändern. Das B3-Datenbank-Passwort kann bei laufendem Server geändert werden.' : 'Change the RCON password only with the server stopped. The B3 database password can be changed while the server runs.'}</p>}
     {active && !remote && <p>{de ? 'RCON-Passwort, Master-Token und Join-Passwort nur bei vollständig gestopptem Server ändern. Das B3-Datenbank-Passwort kann bei laufendem Server geändert werden.' : 'Change the RCON password, master token and join password only with the server fully stopped. The B3 database password can be changed while the server runs.'}</p>}
     {kinds.map(kind => { const warning = sharedCredentialWarning(kind, credentials?.[kind]?.sharedWith, de); return <form key={kind} onSubmit={event => submit(event, 'save', kind)} style={{ marginTop: 10 }}>

@@ -140,3 +140,22 @@ export function authenticodeOfFile(file) {
     return authenticodeInfo(header.subarray(0, read), fs.fstatSync(fd).size);
   } finally { fs.closeSync(fd); }
 }
+
+// Issue #67 (A6-8): Electron fuses of the packaged executable, as @electron/fuses reads the fuse wire
+// (index -> 48 "0" off, 49 "1" on). RunAsNode, NODE_OPTIONS and --inspect are off, so the signed binary
+// runs no foreign script; asar integrity and "only app.asar" make a changed app.asar fail to load
+// (Electron checks asar integrity on Windows and macOS; on Linux the fuse is set but has no effect).
+// GrantFileProtocolExtraPrivileges stays on: the window is the file:// page dist/index.html.
+export const RELEASE_FUSES = Object.freeze([
+  ['RunAsNode', 0, false],
+  ['EnableCookieEncryption', 1, true],
+  ['EnableNodeOptionsEnvironmentVariable', 2, false],
+  ['EnableNodeCliInspectArguments', 3, false],
+  ['EnableEmbeddedAsarIntegrityValidation', 4, true],
+  ['OnlyLoadAppFromAsar', 5, true],
+]);
+
+export function fuseFindings(wire) {
+  if (!wire || String(wire.version) !== '1') return ['fuse wire version 1 not found'];
+  return RELEASE_FUSES.filter(([, index, on]) => wire[index] !== (on ? 49 : 48)).map(([name, index, on]) => `${name} should be ${on ? 'on' : 'off'} (wire ${wire[index] ?? 'missing'})`);
+}
