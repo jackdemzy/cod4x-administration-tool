@@ -8,6 +8,7 @@ import { evaluateB3Dependencies } from '../lib/b3-dependencies.mjs';
 // Audit 4.18.31, debug pass: faults found while playing the app through (B1-B10, see the PR of the
 // audit). Components are rendered to static markup where that is cheap; the rest is pinned in source.
 const root = fileURLToPath(new URL('../', import.meta.url));
+const escapeRegExp = value => value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 const skip = process.platform === 'win32' || existsSync(new URL('../node_modules/@esbuild/linux-x64/bin/esbuild', import.meta.url)) ? false : 'native esbuild missing';
 
@@ -65,7 +66,7 @@ test('B5: the German login shows German errors; English stays as sent', { skip }
 test('B5: hard-coded English in the German UI is translated', () => {
   const ui = read('cod4x-control-improved.jsx');
   for (const english of ['"Load FPSChallenge download catalog"', '"Use existing server mod"', '"FIRST-RUN ADMIN INITIALIZATION"', '"RCON is sent server-side; the password is never written to the application log."']) {
-    assert.match(ui, new RegExp(`de\\?"[^"]+":${english.replace(/[.?()]/g, '\\$&')}`), english);
+    assert.match(ui, new RegExp(`de\\?"[^"]+":${escapeRegExp(english)}`), english);
   }
   assert.doesNotMatch(ui.slice(ui.indexOf('  de: {'), ui.indexOf('  en: {')), /server\.cfg Preview/);
   assert.match(read('lib/instance-master-status.jsx'), /de \? 'Zuletzt gesehen' : 'Last seen'/);
