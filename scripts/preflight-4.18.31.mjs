@@ -16,6 +16,15 @@ for (const file of ["installer-server.mjs", "electron-main.cjs", "electron-prelo
   }
 }
 
+// Full debug and security check 4.18.31: every area reviewed again, no open Critical/High/Medium
+// finding in docs/SECURITY-AUDIT-4.18.31.md, every fixed finding's regression test green.
+const audit31 = spawnSync(process.execPath, ["scripts/verify-4.18.26-security-gate.mjs", "docs/SECURITY-AUDIT-4.18.31.md"], { encoding: "utf8" });
+process.stdout.write(audit31.stdout || "");
+process.stderr.write(audit31.stderr || "");
+if (audit31.status !== 0) {
+  console.error("4.18.31 security audit gate FAIL");
+  process.exit(audit31.status || 1);
+}
 const regression = spawnSync(process.execPath, ["scripts/verify-4.18.31-runtime.mjs"], { encoding: "utf8" });
 process.stdout.write(regression.stdout || "");
 process.stderr.write(regression.stderr || "");
@@ -184,4 +193,4 @@ if (multiServer.status !== 0) {
   console.error("Multi-server isolation behavior checks FAIL");
   process.exit(multiServer.status || 1);
 }
-console.log("4.18.31 source preflight PASS (release checks: build targets, SHA-256 and app.asar policy, pipeline order, Release workflow; installer gate against a release build in CI; security Low findings A1 to A6 fixed (A1-5 via own child handle or pidfd) and covered by the security gate, write rate limit; E2E gate: roadmap flow, three servers and ten intentional failures against the real backend; recovery gate: six changes rolled back byte-identical, manual restore with the B3 confirmation, RECOVERY_REQUIRED; security audit gate: six areas reviewed, no open Critical/High/Medium finding, native Docker check against a real sshd, Docker daemon and core, native remote Linux check with RCON against a real sshd and core, native lifecycle and native core RCON / real master registration/listing / native plugin load / native B3-with-server gates remain separate; the native B3 plugins check runs when Python 2.7 and eBc-B3 are present; the native MySQL and B3 admin checks run when a test database is configured, the native live kick check when a CoD4x core is present)");
+console.log("4.18.31 source preflight PASS (full debug and security check 4.18.31: second audit, no open Critical/High/Medium finding, regression tests green; release checks: build targets, SHA-256 and app.asar policy, pipeline order, Release workflow; installer gate against a release build in CI; security Low findings A1 to A6 fixed (A1-5 via own child handle or pidfd) and covered by the security gate, write rate limit; E2E gate: roadmap flow, three servers and ten intentional failures against the real backend; recovery gate: six changes rolled back byte-identical, manual restore with the B3 confirmation, RECOVERY_REQUIRED; security audit gate: six areas reviewed, no open Critical/High/Medium finding, native Docker check against a real sshd, Docker daemon and core, native remote Linux check with RCON against a real sshd and core, native lifecycle and native core RCON / real master registration/listing / native plugin load / native B3-with-server gates remain separate; the native B3 plugins check runs when Python 2.7 and eBc-B3 are present; the native MySQL and B3 admin checks run when a test database is configured, the native live kick check when a CoD4x core is present)");

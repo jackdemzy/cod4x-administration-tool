@@ -109,6 +109,19 @@ test('a crash is reported at once, a planned stop once and without follow-ups', 
   Object.assign(stop.state, { status: 'STOPPED', pid: null });
   for (let i = 0; i < 5; i++) { stop.time.advance(15e3); await stop.collector.tick(); }
   assert.deepEqual(stop.events.map(event => [event.kind, event.cause.kind]), [['down', 'stopped']]);
+  // Debug pass 4.18.31 (B2): a cleanly stopped server shows as stopped, not as "Not answering".
+  assert.equal(stop.collector.live('a').down, false);
+  assert.equal(stop.collector.live('a').status, 'STOPPED');
+  // Codex review: a server that stopped answering and is then stopped is no longer "Not answering".
+  const hang = await fixture(t);
+  await hang.collector.tick();
+  hang.probe.reply = null;
+  for (let i = 0; i < 4; i++) { hang.time.advance(15e3); await hang.collector.tick(); }
+  assert.equal(hang.collector.live('a').down, true);
+  Object.assign(hang.state, { status: 'STOPPED', pid: null });
+  hang.time.advance(15e3); await hang.collector.tick();
+  assert.equal(hang.collector.live('a').down, false);
+  assert.deepEqual(hang.events.map(event => event.kind), ['down']);
 });
 
 test('a server that was never up produces no outage', async t => {

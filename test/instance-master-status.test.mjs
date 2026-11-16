@@ -27,7 +27,7 @@ test('master status view explains loopback, failures and never claims a verified
   assert.match(failed, /role="alert"/);
   assert.match(failed, /sv_authtoken is invalid/);
   const listed = render('MasterListSummary', { de: true, master: { summary: { registration: true, heartbeat: true, listed: true, lastSeenAt: '2026-10-18T10:00:00.000Z' }, list: { matchedBy: 'ADDRESS', checkedAt: '2026-10-18T10:00:00.000Z', masterTime: 'Sun Oct 18', entry: { hostname: 'Gate', addresses: [{ ip: '203.0.113.7', port: 28960, state: 'alive' }] }, listedPorts: [] } } });
-  for (const label of ['Registration', 'Heartbeat', 'Listed', 'Last seen']) assert.match(listed, new RegExp(`<th>${label}</th><td>`));
+  for (const label of ['Registrierung', 'Heartbeat', 'Gelistet', 'Zuletzt gesehen']) assert.match(listed, new RegExp(`<th>${label}</th><td>`));
   assert.match(listed, /über Adresse/);
   assert.match(listed, /203\.0\.113\.7:28960 \(alive\)/);
   const lost = render('MasterStatusView', { de: true, master: { state: 'HEARTBEAT_LOST', reason: 'MASTER_LIST_DEAD', tokenConfigured: true, networkScope: 'PUBLIC', verified: true, summary: { registration: true, heartbeat: false, listed: true, lastSeenAt: null } } });

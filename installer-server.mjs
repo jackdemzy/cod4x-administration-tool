@@ -22,7 +22,8 @@ import os from "node:os";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
+import { rotateGameLogs } from "./lib/game-log-rotation.mjs";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -72,6 +73,7 @@ import { createLinuxRuntimeAdapter, assertLinuxInstanceOwnership } from "./lib/l
 import { detectElevation } from "./lib/elevation-check.mjs";
 import { isB3PluginCodePath, isB3PluginTextPath, localOnlyGuard, publicBlockers } from "./lib/b3-plugin-routes.mjs";
 import { isCredentialPath } from "./lib/credential-request.mjs";
+import backendReady from "./lib/backend-ready.cjs";
 import { rateLimit } from "express-rate-limit";
 
 const require = createRequire(import.meta.url);
@@ -354,19 +356,23 @@ function requireCodeWhen(bringsCode) {
     res.status(403).json({ ok: false, error: "Permission denied", permission: "server.code", role: req.auth?.role });
   };
 }
-const runtimeBringsCode = body => Boolean(body.executablePath) || (body.args !== undefined && !(Array.isArray(body.args) && body.args.length === 0));
-const cloneBringsCode = body => body.serverCore !== undefined;
+// Audit 4.18.31 (F-1): a server folder or BaseGame folder of the caller's choice brings code too (iwd/GSC
+// content, plugins next to it), so choosing one other than the stored one needs server.code.
+const choosesOtherPath = (value, stored) => value !== undefined && value !== null && String(value).trim() !== "" && String(value).trim() !== String(stored ?? "").trim();
+// Codex review: the page always sends the stored executable; only another one brings code.
+const runtimeBringsCode = body => choosesOtherPath(body.executablePath, defaultRuntime.state.executablePath) || (body.args !== undefined && !(Array.isArray(body.args) && body.args.length === 0)) || choosesOtherPath(body.path, defaultRuntime.state.target) || choosesOtherPath(body.baseGamePath, defaultRuntime.state.baseGamePath);
+const cloneBringsCode = body => body.serverCore !== undefined || body.basePath !== undefined;
 
 const RBAC_ENDPOINT_BINDINGS = Object.freeze([
   { area: "installation", permission: "install.execute", routes: ["POST /api/installer"] },
-  { area: "updates", permission: "update.execute", routes: ["POST /api/fpschallenge/anticheat/download/:version"] },
+  { area: "updates", permission: "update.execute", routes: ["GET /api/fpschallenge/anticheat/download/:version"] },
   { area: "server", permission: "server.manage", routes: ["POST /api/server/start", "POST /api/runtime/start", "POST /api/runtime/stop", "POST /api/runtime/restart", "POST /api/rcon/execute", "POST /api/instances/:id/rcon/connect", "POST /api/instances/:id/rcon/command", "POST /api/admin/test"] },
   { area: "restore-points", permission: "config.manage", routes: ["GET /api/instances/:id/restore-points", "POST /api/instances/:id/restore-points", "GET /api/instances/:id/restore-points/:pointId/integrity", "POST /api/instances/:id/restore-points/:pointId/restore", "GET /api/runtime/restore-points", "POST /api/runtime/restore-points", "GET /api/runtime/restore-points/:pointId/integrity"] },
   { area: "configuration", permission: "config.manage", routes: ["GET /api/policy", "POST /api/policy/validate", "POST /api/policy/save", "GET /api/config/profiles", "POST /api/config/profiles/save", "POST /api/config/profiles/activate", "POST /api/config/profiles/delete"] },
   { area: "diagnostics", permission: "diagnostics.read", routes: ["GET /api/diagnostics", "GET /api/runtime/status"] },
   { area: "monitoring", permission: "monitor.read", routes: ["GET /api/monitor/overview", "GET /api/monitor/instances/:id/history", "GET /api/monitor/instances/:id/events"] },
   { area: "remote", permission: "user.manage", routes: ["GET /api/remote", "POST /api/remote/settings", "POST /api/remote/sessions/:sessionId/revoke", "POST /api/remote/sessions/revoke-all"] },
-  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances/:id/core", "POST /api/runtime/restore-points/:pointId/restore", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core or arguments)", "POST /api/runtime/restart (core or arguments)", "POST /api/server/start (core or arguments)", "POST /api/instances/:id/clone (core)", "POST /api/b3/environment"] },
+  { area: "server-code", permission: "server.code", routes: ["POST /api/runtime/config", "POST /api/runtime/adopt", "POST /api/instances/:id/core", "POST /api/runtime/restore-points/:pointId/restore", "POST /api/instances", "POST /api/instances/:id/plugins/install", "POST /api/instances/:id/plugins/approve", "POST /api/runtime/start (core, arguments or another folder)", "POST /api/runtime/restart (core, arguments or another folder)", "POST /api/server/start (core, arguments or another folder)", "POST /api/instances/:id/clone (core or BaseGame)", "GET /api/runtime/preflight (chosen paths)", "POST /api/b3/environment"] },
   { area: "b3-plugin-code", permission: "b3.plugins.code", routes: ["POST /api/instances/:id/b3/plugins/custom", "GET /api/instances/:id/b3/plugins/custom/:name/code", "PUT /api/instances/:id/b3/plugins/custom/:name/code", "DELETE /api/instances/:id/b3/plugins/custom/:name"] },
   ...REMOTE_LINUX_BINDINGS,
   { area: "audit", permission: "audit.read", routes: ["GET /api/audit", "GET /api/audit/persistent", "POST /api/audit/persist", "GET /api/audit/hardening", "GET /api/audit/checkpoint"] },
@@ -449,7 +455,7 @@ app.use("/api", rateLimit({
     // one audit entry per client and window, so a flood does not flood the audit log too
     if (req.rateLimit?.used === req.rateLimit?.limit + 1) audit("warn", "api.rate_limited", { method: req.method, path: req.path });
     res.setHeader("Retry-After", String(Math.ceil(options.windowMs / 1000)));
-    res.status(429).json({ ok: false, code: "RATE_LIMITED", error: "Zu viele Anfragen. Bitte kurz warten." });
+    res.status(429).json({ ok: false, code: "RATE_LIMITED", error: "Too many requests. Please wait a moment." });
   },
 }));
 const jsonBody = express.json({ limit: "64kb" }), b3PluginJsonBody = express.json({ limit: "2mb" });
@@ -469,6 +475,7 @@ app.use((error, req, res, next) => {
 await loadAuthUser();
 await loadAuthUsers();
 
+const { BACKEND_READY_LINE } = backendReady;
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "127.0.0.1";
 const INSTALL_ROOT = path.resolve(process.env.COD4X_INSTALL_ROOT || dataPath("installations"));
@@ -522,6 +529,8 @@ const SAFE_RCON_COMMANDS = new Set([
 async function executeRcon({host,port,password,command}) {
   if (!host || !password || !command) throw new Error("RCON host, password and command are required");
   const cmd=String(command).trim();
+  // Audit 4.18.31: one printable line only; a line break or control byte would smuggle a second command.
+  if (cmd.length>256 || /[^\x20-\x7e]/.test(cmd) || /[^\x21-\x7e]/.test(String(password)) || String(password).length>128) throw new Error("RCON command or password contains characters that are not allowed");
   const base=cmd.split(/\s+/)[0];
   if (!SAFE_RCON_COMMANDS.has(base)) throw new Error(`RCON command not allowed: ${base}`);
   const socket=dgram.createSocket("udp4");
@@ -555,6 +564,8 @@ function normalizeRuntimePath(value) {
   const raw = String(value ?? "").trim();
   if (!raw) throw new Error("Runtime path is required");
   if (raw.includes("\0")) throw new Error("Invalid runtime path");
+  // Audit 4.18.31 (F-1): the core splits its command line at "+"; a path with "+" would add commands.
+  if (/[+\r\n]/.test(raw)) throw new Error("Runtime path must not contain \"+\" or line breaks.");
   if (process.platform === "linux" && raw.startsWith("/")) return path.normalize(raw);
   if (/^(?:[A-Za-z]:[\\/]|\\\\)/.test(raw)) return path.normalize(raw);
   return normalizeSafeRelativePath(raw || "./server");
@@ -834,6 +845,21 @@ async function verifiedCoreStatus(target, expectedCod4x = "", platform = process
  * Keep that path contract explicit so preflight, adoption and start all use
  * exactly the same verification target.
  */
+// Debug pass 4.18.31 (B3): the security check and diagnostics judge the core the runtime really uses
+// (stored executable, version and platform) instead of a Windows default and the client iw3mp.exe.
+async function configuredCoreStatus(target, cod4x, queryPlatform) {
+  const state = defaultRuntime.state;
+  // Codex review: the stored runtime core only answers for the installation and version it belongs to;
+  // another selected path or version is checked on its own.
+  const runtimeTarget = state.executablePath ? await resolveServerTarget(state.target || "./server").then(resolved => resolved.target, () => null) : null;
+  const sameTarget = runtimeTarget !== null && path.resolve(runtimeTarget) === path.resolve(target);
+  if (state.executablePath && sameTarget && (!state.cod4x || String(state.cod4x) === String(cod4x))) {
+    const platform = normalizeServerPlatform(state.platform || queryPlatform || "windows");
+    return { ...await verifiedRuntimeCoreStatus(state.executablePath, String(state.cod4x || cod4x), platform), platform, checked: "runtime" };
+  }
+  const platform = normalizeServerPlatform(queryPlatform || (process.platform === "win32" ? "windows" : "linux"));
+  return { ...await verifiedCoreStatus(target, cod4x, platform), platform, checked: "target" };
+}
 async function verifiedRuntimeCoreStatus(executablePath, expectedCod4x = "", platform = process.platform === "win32" ? "windows" : "linux") {
   const normalizedExecutable = normalizeRuntimeExecutablePath(executablePath, platform);
   const coreDirectory = path.dirname(normalizedExecutable);
@@ -892,10 +918,14 @@ async function sha256(file) {
 
 const allowedArtifact = artifactUrl; // https only (security audit 4.18.26, A1-7)
 
-async function downloadTo(url, target) {
-  const response = await fetch(url, { redirect: "error" });
+// maxBytes/timeoutMs (Codex review of audit 4.18.31): a download handed out through the API is bounded.
+async function downloadTo(url, target, { maxBytes = 0, timeoutMs = 0 } = {}) {
+  const response = await fetch(url, { redirect: "error", ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}) });
   if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`);
-  await pipeline(Readable.fromWeb(response.body), (await import("node:fs")).createWriteStream(target));
+  if (maxBytes && Number(response.headers.get("content-length") || 0) > maxBytes) throw new Error(`Download refused: larger than ${maxBytes} bytes`);
+  let received = 0;
+  const limit = new Transform({ transform(chunk, _encoding, done) { received += chunk.length; done(maxBytes && received > maxBytes ? new Error(`Download refused: larger than ${maxBytes} bytes`) : null, chunk); } });
+  await pipeline(Readable.fromWeb(response.body), limit, (await import("node:fs")).createWriteStream(target));
 }
 
 async function verifyArtifact(file, entry) {
@@ -1009,7 +1039,7 @@ app.post("/api/auth/totp/setup", requireAuth, (req, res) => {
 });
 app.post("/api/auth/totp/confirm", requireAuth, async (req, res) => {
   const user = findAuthUser(req.auth.username), key = String(req.auth.username).toLowerCase(), pending = totpPending.get(key);
-  if (!user || !pending || pending.expiresAt <= Date.now()) { totpPending.delete(key); return res.status(409).json({ ok: false, code: "TOTP_SETUP_EXPIRED", error: "Einrichtung abgelaufen. Bitte neu starten." }); }
+  if (!user || !pending || pending.expiresAt <= Date.now()) { totpPending.delete(key); return res.status(409).json({ ok: false, code: "TOTP_SETUP_EXPIRED", error: "Setup expired. Please start again." }); }
   const step = verifyTotp(pending.secret, req.body?.code);
   if (step === null) { audit("warn", "auth.totp.confirm_failed", { username: user.username }); return res.status(400).json({ ok: false, code: "TOTP_INVALID", error: "Invalid code. Check the clock on the phone and the computer." }); }
   const codes = generateRecoveryCodes();
@@ -1172,19 +1202,32 @@ app.get("/api/fpschallenge/anticheat/catalog", async (_req, res) => {
   });
 });
 
+// Codex review: one FPSAC download at a time, at most 128 MiB and 2 minutes.
+const FPSAC_MAX_BYTES = 128 * 1024 * 1024, FPSAC_TIMEOUT_MS = 120000;
+let fpsacDownloadBusy = false;
 app.get("/api/fpschallenge/anticheat/download/:version", requirePermission("update.execute"), async (req,res) => {
   if (req.params.version !== "9.2.0") return res.status(404).json({ok:false,error:"Unsupported FPSAC version"});
   const url = process.env.FPSAC_URL;
   if (!url) return res.status(503).json({ok:false,error:"FPSAC 9.2.0 download is not configured on the server"});
+  // Audit 4.18.31 (W-6, F-4): pinned like every other artifact. The file is downloaded and checked
+  // against FPSAC_SHA256 first and only then handed out, always as a download, never as a page.
+  const sha256 = String(process.env.FPSAC_SHA256 || "").trim();
+  if (!/^[a-f0-9]{64}$/i.test(sha256)) return res.status(503).json({ok:false,error:"FPSAC 9.2.0 download needs FPSAC_SHA256 (64 hex characters) on the server"});
+  if (fpsacDownloadBusy) return res.status(429).json({ok:false,code:"FPSAC_DOWNLOAD_BUSY",error:"An FPSAC download is already running"});
+  fpsacDownloadBusy = true;
+  let directory = null;
   try {
-    const u = allowedArtifact({url});
-    const response = await fetch(u,{redirect:"error"});
-    if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status}`);
-    res.status(200);
-    if (response.headers.get("content-type")) res.set("Content-Type",response.headers.get("content-type"));
-    await pipeline(Readable.fromWeb(response.body),res);
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), "cod4x-fpsac-"));
+    const file = path.join(directory, "fpsac-9.2.0.zip");
+    await downloadTo(allowedArtifact({url}), file, { maxBytes: FPSAC_MAX_BYTES, timeoutMs: FPSAC_TIMEOUT_MS });
+    await verifyArtifact(file, {sha256});
+    res.status(200).set({"Content-Type":"application/octet-stream","Content-Disposition":'attachment; filename="fpsac-9.2.0.zip"',"X-Content-Type-Options":"nosniff"});
+    await pipeline((await import("node:fs")).createReadStream(file),res);
   } catch(e) {
     if (!res.headersSent) res.status(400).json({ok:false,error:e.message});
+  } finally {
+    fpsacDownloadBusy = false;
+    if (directory) await fs.rm(directory,{recursive:true,force:true}).catch(()=>{});
   }
 });
 
@@ -1236,7 +1279,7 @@ app.get("/api/security/status", requirePermission("diagnostics.read"), async (re
     const pathInsideRoot = target === INSTALL_ROOT || target.startsWith(INSTALL_ROOT + path.sep);
     const versionAllowed = policyState.security.allowedCod4xVersions.includes(cod4x);
     const targetAllowed = policyState.security.targets.includes(targetType);
-    const core = await verifiedCoreStatus(target, cod4x, String(req.query.platform || "windows"));
+    const core = await configuredCoreStatus(target, cod4x, req.query.platform);
     const checks = [
       { id: "path", label: "Installation root boundary", pass: pathInsideRoot },
       { id: "traversal", label: "Path traversal protection", pass: true },
@@ -1817,9 +1860,12 @@ app.get("/api/diagnostics", requirePermission("diagnostics.read"), async (req, r
       try { await fs.access(target); add("target-exists", "Install target", "pass", "Directory exists."); }
       catch { add("target-exists", "Install target", "warn", "Directory does not exist yet."); }
 
-      const exe = assertSafeChildPath(target, "iw3mp.exe");
-      try { await fs.access(exe); add("verified-core", "Verified-Core", "pass", "iw3mp.exe is present."); }
-      catch { add("verified-core", "Verified-Core", "warn", "iw3mp.exe was not found; an installation/verification is still required."); }
+      // Debug pass 4.18.31 (B3): the dedicated core of the runtime, not the client iw3mp.exe.
+      try {
+        const core = await configuredCoreStatus(target, cod4x, req.query.platform);
+        if (core.verified) add("verified-core", "Verified-Core", "pass", `${serverCoreDefinition(core.platform).executable} is verified (CoD4x ${core.manifest?.cod4x || cod4x}).`);
+        else add("verified-core", "Verified-Core", "warn", `${serverCoreDefinition(core.platform).executable} is not verified yet${core.reasons?.length ? `: ${core.reasons.join("; ")}` : "."}`);
+      } catch (e) { add("verified-core", "Verified-Core", "warn", `Server core could not be checked: ${e.message}`); }
 
       const manifestPath = assertSafeChildPath(target, "cod4x-control-manifest.json");
       try {
@@ -1965,7 +2011,12 @@ app.post("/api/installer", requirePermission("install.execute"), async (req, res
 
 // ─── 4.17.2 Runtime Discovery / Existing-Core Adoption ─────────────────────
 app.get("/api/runtime/search",requirePermission("diagnostics.read"),async(_req,res)=>{const correlationId=crypto.randomUUID();try{const candidates=await searchRuntimeCores();audit("info","runtime.core.search",{correlationId,count:candidates.length});res.json({ok:true,correlationId,candidates});}catch(err){audit("warn","runtime.core.search.failed",{correlationId,error:err.message});res.status(500).json({ok:false,correlationId,error:err.message});}});
-app.get("/api/runtime/preflight",requirePermission("diagnostics.read",{quietAllowed:true}),async(req,res)=>{try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform}),core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);res.json({ok:core.verified&&baseGame.valid,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
+// Audit 4.18.31 (W-1): reading roles check the stored runtime only. Probing chosen paths (which on
+// Windows may be UNC shares and hand the account's NTLM credentials to another host) needs server.code,
+// like saving them does.
+// The page always sends its fields; a value equal to the stored one is no choice of its own.
+const preflightChoosesPath=query=>choosesOtherPath(query.path,defaultRuntime.state.target||"./server")||choosesOtherPath(query.executablePath,defaultRuntime.state.executablePath)||choosesOtherPath(query.baseGamePath,defaultRuntime.state.baseGamePath);
+app.get("/api/runtime/preflight",requirePermission("diagnostics.read",{quietAllowed:true}),async(req,res)=>{if(preflightChoosesPath(req.query)&&!hasPermission(req.auth?.role,"server.code")){audit("warn","rbac.permission.checked",{username:req.auth?.username,role:req.auth?.role,permission:"server.code",allowed:false});return res.status(403).json({ok:false,error:"Permission denied",permission:"server.code",role:req.auth?.role});}try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform}),core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);res.json({ok:core.verified&&baseGame.valid,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
 // Puts the runtime record of a restore point back (only the configuration fields; process fields such
 // as status and pid stay as they are).
 const RUNTIME_RECORD_FIELDS=["target","platform","resolvedTarget","runtimeRoot","executablePath","executable","cod4x","baseGamePath","updatedAt"];
@@ -2570,6 +2621,8 @@ runtimeDependencies.beforeLaunch = async ({ filesystemHomePath }) => {
     error.code = "INSTANCE_LEGACY_HOME_BLOCKED";
     throw error;
   }
+  // Codex review (A1-10): the standard server's game logs are rotated before each start too.
+  await rotateGameLogs(path.join(filesystemHomePath, "main"));
 };
 
 function instanceRoute(action, status = 200) {
@@ -2824,7 +2877,7 @@ async function b3IntegrationView(id, full = false) {
   const own = await credentialService.instanceStatus(id);
   const hints = restartHints({ plan: view.plan, credentialDigest: own.digest, launchedWith: serverRunning ? view.launchedWith : null, startedWith: b3Running ? b3Service.startedWith(id) : null, pluginsRevision: instanceStore.get(id).b3PluginsRevision });
   const status = await credentialService.instanceStatus(id);
-  return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: full ? vault.sha256 : null } };
+  return { settings: view.settings, plan: view.plan, b3hide: view.b3hide, knownHash: view.knownHash, prefixChecked: view.prefixChecked === true, restart: hints, authLevels: status.b3auth?.levels || [], vault: { locked: vault.locked, initialized: vault.initialized, sha256: full ? vault.sha256 : null } };
 }
 app.get("/api/instances/:id/b3/integration", requirePermission("diagnostics.read"), instanceRoute(async req => ({ integration: await b3IntegrationView(req.params.id, hasPermission(req.auth.role, "config.manage")) })));
 app.post("/api/instances/:id/b3/integration", requirePermission("config.manage"), instanceRoute(async req => {
@@ -3146,8 +3199,26 @@ app.post("/api/remote/sessions/revoke-all", requirePermission("user.manage"), re
 await loadRemoteSettings();
 await applyRemoteGateway();
 
-app.listen(PORT, HOST, () => {
+// Audit 4.18.31 (W-3, S-2): the last error handler. Express's default one would log a malformed body
+// (with the password or webhook it holds) and answer with a stack trace; this one answers fixed codes.
+app.use((error, req, res, _next) => {
+  const status = error?.type === "entity.too.large" ? 413 : Number.isInteger(error?.status) && error.status >= 400 && error.status < 500 ? error.status : 500;
+  if (status === 500) console.error(`[api] ${req.method} ${req.path} failed: ${error?.stack || error?.code || "unknown error"}`);
+  if (res.headersSent) return res.end();
+  res.status(status).json({ ok: false, code: status === 413 ? "REQUEST_TOO_LARGE" : status === 500 ? "INTERNAL_ERROR" : "REQUEST_INVALID", error: status === 413 ? "Request is too large." : status === 500 ? "Internal error." : "Request is invalid." });
+});
+
+// Audit 4.18.31 (S-1): a port taken by another program ends the backend (Express 5 hands the listen
+// error to this callback instead of throwing). Only after a successful listen does the backend print
+// the ready line on its own stdout, which the desktop app waits for instead of trusting whatever
+// answers on the port.
+app.listen(PORT, HOST, (error) => {
+  if (error) {
+    console.error(`COD4X CONTROL installer API could not listen on ${HOST}:${PORT}: ${error.code || error.message}`);
+    process.exit(1);
+  }
   console.log(`COD4X CONTROL installer API listening on :${PORT}`);
+  console.log(BACKEND_READY_LINE);
   // Security audit 4.18.26 (A1-3): CONTROL needs neither root nor Windows administrator rights.
   detectElevation({ execFileAsync }).then(({ elevated, kind }) => {
     if (!elevated) return;

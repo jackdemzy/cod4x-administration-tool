@@ -53,7 +53,8 @@ const app = createRemoteGateway({
 const listener = await listenRemoteGateway(app, { host: "127.0.0.1", port: 0 });
 const base = `http://127.0.0.1:${listener.address().port}`;
 const post = (body, headers = {}) => fetch(`${base}/remote/api/login`, { method: "POST", headers: { "content-type": "application/json", origin: base, "x-forwarded-for": "198.51.100.4", ...headers }, body: JSON.stringify(body) });
-const viewerNeedsTotp = (await (await post({ username: "phone", password: "gate-password-123" })).json()).code === "REMOTE_TOTP_SETUP_REQUIRED";
+// Audit 4.18.31 (A5-12): behind the public proxy a correct password without TOTP is answered like a wrong one.
+const viewerNeedsTotp = (await (await post({ username: "phone", password: "gate-password-123" })).json()).code === "REMOTE_LOGIN_INVALID";
 for (let i = 0; i < 5; i++) await post({ username: "phone", password: "wrong" });
 const lockedAfterFive = (await post({ username: "phone", password: "gate-password-123" })).status === 429;
 const pushWithoutService = (await fetch(`${base}/remote/api/push/key`)).status === 401;

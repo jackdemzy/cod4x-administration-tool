@@ -37,10 +37,10 @@ export function MasterListSummary({ master, de }) {
   const { summary, list } = master;
   return <table>
     <tbody>
-      <tr><th>Registration</th><td>{mark(summary.registration)}</td></tr>
+      <tr><th>{de ? 'Registrierung' : 'Registration'}</th><td>{mark(summary.registration)}</td></tr>
       <tr><th>Heartbeat</th><td>{mark(summary.heartbeat)}</td></tr>
-      <tr><th>Listed</th><td>{mark(summary.listed)}{list?.matchedBy && <> ({list.matchedBy === 'ADDRESS' ? (de ? 'über Adresse' : 'by address') : (de ? 'über Serveridentität' : 'by server identity')})</>}</td></tr>
-      <tr><th>Last seen</th><td>{summary.lastSeenAt || '–'}</td></tr>
+      <tr><th>{de ? 'Gelistet' : 'Listed'}</th><td>{mark(summary.listed)}{list?.matchedBy && <> ({list.matchedBy === 'ADDRESS' ? (de ? 'über Adresse' : 'by address') : (de ? 'über Serveridentität' : 'by server identity')})</>}</td></tr>
+      <tr><th>{de ? 'Zuletzt gesehen' : 'Last seen'}</th><td>{summary.lastSeenAt || '–'}</td></tr>
       {list && <tr><th>{de ? 'Geprüft' : 'Checked'}</th><td>{list.checkedAt}{list.masterTime && <> · Master: {list.masterTime}</>}</td></tr>}
       {list?.entry && <tr><th>{de ? 'Eintrag' : 'Entry'}</th><td>{list.entry.hostname} · {list.entry.addresses.map(address => `${address.ip}:${address.port} (${address.state})`).join(', ')}</td></tr>}
       {list?.listedPorts?.length > 0 && <tr><th>{de ? 'Gelistete Ports' : 'Listed ports'}</th><td>{list.listedPorts.join(', ')}</td></tr>}

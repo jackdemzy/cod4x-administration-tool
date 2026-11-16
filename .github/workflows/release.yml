@@ -81,12 +81,12 @@ jobs:
           echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
           echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # Release review 4.18.30 (R-5): no job pushes; the token does not stay in .git/config.
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -118,7 +118,7 @@ jobs:
       - name: Upload unsigned app folder for signing
         id: unsigned-app
         if: env.SIGN_WINDOWS == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-win-unpacked
           path: dist-installer/win-unpacked/
@@ -127,7 +127,7 @@ jobs:
 
       - name: Sign app exe (SignPath)
         if: env.SIGN_WINDOWS == 'true'
-        uses: signpath/github-action-submit-signing-request@v3
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
@@ -157,7 +157,7 @@ jobs:
       - name: Upload unsigned installers for signing
         id: unsigned-installers
         if: env.SIGN_WINDOWS == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-win-installers
           path: dist-installer/*.exe
@@ -166,7 +166,7 @@ jobs:
 
       - name: Sign setup and portable (SignPath)
         if: env.SIGN_WINDOWS == 'true'
-        uses: signpath/github-action-submit-signing-request@v3
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
@@ -203,7 +203,7 @@ jobs:
           COD4X_RELEASE_DIR: ${{ github.workspace }}/dist-installer
         run: node scripts/verify-4.18.30-installer-gate.mjs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ matrix.platform }}
           if-no-files-found: error
@@ -224,7 +224,7 @@ jobs:
       # Same condition as SIGN_WINDOWS in the build job (on a tag): the build has failed unless signed.
       SIGNED: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 

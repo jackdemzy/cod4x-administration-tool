@@ -41,7 +41,7 @@ export async function backend(t, extraEnv = {}) {
     const response = await fetch(`${url}${route}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(8000) });
     return { status: response.status, headers: response.headers, json: await response.json().catch(() => null) };
   };
-  return { url, port, call, root };
+  return { url, port, call, root, output: () => diagnostics, child };
 }
 
 export const password = () => `${crypto.randomBytes(12).toString('hex')}Aa9!`;

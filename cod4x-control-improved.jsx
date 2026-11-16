@@ -258,7 +258,7 @@ const DVARS = [
   ["scr_game_killstreaks","1","Script","Killstreaks."],
   ["scr_game_perks","1","Script","Perks."],
   ["scr_team_fftype","0","Script","Teamfeuer-Typ für geskriptete Modi."],
-  ["net_port","28960","Network","UDP-Port."],
+  ["net_port","28960","Network","UDP port."],
   ["net_ip","0.0.0.0","Network","Bind-Adresse."],
   ["rate","25000","Network","Client-Netzwerkrate."],
   ["fs_game","","FileSystem","Mod-Verzeichnis; leer = Basisspiel."],
@@ -510,7 +510,7 @@ const I18N = {
     hostname:"sv_hostname", clients:"sv_maxclients", joinPassword:"sv_password", rconPassword:"RCON-Passwort",
     port:"net_port", fps:"sv_fps", maxrate:"sv_maxRate", mod:"Mod / fs_game", customMod:"Benutzerdefinierter Mod-Pfad",
     mode:"g_gametype", friendlyfire:"g_friendlyfire", vote:"g_allowvote", pure:"sv_pure", inactivity:"g_inactivity",
-    killstreaks:"scr_game_killstreaks", perks:"scr_game_perks", logfile:"logfile", preview:"server.cfg Preview",
+    killstreaks:"scr_game_killstreaks", perks:"scr_game_perks", logfile:"logfile", preview:"server.cfg-Vorschau",
     close:"Schließen", copy:"Kopieren", copied:"✓ kopiert", generated:"→ als server.cfg speichern",
     public:"leer = öffentlich", recommended:"empfohlen", noRcon:"RCON-Passwort ist leer. Für Remote-RCON ein Passwort setzen.",
     rotationTitle:"Map Rotation Builder", rotationSub:"Rotation visuell zusammenstellen und als CFG exportieren",
@@ -648,6 +648,7 @@ function fsGameError(value,de=false){
 }
 
 function ConfigBuilder({t,lang}) {
+  const de=lang==="de";
   const [cfg,setCfg] = useState({
     sv_hostname:"^1My ^7CoD4x Server",sv_maxclients:"18",sv_password:"",rcon_password:"",
     sv_pure:"1",sv_maxrate:"25000",sv_floodProtect:"4",sv_allowDownload:"1",sv_fps:"20",
@@ -804,7 +805,7 @@ set g_log "${cfg.g_log}"
         <div style={{marginBottom:10,display:"flex",gap:6,flexWrap:"wrap"}}>
           <Tag color={C.blue}>CoD4x {cod4xVersion}</Tag>
           <Tag color={C.accent}>{fpsVersion==="custom"?"FPS Promod Custom":`FPS Promod ${fpsVersion}`}</Tag>
-          <Tag color={botEnabled?C.success:C.muted}>{botEnabled?"Bot Warfare":"No Bot Warfare"}</Tag>
+          <Tag color={botEnabled?C.success:C.muted}>{botEnabled?"Bot Warfare":(de?"Ohne Bot Warfare":"No Bot Warfare")}</Tag>
           <Tag color={effectiveMod?C.success:C.muted}>{effectiveMod || t.vanilla}</Tag>
         </div>
       </div>
@@ -853,7 +854,7 @@ set g_log "${cfg.g_log}"
         </Field>
         <Field label="FPSChallenge version">
           <select style={selectStyle} value={fpschallengeVersion} onChange={e=>setFpschallengeVersion(e.target.value)}>
-            <option value="">Load catalog…</option>
+            <option value="">{de?"Katalog laden …":"Load catalog…"}</option>
             {fpschallengeCatalog.map(v=><option key={v.id} value={v.id}>{v.name}{v.variant?" — "+v.variant:""}</option>)}
           </select>
         </Field>
@@ -864,9 +865,9 @@ set g_log "${cfg.g_log}"
             const d=await r.json();
             setFpschallengeCatalog(d.versions||[]);
           }finally{setFpschallengeLoading(false);}
-        }}>{fpschallengeLoading?"Loading…":"Load FPSChallenge download catalog"}</button>
+        }}>{fpschallengeLoading?(de?"Lädt …":"Loading…"):(de?"FPSChallenge-Downloadkatalog laden":"Load FPSChallenge download catalog")}</button>
         <div style={{color:C.muted,fontSize:10,lineHeight:1.5,marginTop:8}}>
-          Catalog source: dl.fpschallenge.eu/cod4/mods/. Versions are discovered from the server directory listing.
+          {de?"Katalogquelle: dl.fpschallenge.eu/cod4/mods/. Die Versionen werden aus dem Verzeichnis des Servers gelesen.":"Catalog source: dl.fpschallenge.eu/cod4/mods/. Versions are discovered from the server directory listing."}
         </div>
       </div>
 
@@ -877,18 +878,18 @@ set g_log "${cfg.g_log}"
             {EBC_PROMOD_PROFILES.map(p=><option key={p.id} value={p.id}>{p.name} — {p.version}</option>)}
           </select>
         </Field>
-        <Field label="Install mode">
+        <Field label={de?"Installationsart":"Install mode"}>
           <select style={selectStyle} value={promodInstallMode} onChange={e=>setPromodInstallMode(e.target.value)}>
-            <option value="copy-source">Copy verified local source</option>
-            <option value="git-clone">Git clone during install</option>
-            <option value="existing">Use existing server mod</option>
+            <option value="copy-source">{de?"Geprüfte lokale Quelle kopieren":"Copy verified local source"}</option>
+            <option value="git-clone">{de?"Git-Clone bei der Installation":"Git clone during install"}</option>
+            <option value="existing">{de?"Vorhandenen Server-Mod verwenden":"Use existing server mod"}</option>
           </select>
         </Field>
-        <Field label="Local source path (optional)">
+        <Field label={de?"Lokaler Quellpfad (optional)":"Local source path (optional)"}>
           <input style={inputStyle} value={promodSourcePath} onChange={e=>setPromodSourcePath(e.target.value)} placeholder="C:\Sources\ebc-pm"/>
         </Field>
         <div style={{color:C.muted,fontSize:10,lineHeight:1.5}}>
-          eBc Promod is the Explicit Bouncers Promod repository and is documented as ready for live CoD4/CoD4X servers.
+          {de?"eBc Promod ist das Promod-Repository der Explicit Bouncers und laut Dokumentation für Live-Server mit CoD4/CoD4X geeignet.":"eBc Promod is the Explicit Bouncers Promod repository and is documented as ready for live CoD4/CoD4X servers."}
         </div>
       </div>
 
@@ -1392,7 +1393,7 @@ function ServerInstancesPanel({lang,executablePath,baseGamePath,platform,cod4x})
     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
       <label>{de?"Server-ID":"Server ID"}<input style={inputStyle} value={id} onChange={e=>setId(e.target.value)} disabled={busy}/></label>
       <label>{de?"Name":"Name"}<input style={inputStyle} value={name} onChange={e=>setName(e.target.value)} disabled={busy}/></label>
-      <label>UDP-Port<input type="number" min="1024" max="65535" style={inputStyle} value={port} onChange={e=>setPort(e.target.value)} disabled={busy}/></label>
+      <label>{de?"UDP-Port":"UDP port"}<input type="number" min="1024" max="65535" style={inputStyle} value={port} onChange={e=>setPort(e.target.value)} disabled={busy}/></label>
       <button style={buttonStyle} disabled={busy||!executablePath||!baseGamePath} onClick={()=>request("/api/instances","POST",definition)}>{de?"Neu erstellen":"Create"}</button>
     </div>
     {instances.length===0&&<div style={{color:C.muted}}>{de?"Noch keine verwalteten Instanzen. Die bisherige Einzel-Runtime bleibt separat erhalten.":"No managed instances yet. Legacy single runtime remains separate."}</div>}
@@ -1427,9 +1428,12 @@ function ServerInstancesPanel({lang,executablePath,baseGamePath,platform,cod4x})
 
 function ProductionRuntimePanel({lang}){
   const [runtime,setRuntime]=useState(null),[preflight,setPreflight]=useState(null),[path,setPath]=useState("./server"),[baseGamePath,setBaseGamePath]=useState(""),[executablePath,setExecutablePath]=useState(""),[platform,setPlatform]=useState("windows"),[cod4x,setCod4x]=useState("21.5"),[busy,setBusy]=useState(false),[searching,setSearching]=useState(false),[candidates,setCandidates]=useState([]),[error,setError]=useState(""),[message,setMessage]=useState("");
-  const loadGeneration=useRef(0);
+  const loadGeneration=useRef(0),seeded=useRef(false);
   const de=lang==="de";
-  const load=async()=>{const generation=++loadGeneration.current;try{const q=`/api/runtime/preflight?path=${encodeURIComponent(path)}&executablePath=${encodeURIComponent(executablePath)}&platform=${encodeURIComponent(platform)}&cod4x=${encodeURIComponent(cod4x)}&baseGamePath=${encodeURIComponent(baseGamePath)}`;const [sr,pr]=await Promise.all([apiFetch(apiUrl("/api/runtime/status")),apiFetch(apiUrl(q))]);const sd=await sr.json().catch(()=>({}));const pd=await pr.json().catch(()=>({}));if(generation!==loadGeneration.current)return;if(!sr.ok)throw new Error(sd?.error||`HTTP ${sr.status}`);setRuntime(sd.runtime);setPreflight(pd);if(sd.runtime?.baseGamePath&&!baseGamePath)setBaseGamePath(sd.runtime.baseGamePath);if(sd.runtime?.target&&path==="./server")setPath(sd.runtime.target);if(sd.runtime?.executablePath&&!executablePath)setExecutablePath(sd.runtime.executablePath);if(sd.runtime?.cod4x&&cod4x==="21.5")setCod4x(sd.runtime.cod4x);if(sd.runtime?.platform&&platform==="windows")setPlatform(sd.runtime.platform)}catch(e){setError(e.message)}};
+  // Debug pass 4.18.31 (B9): the stored runtime (platform, core, folders) is read before the first
+  // preflight, which otherwise went out with the "windows" default and failed for a Linux core.
+  const seed=async generation=>{const sr=await apiFetch(apiUrl("/api/runtime/status"));const sd=await sr.json().catch(()=>({}));if(generation!==loadGeneration.current)return false;if(!sr.ok)throw new Error(sd?.error||`HTTP ${sr.status}`);seeded.current=true;setRuntime(sd.runtime);const r=sd.runtime||{};let changed=false;if(r.baseGamePath&&!baseGamePath){setBaseGamePath(r.baseGamePath);changed=true}if(r.target&&path==="./server"&&r.target!==path){setPath(r.target);changed=true}if(r.executablePath&&!executablePath){setExecutablePath(r.executablePath);changed=true}if(r.cod4x&&cod4x==="21.5"&&r.cod4x!==cod4x){setCod4x(r.cod4x);changed=true}if(r.platform&&platform==="windows"&&r.platform!==platform){setPlatform(r.platform);changed=true}return !changed};
+  const load=async()=>{const generation=++loadGeneration.current;try{if(!seeded.current&&!(await seed(generation)))return;const q=`/api/runtime/preflight?path=${encodeURIComponent(path)}&executablePath=${encodeURIComponent(executablePath)}&platform=${encodeURIComponent(platform)}&cod4x=${encodeURIComponent(cod4x)}&baseGamePath=${encodeURIComponent(baseGamePath)}`;const [sr,pr]=await Promise.all([apiFetch(apiUrl("/api/runtime/status")),apiFetch(apiUrl(q))]);const sd=await sr.json().catch(()=>({}));const pd=await pr.json().catch(()=>({}));if(generation!==loadGeneration.current)return;if(!sr.ok)throw new Error(sd?.error||`HTTP ${sr.status}`);setRuntime(sd.runtime);setPreflight(pd);if(sd.runtime?.baseGamePath&&!baseGamePath)setBaseGamePath(sd.runtime.baseGamePath);if(sd.runtime?.target&&path==="./server")setPath(sd.runtime.target);if(sd.runtime?.executablePath&&!executablePath)setExecutablePath(sd.runtime.executablePath);if(sd.runtime?.cod4x&&cod4x==="21.5")setCod4x(sd.runtime.cod4x);if(sd.runtime?.platform&&platform==="windows")setPlatform(sd.runtime.platform)}catch(e){setError(e.message)}};
   useEffect(()=>{load();const id=setInterval(load,2500);return()=>{clearInterval(id);loadGeneration.current++}},[path,executablePath,platform,cod4x,baseGamePath]);
   async function saveConfig(nextPath=path,nextExecutable=executablePath,nextPlatform=platform,nextCod4x=cod4x){setBusy(true);setError("");try{const r=await apiFetch(apiUrl("/api/runtime/config"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:nextPath,executablePath:nextExecutable,platform:nextPlatform,cod4x:nextCod4x,baseGamePath})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`HTTP ${r.status}`);setRuntime(d.runtime);setMessage(de?"Runtime-Konfiguration gespeichert.":"Runtime configuration saved.");await load()}catch(e){setError(e.message)}finally{setBusy(false)}}
   async function action(kind){setBusy(true);setError("");setMessage("");try{const r=await apiFetch(apiUrl(`/api/runtime/${kind}`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path,executablePath,platform,cod4x,baseGamePath})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error||`HTTP ${r.status}`);setRuntime(d.runtime);setMessage(kind==="start"?(de?"Runtime gestartet.":"Runtime started."):kind==="stop"?(de?"Runtime gestoppt.":"Runtime stopped."):(de?"Runtime neu gestartet.":"Runtime restarted."));await load()}catch(e){setError(e.message);await load()}finally{setBusy(false)}}
@@ -2277,6 +2281,25 @@ function ConfigurationPolicyPanel({lang}){
   </Section>;
 }
 
+// Debug pass 4.18.31 (B5): login and first-run errors come from the backend in English;
+// the German UI shows them in German.
+const LOGIN_ERRORS_DE={
+  "Invalid username or password.":"Benutzername oder Passwort falsch.",
+  "User is disabled.":"Dieser Benutzer ist deaktiviert.",
+  "Administrator is already initialized.":"Der Administrator ist bereits eingerichtet.",
+  "First-run initialization required.":"Zuerst muss der Administrator eingerichtet werden.",
+  "Username: 3–32 characters, only letters, digits, '.', '_' and '-'.":"Benutzername: 3–32 Zeichen, nur Buchstaben, Ziffern, „.“, „_“ und „-“.",
+  "Password: at most 256 characters.":"Passwort: höchstens 256 Zeichen.",
+};
+export function loginErrorText(d,status,de){
+  const text=d?.error||`HTTP ${status}`;
+  if(!de) return text;
+  if(d?.code==="LOGIN_LOCKED"&&Number.isFinite(d.retryAfterMs)) return `Zu viele Fehlversuche. Erneut versuchen in ${Math.ceil(d.retryAfterMs/60000)} min.`;
+  const minimum=/^Password: at least (\d+) characters required\.$/.exec(text);
+  if(minimum) return `Passwort: mindestens ${minimum[1]} Zeichen.`;
+  return LOGIN_ERRORS_DE[text]||text;
+}
+
 function SecurityPanel({t,lang}){
   const de=lang==="de";
   const [fpsAcCatalog,setFpsAcCatalog]=useState([]);
@@ -2353,7 +2376,8 @@ function SecurityPanel({t,lang}){
         </Field>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
           <button style={buttonStyle} disabled={loading} onClick={loadCatalog}>{loading?(de?"Laden…":"Loading…"):(de?"FPSAC-Versionen laden":"Load FPSAC versions")}</button>
-          <a href={apiUrl("/api/fpschallenge/anticheat/download/9.2.0")} style={{...buttonStyle,textDecoration:"none"}}>{de?"FPSAC 9.2.0 herunterladen":"Download FPSAC 9.2.0"}</a>
+          {/* Audit 4.18.31 (W-6): a plain link carries no bearer token (401); fetch it and save the file. */}
+          <button style={buttonStyle} disabled={loading} onClick={async()=>{setStatus("");try{const r=await apiFetch(apiUrl("/api/fpschallenge/anticheat/download/9.2.0"));if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d?.error||`HTTP ${r.status}`);}const url=URL.createObjectURL(await r.blob());const link=document.createElement("a");link.href=url;link.download="fpsac-9.2.0.zip";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);}catch(e){setStatus(e.message);}}}>{de?"FPSAC 9.2.0 herunterladen":"Download FPSAC 9.2.0"}</button>
         </div>
         <div style={{display:"flex",gap:18,fontSize:11,color:C.muted}}>
           <label><input type="checkbox" checked={enforce} onChange={e=>setEnforce(e.target.checked)}/> Enforce</label>
@@ -2367,8 +2391,8 @@ function SecurityPanel({t,lang}){
         <Field label="Host"><input style={inputStyle} value={rconHost} onChange={e=>setRconHost(e.target.value)} /></Field>
         <Field label="Port"><input style={inputStyle} value={rconPort} onChange={e=>setRconPort(e.target.value)} /></Field>
       </div>
-      <Field label="RCON Password"><input style={inputStyle} type="password" value={rconPassword} onChange={e=>setRconPassword(e.target.value)} /></Field>
-      <div style={{fontSize:10,color:C.muted}}>RCON is sent server-side; the password is never written to the application log.</div>
+      <Field label={de?"RCON-Passwort":"RCON Password"}><input style={inputStyle} type="password" value={rconPassword} onChange={e=>setRconPassword(e.target.value)} /></Field>
+      <div style={{fontSize:10,color:C.muted}}>{de?"RCON wird vom Backend gesendet; das Passwort wird nie ins Anwendungsprotokoll geschrieben.":"RCON is sent server-side; the password is never written to the application log."}</div>
     </Section>
   </div>;
 }
@@ -2425,7 +2449,7 @@ function AuthGate(){
   async function request(path, body){
     const r=await apiFetch(apiUrl(path),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(d?.error||`HTTP ${r.status}`);
+    if(!r.ok) throw new Error(loginErrorText(d,r.status,de));
     return d;
   }
 
@@ -2536,7 +2560,7 @@ function AuthGate(){
   if(mode!=="authenticated") return <div style={{minHeight:"100vh",background:C.bg,color:C.text,display:"grid",placeItems:"center",fontFamily:"Inter,Segoe UI,system-ui,sans-serif",padding:24}}>
     <form onSubmit={submit} style={{width:"100%",maxWidth:420,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:24,boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}><div style={{color:C.accent,fontFamily:"monospace",fontWeight:800,fontSize:13,letterSpacing:"0.12em"}}>COD4X CONTROL</div><div style={{display:"flex",gap:5}}><button type="button" onClick={()=>setLang("en")} style={langBtn(!de)}>EN</button><button type="button" onClick={()=>setLang("de")} style={langBtn(de)}>DE</button></div></div>
-      <div style={{color:C.muted,fontSize:10,letterSpacing:"0.08em",marginBottom:22}}>{mode==="init"?"FIRST-RUN ADMIN INITIALIZATION":"AUTHENTICATION"}</div>
+      <div style={{color:C.muted,fontSize:10,letterSpacing:"0.08em",marginBottom:22}}>{mode==="init"?(de?"ERSTEINRICHTUNG DES ADMINISTRATORS":"FIRST-RUN ADMIN INITIALIZATION"):(de?"ANMELDUNG":"AUTHENTICATION")}</div>
       <h1 style={{fontSize:19,margin:"0 0 7px",fontWeight:650}}>{mode==="init"?(de?"Administrator einrichten":"Set up administrator"):(de?"Anmelden":"Sign in")}</h1>
       <div style={{fontSize:11,color:C.muted,marginBottom:18}}>{mode==="init"?(de?`Mindestens ${12} Zeichen für das Administrator-Passwort.`:`At least ${12} characters for the administrator password.`):(de?"30 Minuten Session-Lifetime.":"30 minute session lifetime.")}</div>
       <Field label={de?"Benutzername":"Username"}><input autoFocus style={inputStyle} value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" /></Field>
@@ -2596,7 +2620,7 @@ export function ControlApp({user,onLogout,lang="en",setLang=()=>{}}){
         {tab==="diagnostics"&&<DiagnosticsPanel t={t} lang={lang}/>}
         {tab==="runtime"&&<ProductionRuntimePanel lang={lang}/>}
         {tab==="remote"&&<><Header title="Remote Linux" sub={de?"Linux-Server über SSH verwalten":"Manage Linux servers over SSH"}/><div className="remote-linux"><RemoteHostsPanel de={de} request={(route,options)=>apiFetch(apiUrl(route),options)}/></div></>}
-        {tab==="audit"&&<><RBACPanel lang={lang}/><UserAdministrationPanel lang={lang} user={user}/><SessionManagementPanel lang={lang} user={user}/><BackupRecoveryPanel lang={lang}/><AuditTrailPanel lang={lang}/><PersistentAuditPanel lang={lang}/><PersistentLogHardeningPanel lang={lang}/><ConfigurationPolicyPanel lang={lang}/><ConfigurationProfilesPanel lang={lang}/></>}
+        {tab==="audit"&&<><RBACPanel lang={lang}/><UserAdministrationPanel lang={lang} user={user}/><SessionManagementPanel lang={lang} user={user}/><BackupRecoveryPanel lang={lang}/>{/* Debug pass 4.18.31 (B8): only roles with audit.read see the audit panels (operator got three 403 panels). */}{["admin","auditor","viewer"].includes(user?.role)&&<><AuditTrailPanel lang={lang}/><PersistentAuditPanel lang={lang}/><PersistentLogHardeningPanel lang={lang}/></>}<ConfigurationPolicyPanel lang={lang}/><ConfigurationProfilesPanel lang={lang}/></>}
         {tab==="rcon"&&<RCONCommands t={t}/>}
         {tab==="versions"&&<VersionManager t={t} lang={lang}/>}
         {tab==="tools"&&<><DvarBrowser t={t}/><GSCAssistant t={t} lang={lang}/></>}

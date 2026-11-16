@@ -1,5 +1,4 @@
 const {app,BrowserWindow,dialog,ipcMain,safeStorage,shell} = require('electron');
-const http = require('http');
 const {spawn} = require('child_process');
 const path=require('path');
 const crypto=require('crypto');
@@ -14,6 +13,7 @@ const DESKTOP_CLIENT_TOKEN=crypto.randomBytes(32).toString('hex');
 // browser, the desktop header and the IPC handlers serve only the main window's app page.
 const {isAppPage,externalUrlAllowed,desktopHeaderAllowed,permissionAllowed,rememberedLoginBackendAllowed}=require('./lib/electron-navigation-policy.cjs');
 const {openCappedLog}=require('./lib/capped-log.cjs');
+const {createReadyWatcher}=require('./lib/backend-ready.cjs');
 const APP_INDEX=path.join(__dirname,'dist','index.html');
 // Debug phase (4.18.31): one CONTROL per user session. A second launch started a second backend that
 // failed on the busy port (dialog "exited with code 1") while its window talked to the first
@@ -129,29 +129,32 @@ handle('clear-remembered-login', async () => {
 // <userData>/logs/backend.log instead of nowhere. The output runs through a pipe into a capped log, so
 // the file stays below 2 MB (plus one rotation, backend.log.1) also while a long session keeps logging.
 let backendReady=false; // until then a failed start is reported once, by createWindow
+// Audit 4.18.31 (S-1): set only by the ready line on the stdout pipe of the backend we started.
+let backendListening=false;
 const BACKEND_LOG=()=>path.join(app.getPath('userData'),'logs','backend.log');
 function startBackend(){
   const serverPath=path.join(__dirname,'installer-server.mjs');
   const log=openCappedLog(BACKEND_LOG(),{maxBytes:2*1024*1024});
   server=spawn(process.execPath,[serverPath],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',PORT:String(PORT),HOST,COD4X_DATA_ROOT:app.getPath('userData'),COD4X_RUNTIME_MODE:'interactive',COD4X_DESKTOP_CLIENT_TOKEN:DESKTOP_CLIENT_TOKEN},cwd:app.getPath('userData'),stdio:['ignore','pipe','pipe']});
-  server.stdout.on('data',chunk=>log.write(chunk));
+  const readyWatcher=createReadyWatcher();
+  server.stdout.on('data',chunk=>{log.write(chunk);if(!backendListening&&readyWatcher(chunk))backendListening=true;});
   server.stderr.on('data',chunk=>log.write(chunk));
   server.on('close',()=>log.close());
-  server.on('exit',code=>{if(code && !app.isQuitting && backendReady){dialog.showErrorBox('COD4X CONTROL','The local backend stopped (exit code '+code+'). Details: '+BACKEND_LOG());}});
+  // Audit 4.18.31 (S-1): any end of the backend (also exit code 0) closes the app, so the window
+  // never keeps talking to the port after our backend is gone.
+  server.on('exit',(code,signal)=>{backendListening=false;if(!app.isQuitting && backendReady){dialog.showErrorBox('COD4X CONTROL','The local backend stopped (exit code '+(code??signal)+'). Details: '+BACKEND_LOG());app.quit();}});
 }
-function waitForBackend(retries=40){
+// Audit 4.18.31 (S-1): ready means our own child printed the ready line after it bound the port.
+// An HTTP answer on the port proves nothing: another program may have taken it first.
+function waitForBackend(retries=200){
   return new Promise(resolve=>{
     const attempt=()=>{
       // Our backend ended (e.g. the port is taken by another program): never talk to whatever answers there.
       if(server&&(server.exitCode!==null||server.signalCode!==null)) return resolve(false);
-      const req=http.get({host:HOST,port:PORT,path:'/api/installer/health',timeout:500},res=>{
-        res.resume();
-        if(res.statusCode===200) return resolve(true);
-        retry();
-      });
-      req.on('error',retry); req.on('timeout',()=>{req.destroy(); retry();});
+      if(backendListening) return resolve(true);
+      if(--retries<=0) return resolve(false);
+      setTimeout(attempt,100);
     };
-    const retry=()=>{ if(--retries<=0) return resolve(false); setTimeout(attempt,150); };
     attempt();
   });
 }

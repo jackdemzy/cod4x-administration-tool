@@ -4,7 +4,9 @@ import { parseAuditReport, gateProblems } from "./security-audit-report.mjs";
 
 // Roadmap Block 20 gate: "Security Audit ohne High/Critical Findings". The spec also blocks on
 // Medium, needs every area reviewed and re-runs the regression test of every fixed finding.
-const REPORT = "docs/SECURITY-AUDIT-4.18.26.md";
+// 4.18.31: the report is an optional argument, so the same gate checks docs/SECURITY-AUDIT-4.18.31.md.
+const REPORT = process.argv[2] || "docs/SECURITY-AUDIT-4.18.26.md";
+if (!/^docs\/SECURITY-AUDIT-[\d.]+\.md$/.test(REPORT)) { console.error(`Security gate FAIL: unexpected report path ${REPORT}`); process.exit(1); }
 
 function fail(message) {
   console.error(`Security gate FAIL: ${message}`);

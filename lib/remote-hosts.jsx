@@ -17,6 +17,10 @@ const text = (de, german, english) => (de ? german : english);
 const openSsh = base64 => `SHA256:${String(base64 || '').replace(/=+$/, '')}`;
 
 const MESSAGES = {
+  // Debug pass 4.18.31 (B6): these codes were shown raw.
+  REMOTE_HOST_INVALID: ['Host-Angaben ungültig: ID (beginnt mit a-z, dann a-z, 0-9, -), Name, Hostname, Port 1–65535 und einen Benutzer außer root prüfen.', 'Invalid host details: check ID (starts with a-z, then a-z, 0-9, -), label, host name, port 1–65535 and a user other than root.'],
+  REMOTE_INSTANCE_INVALID: ['Server-Angaben ungültig: ID, absoluter Pfad ohne „+“, „..“ oder Steuerzeichen, Core-Version und Ports prüfen.', 'Invalid server details: check ID, an absolute path without “+”, “..” or control characters, core version and ports.'],
+  REMOTE_CREDENTIAL_MISSING: ['Für diesen Host ist im Tresor kein SSH-Schlüssel gespeichert.', 'No SSH key is stored in the vault for this host.'],
   REMOTE_HOST_KEY_UNVERIFIED: ['Der Host-Schlüssel ist noch nicht bestätigt.', 'The host key has not been confirmed yet.'],
   REMOTE_HOST_KEY_MISMATCH: ['Der Schlüssel des Servers stimmt nicht mit dem bestätigten Wert überein. Nichts wurde gespeichert.', 'The server key does not match the confirmed value. Nothing was saved.'],
   REMOTE_AUTH_FAILED: ['Anmeldung mit dem SSH-Schlüssel abgelehnt.', 'The server rejected the SSH key.'],

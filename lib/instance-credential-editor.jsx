@@ -59,7 +59,9 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
         // A new vault is unlocked with the same passphrase right away instead of asking for it a third time.
         if (kind === 'initialize') await call('/api/credentials/vault/unlock', { passphrase: value });
         else if (kind === 'lock') await call('/api/credentials/vault/lock', {});
-        else {
+        // Audit 4.18.31 debug pass (B1): an unlock is complete here; it used to fall into the save
+        // branch below, which refused with VAULT_LOCKED although the vault had just been unlocked.
+        else if (kind !== 'unlock') {
           if (!unlocked || (active && credentialKind !== 'b3db') || !credentials.sha256) throw Object.assign(new Error('Credential operation blocked'), { code: unlocked ? 'INSTANCE_RUNTIME_BUSY' : 'VAULT_LOCKED' });
           const body = { expectedSha256: credentials.sha256 };
           if (kind === 'save') body.value = value;
@@ -80,8 +82,13 @@ export function InstanceCredentialEditor({ instance, request, de, kinds = KINDS,
     } catch (failure) {
       if (mounted.current) {
         const code = ERROR_CODES.has(failure.code) ? failure.code : 'CREDENTIAL_OPERATION_FAILED';
-        if (code !== 'VAULT_PASSPHRASE_MISMATCH') setCredentials(null); // nothing was sent: the status is still right
-        setError(code === 'VAULT_PASSPHRASE_MISMATCH' ? (de ? 'Die beiden Passwörter stimmen nicht überein. Nichts wurde angelegt.' : 'The two passphrases do not match. Nothing was created.') : (de ? 'Vorgang nicht bestätigt. Status neu laden. ' : 'Operation not confirmed. Refresh status. ') + code);
+        // Debug pass (B4): a refused passphrase changed nothing, so the status stays and the field stays usable.
+        const unchanged = ['VAULT_PASSPHRASE_MISMATCH', 'VAULT_UNLOCK_FAILED', 'VAULT_PASSPHRASE_INVALID'].includes(code);
+        if (!unchanged) setCredentials(null); // nothing was sent: the status is still right
+        setError(code === 'VAULT_PASSPHRASE_MISMATCH' ? (de ? 'Die beiden Passwörter stimmen nicht überein. Nichts wurde angelegt.' : 'The two passphrases do not match. Nothing was created.')
+          : code === 'VAULT_UNLOCK_FAILED' ? (de ? 'Falsches Entsperrpasswort. Der Tresor bleibt gesperrt.' : 'Wrong unlock passphrase. The vault stays locked.')
+          : code === 'VAULT_PASSPHRASE_INVALID' ? (de ? 'Das Entsperrpasswort muss 12 bis 1024 Zeichen lang sein.' : 'The unlock passphrase must be 12 to 1024 characters long.')
+          : (de ? 'Vorgang nicht bestätigt. Status neu laden. ' : 'Operation not confirmed. Refresh status. ') + code);
       }
     } finally {
       value = null; clearInputs(); operation.current = false;
