@@ -218,6 +218,8 @@ export function RemoteApp({ initialSession = null, initialInfo = null, initialLa
   const [lang, setLangState] = useState(() => initialLang || readRemoteLang());
   const setLang = value => setLangState(storeRemoteLang(value));
   const de = lang === 'de';
+  // Keep <html lang> in step with the UI, also when German comes back from the stored choice.
+  useEffect(() => { if (typeof document !== 'undefined') document.documentElement.lang = lang; }, [lang]);
   const [session, setSession] = useState(initialSession);
   const [info, setInfo] = useState(initialInfo);
   const [checked, setChecked] = useState(Boolean(initialSession));
@@ -233,9 +235,9 @@ export function RemoteApp({ initialSession = null, initialInfo = null, initialLa
   async function logout() { await call('/remote/api/logout', { method: 'POST', body: {} }).catch(() => {}); setSession(null); }
   return <div style={{ minHeight: '100vh', background: T.bg, color: T.text, padding: 'max(16px, env(safe-area-inset-top)) 16px 24px', fontFamily: 'system-ui, sans-serif' }}>
     {session ? <>
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+      <header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
         <strong style={{ letterSpacing: '.08em' }}>COD4X MONITOR</strong>
-        <span style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13, color: T.muted }}>{session.user?.username}<LangSwitch de={de} setLang={setLang} /><button onClick={logout} style={{ ...button, width: 'auto', padding: '6px 10px', fontSize: 13, whiteSpace: 'nowrap' }}>{L(de, 'Abmelden', 'Log out')}</button></span>
+        <span style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10, alignItems: 'center', fontSize: 13, color: T.muted, minWidth: 0, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '40vw' }}>{session.user?.username}</span><LangSwitch de={de} setLang={setLang} /><button onClick={logout} style={{ ...button, width: 'auto', padding: '6px 10px', fontSize: 13, whiteSpace: 'nowrap' }}>{L(de, 'Abmelden', 'Log out')}</button></span>
       </header>
       {session.monitor === false ? <p>{L(de, 'Keine Berechtigung für das Monitoring (monitor.read).', 'No permission for monitoring (monitor.read).')}</p> : <><MonitorDashboard de={de} request={request} /><ActionsPanel de={de} /><PushToggle de={de} /></>}
     </> : checked ? <RemoteLogin onLogin={data => { setExpired(''); setSession({ ...data, monitor: true }); }} initialError={expired ? remoteMessage(expired, de) : ''} de={de} setLang={setLang} /> : <p style={{ color: T.muted }}>…</p>}

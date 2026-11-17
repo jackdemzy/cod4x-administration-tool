@@ -32,6 +32,9 @@ test('remote app: login page with the AGPL source link, dashboard after login, n
   const german = render('RemoteApp', { initialInfo: info, initialLang: 'de', initialSession: { user: { username: 'phone', role: 'viewer' }, monitor: true } });
   assert.ok(german.includes('Abmelden') && german.includes('Erste Abfrage läuft') && german.includes('Quellcode (AGPL-3.0)'), 'German stays selectable');
   assert.ok(!/Abmelden|Quellcode|Erste Abfrage/.test(loggedIn), 'no German text in the English view');
+  const appCode = readFileSync(new URL('../lib/remote-app.jsx', import.meta.url), 'utf8');
+  assert.match(appCode, /document\.documentElement\.lang = lang; \}, \[lang\]\)/, '<html lang> follows a restored German choice');
+  assert.match(loggedIn, /<header style="display:flex;flex-wrap:wrap/, 'the header wraps on narrow phones');
   assert.equal(helpers.remoteRoute('/api/monitor/instances/a/history?range=7d'), '/remote/api/monitor/instances/a/history?range=7d');
   assert.equal(helpers.remoteMessage('REMOTE_LOGIN_LOCKED'), 'Too many failed attempts. Please try again later.');
   assert.equal(helpers.remoteMessage('REMOTE_LOGIN_LOCKED', true), 'Zu viele Fehlversuche. Bitte später erneut versuchen.');
