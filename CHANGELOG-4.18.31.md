@@ -81,3 +81,10 @@ Found, not changed:
 - **A4-8 game logs:** logs above 64 MiB are renamed to `.1` before each remote start (SSH and Docker). While any server runs (local instances, the standard server, remote servers) a log above the limit is copied to `.1` and emptied every 5 minutes; a container's logs are capped inside the container. `COD4X_LOG_CAP=off` turns the timer off.
 - **#21 minimatch:** npm `overrides` lift the build-time `minimatch` of `app-builder-lib` and `@electron/universal` to 11.0.8 (GHSA-g3hv-75wg-m249). `npm audit`: 0 vulnerabilities.
 - Tests: `test/issue-67.test.mjs` (new).
+
+## Phone web app (/remote/) in English
+
+- The mobile monitor (`lib/remote-app.jsx`: login, push toggle, actions, error messages) is English by default; German stays selectable with an EN/DE switch on the login page and in the header. The choice is stored in `localStorage` (`cod4x.ui.lang`, `lib/remote-lang.mjs`); the login session still lives only in the HttpOnly cookie.
+- Every error code has a [German, English] pair; times follow the chosen language. `remote.html` and the web app manifest are English (`lang="en"`).
+- Gateway, push alerts and logs were already English.
+- Tests: `test/remote-ui.test.mjs` renders the app in both languages and checks that no German text is left outside the pairs; the 4.18.16 remote gate checks the English source link.
