@@ -15,6 +15,7 @@ async function renderer() {
 }
 const nativeCompilerAvailable = process.platform === 'win32' || existsSync(new URL('../node_modules/@esbuild/linux-x64/bin/esbuild', import.meta.url));
 const skip = nativeCompilerAvailable ? false : 'Shared Windows dependencies do not contain native Linux esbuild; UI renderer verified on Windows separately';
+const appCode0 = () => readFileSync(new URL('../lib/remote-app.jsx', import.meta.url), 'utf8');
 const noFetch = () => { throw new Error('SSR must not fetch'); };
 
 test('remote app: login page with the AGPL source link, dashboard after login, no password storage', { skip }, async () => {
@@ -24,7 +25,13 @@ test('remote app: login page with the AGPL source link, dashboard after login, n
   assert.ok(login.includes('COD4X CONTROL 4.18.16') && login.includes('href="https://github.com/jackdemzy/cod4x-administration-tool"') && login.includes('Source code (AGPL-3.0)'));
   const form = render('RemoteLogin', { onLogin() {}, setLang() {} });
   assert.ok(form.includes('Username<') && form.includes('>Log in<') && /aria-pressed="true"[^>]*>EN</.test(form) && /aria-pressed="false"[^>]*>DE</.test(form), 'English login with the EN/DE switch');
-  const formDe = render('RemoteLogin', { onLogin() {}, setLang() {}, de: true, initialError: 'x' });
+  const formDe = render('RemoteLogin', { onLogin() {}, setLang() {}, de: true, initialError: { code: 'REMOTE_LOGIN_REQUIRED' } });
+  assert.ok(formDe.includes('Sitzung abgelaufen. Bitte neu anmelden.'), 'the stored error code is translated while rendering');
+  assert.ok(render('RemoteLogin', { onLogin() {}, initialError: { code: 'REMOTE_LOGIN_REQUIRED' } }).includes('Session expired. Please log in again.'), 'same error, English after a switch');
+  assert.equal(helpers.failureText({ push: { name: 'AbortError', message: 'x' } }), 'Push registration failed (AbortError: x).');
+  assert.equal(helpers.failureText({ push: { name: 'AbortError' } }, true), 'Push-Anmeldung fehlgeschlagen (AbortError).');
+  assert.equal(helpers.failureText({ code: undefined }), 'Unknown error.', 'a network error without code still shows a message');
+  assert.equal(helpers.failureText(null), '');
   assert.ok(formDe.includes('Benutzername<') && formDe.includes('>Anmelden<') && /aria-pressed="true"[^>]*>DE</.test(formDe));
   const loggedIn = render('RemoteApp', { initialInfo: info, initialSession: { user: { username: 'phone', role: 'viewer' }, monitor: true } });
   assert.ok(loggedIn.includes('phone') && loggedIn.includes('Log out') && loggedIn.includes('First poll running'));
@@ -32,6 +39,7 @@ test('remote app: login page with the AGPL source link, dashboard after login, n
   const german = render('RemoteApp', { initialInfo: info, initialLang: 'de', initialSession: { user: { username: 'phone', role: 'viewer' }, monitor: true } });
   assert.ok(german.includes('Abmelden') && german.includes('Erste Abfrage läuft') && german.includes('Quellcode (AGPL-3.0)'), 'German stays selectable');
   assert.ok(!/Abmelden|Quellcode|Erste Abfrage/.test(loggedIn), 'no German text in the English view');
+  assert.doesNotMatch(appCode0(), /setError\(remoteMessage|setNotice\(L\(|error: remoteMessage/, 'no translated text is kept in state');
   const appCode = readFileSync(new URL('../lib/remote-app.jsx', import.meta.url), 'utf8');
   assert.match(appCode, /document\.documentElement\.lang = lang; \}, \[lang\]\)/, '<html lang> follows a restored German choice');
   assert.match(loggedIn, /<header style="display:flex;flex-wrap:wrap/, 'the header wraps on narrow phones');

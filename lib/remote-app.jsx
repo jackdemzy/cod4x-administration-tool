@@ -37,6 +37,12 @@ const MESSAGES = {
   VAULT_LOCKED: ['Der Tresor im Admin-Tool ist gesperrt, RCON ist deshalb nicht möglich.', 'The vault in the admin tool is locked, so RCON is not possible.'],
 };
 const L = (de, german, english) => de ? german : english;
+// Errors are kept as { code } (or { push } for a browser push error) and
+// translated while rendering, so a shown message follows an EN/DE switch.
+export const failureText = (failure, de = false) => !failure ? '' : failure.push
+  ? `${L(de, 'Push-Anmeldung fehlgeschlagen', 'Push registration failed')} (${failure.push.name || L(de, 'Fehler', 'Error')}${failure.push.message ? `: ${failure.push.message}` : ''}).`
+  : remoteMessage(failure.code, de);
+const alertLine = (failure, de) => failure && <p role="alert" style={{ color: T.bad, fontSize: 14, margin: 0 }}>{failureText(failure, de)}</p>;
 export const remoteMessage = (code, de = false) => (Object.hasOwn(MESSAGES, code) ? MESSAGES[code][de ? 0 : 1] : code) || L(de, 'Unbekannter Fehler.', 'Unknown error.');
 
 async function call(route, { method = 'GET', body } = {}) {
@@ -66,17 +72,17 @@ export function LangSwitch({ de = false, setLang = () => {} }) {
   </span>;
 }
 
-export function RemoteLogin({ onLogin, initialError = '', de = false, setLang }) {
+export function RemoteLogin({ onLogin, initialError = null, de = false, setLang }) {
   const [form, setForm] = useState({ username: '', password: '', code: '' });
   const [needCode, setNeedCode] = useState(false);
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
   async function submit(event) {
-    event.preventDefault(); setBusy(true); setError('');
+    event.preventDefault(); setBusy(true); setError(null);
     try { const data = await call('/remote/api/login', { method: 'POST', body: needCode ? form : { username: form.username, password: form.password } }); onLogin(data); }
     catch (failure) {
-      if (failure.code === 'REMOTE_TOTP_REQUIRED') { setNeedCode(true); setError(remoteMessage(failure.code, de)); }
-      else { setError(remoteMessage(failure.code, de)); if (failure.code === 'REMOTE_TOTP_INVALID') setForm(value => ({ ...value, code: '' })); }
+      if (failure.code === 'REMOTE_TOTP_REQUIRED') { setNeedCode(true); setError({ code: failure.code }); }
+      else { setError({ code: failure.code }); if (failure.code === 'REMOTE_TOTP_INVALID') setForm(value => ({ ...value, code: '' })); }
     } finally { setBusy(false); }
   }
   return <form onSubmit={submit} style={{ display: 'grid', gap: 12, maxWidth: 380, margin: '0 auto' }}>
@@ -84,7 +90,7 @@ export function RemoteLogin({ onLogin, initialError = '', de = false, setLang })
     <label style={{ display: 'grid', gap: 6, fontSize: 13, color: T.muted }}>{L(de, 'Benutzername', 'Username')}<input style={field} autoComplete="username" autoCapitalize="none" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required /></label>
     <label style={{ display: 'grid', gap: 6, fontSize: 13, color: T.muted }}>{L(de, 'Passwort', 'Password')}<input style={field} type="password" autoComplete="current-password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required /></label>
     {needCode && <label style={{ display: 'grid', gap: 6, fontSize: 13, color: T.muted }}>{L(de, 'Code (Authenticator) oder Wiederherstellungscode', 'Code (authenticator) or recovery code')}<input style={field} autoComplete="one-time-code" inputMode="text" autoFocus value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} required /></label>}
-    {error && <p role="alert" style={{ color: T.bad, fontSize: 14, margin: 0 }}>{error}</p>}
+    {alertLine(error, de)}
     <button type="submit" disabled={busy} style={button}>{busy ? '…' : L(de, 'Anmelden', 'Log in')}</button>
   </form>;
 }
@@ -94,17 +100,17 @@ const base64UrlToBytes = text => { const raw = atob(text.replace(/-/g, '+').repl
 // Block 24c: this device receives alerts as push messages. The browser keeps the
 // subscription; the server stores it for this user only.
 export function PushToggle({ supported = null, de = false }) {
-  const [state, setState] = useState({ ready: false, supported, on: false, enabled: true, error: '' });
+  const [state, setState] = useState({ ready: false, supported, on: false, enabled: true, error: null });
   const update = patch => setState(value => ({ ...value, ...patch }));
   useEffect(() => {
     const ok = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && typeof window !== 'undefined' && 'PushManager' in window && 'Notification' in window;
     if (!ok) { update({ ready: true, supported: false }); return; }
     Promise.all([call('/remote/api/push/key'), navigator.serviceWorker.ready.then(registration => registration.pushManager.getSubscription())])
       .then(([key, subscription]) => update({ ready: true, supported: true, enabled: key.enabled !== false, on: Boolean(subscription && key.mine) }))
-      .catch(failure => update({ ready: true, supported: true, error: remoteMessage(failure.code, de) }));
+      .catch(failure => update({ ready: true, supported: true, error: { code: failure.code } }));
   }, []);
   async function toggle() {
-    update({ error: '' });
+    update({ error: null });
     try {
       const registration = await navigator.serviceWorker.ready;
       const current = await registration.pushManager.getSubscription();
@@ -121,7 +127,7 @@ export function PushToggle({ supported = null, de = false }) {
       update({ on: true });
     } catch (failure) {
       // Server answers carry a string code; browser errors (DOMException) a number.
-      update({ error: typeof failure.code === 'string' ? remoteMessage(failure.code, de) : `${L(de, 'Push-Anmeldung fehlgeschlagen', 'Push registration failed')} (${failure.name || L(de, 'Fehler', 'Error')}${failure.message ? `: ${failure.message}` : ''}).` });
+      update({ error: typeof failure.code === 'string' ? { code: failure.code } : { push: { name: failure.name, message: failure.message } } });
     }
   }
   if (!state.ready) return null;
@@ -131,7 +137,7 @@ export function PushToggle({ supported = null, de = false }) {
       <p style={{ margin: 0, fontSize: 13, color: T.muted }}>{state.on ? L(de, 'Dieses Gerät bekommt Alarme, wenn ein Server ausfällt oder wieder da ist.', 'This device gets alerts when a server goes down or comes back.') : L(de, 'Alarme auf dieses Gerät schicken lassen.', 'Send alerts to this device.')}{state.enabled ? '' : L(de, ' (Push ist im Admin-Tool gerade ausgeschaltet.)', ' (Push is currently switched off in the admin tool.)')}</p>
       <button onClick={toggle} style={{ ...button, ...(state.on ? { background: 'transparent', color: T.muted, borderColor: T.border } : {}) }}>{state.on ? L(de, 'Push ausschalten', 'Disable push') : L(de, 'Push aktivieren', 'Enable push')}</button>
     </>}
-    {state.error && <p role="alert" style={{ color: T.bad, fontSize: 14, margin: 0 }}>{state.error}</p>}
+    {alertLine(state.error, de)}
   </section>;
 }
 
@@ -147,8 +153,8 @@ export function ActionsPanel({ initial = null, de = false }) {
   const [open, setOpen] = useState(null); // { id, kind }
   const [form, setForm] = useState({ text: '', reason: '', code: '' });
   const [players, setPlayers] = useState(null);
-  const [notice, setNotice] = useState('');
-  const [error, setError] = useState('');
+  const [notice, setNotice] = useState(null); // 'say' | 'kick' | 'restart'
+  const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (initial) return;
@@ -161,17 +167,17 @@ export function ActionsPanel({ initial = null, de = false }) {
   const stepped = info.stepUpUntil && info.stepUpUntil > Date.now();
   const needCode = kind => kind === 'restart' || !stepped;
   const until = stepped ? new Date(info.stepUpUntil).toLocaleTimeString(de ? 'de-DE' : 'en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-  const show = (id, kind) => { setOpen({ id, kind }); setForm({ text: '', reason: '', code: '' }); setError(''); setNotice(''); setPlayers(null); if (kind === 'kick') call(`/remote/api/instances/${encodeURIComponent(id)}/players`).then(data => setPlayers(data.players)).catch(failure => setError(remoteMessage(failure.code, de))); };
+  const show = (id, kind) => { setOpen({ id, kind }); setForm({ text: '', reason: '', code: '' }); setError(null); setNotice(null); setPlayers(null); if (kind === 'kick') call(`/remote/api/instances/${encodeURIComponent(id)}/players`).then(data => setPlayers(data.players)).catch(failure => setError({ code: failure.code })); };
   async function act(kind, body) {
-    setBusy(true); setError(''); setNotice('');
+    setBusy(true); setError(null); setNotice(null);
     try {
       const data = await call(`/remote/api/instances/${encodeURIComponent(open.id)}/${kind}`, { method: 'POST', body: { ...body, ...(form.code ? { code: form.code } : {}) } });
       setInfo(value => ({ ...value, stepUpUntil: data.stepUpUntil }));
-      setNotice(kind === 'say' ? L(de, 'Nachricht gesendet.', 'Message sent.') : kind === 'kick' ? L(de, 'Spieler gekickt.', 'Player kicked.') : L(de, 'Neustart ausgelöst.', 'Restart triggered.'));
+      setNotice(kind);
       setForm(value => ({ ...value, text: '', code: '' }));
       if (kind === 'kick') setPlayers(list => (list || []).filter(player => player.slot !== body.slot));
       if (kind === 'restart') setOpen(null);
-    } catch (failure) { setError(remoteMessage(failure.code, de)); if (failure.code === 'REMOTE_STEP_UP_REQUIRED') setInfo(value => ({ ...value, stepUpUntil: null })); }
+    } catch (failure) { setError({ code: failure.code }); if (failure.code === 'REMOTE_STEP_UP_REQUIRED') setInfo(value => ({ ...value, stepUpUntil: null })); }
     finally { setBusy(false); }
   }
   const codeField = kind => needCode(kind) && <label style={{ display: 'grid', gap: 6, fontSize: 13, color: T.muted }}>{kind === 'restart' ? L(de, 'Neuer Code für den Neustart (ein schon benutzter gilt nicht, sonst kurz auf den nächsten warten)', 'New code for the restart (a code already used does not count; otherwise wait briefly for the next one)') : L(de, 'Code aus der Authenticator-App (gilt dann 5 min)', 'Code from the authenticator app (then valid for 5 min)')}<input style={field} inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={form.code} onChange={e => setForm({ ...form, code: e.target.value.replace(/\D/g, '') })} /></label>;
@@ -209,8 +215,8 @@ export function ActionsPanel({ initial = null, de = false }) {
         <button style={{ ...button, color: T.bad, borderColor: `${T.bad}88`, background: 'transparent' }} disabled={busy || form.code.length !== 6} onClick={() => act('restart', {})}>{L(de, 'Jetzt neu starten', 'Restart now')}</button>
       </div>}
     </div>)}
-    {notice && <p style={{ ...small, color: T.good }}>{notice}</p>}
-    {error && <p role="alert" style={{ color: T.bad, fontSize: 14, margin: 0 }}>{error}</p>}
+    {notice && <p style={{ ...small, color: T.good }}>{notice === 'say' ? L(de, 'Nachricht gesendet.', 'Message sent.') : notice === 'kick' ? L(de, 'Spieler gekickt.', 'Player kicked.') : L(de, 'Neustart ausgelöst.', 'Restart triggered.')}</p>}
+    {alertLine(error, de)}
   </section>;
 }
 
@@ -240,7 +246,7 @@ export function RemoteApp({ initialSession = null, initialInfo = null, initialLa
         <span style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 10, alignItems: 'center', fontSize: 13, color: T.muted, minWidth: 0, maxWidth: '100%' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '40vw' }}>{session.user?.username}</span><LangSwitch de={de} setLang={setLang} /><button onClick={logout} style={{ ...button, width: 'auto', padding: '6px 10px', fontSize: 13, whiteSpace: 'nowrap' }}>{L(de, 'Abmelden', 'Log out')}</button></span>
       </header>
       {session.monitor === false ? <p>{L(de, 'Keine Berechtigung für das Monitoring (monitor.read).', 'No permission for monitoring (monitor.read).')}</p> : <><MonitorDashboard de={de} request={request} /><ActionsPanel de={de} /><PushToggle de={de} /></>}
-    </> : checked ? <RemoteLogin onLogin={data => { setExpired(''); setSession({ ...data, monitor: true }); }} initialError={expired ? remoteMessage(expired, de) : ''} de={de} setLang={setLang} /> : <p style={{ color: T.muted }}>…</p>}
+    </> : checked ? <RemoteLogin onLogin={data => { setExpired(''); setSession({ ...data, monitor: true }); }} initialError={expired ? { code: expired } : null} de={de} setLang={setLang} /> : <p style={{ color: T.muted }}>…</p>}
     <SourceFooter info={info} de={de} />
   </div>;
 }
