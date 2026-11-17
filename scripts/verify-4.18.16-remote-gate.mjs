@@ -53,7 +53,7 @@ const checks = [
   ["the local login uses the same brake", server.includes("const throttleKey = LoginThrottle.key(loginClient(req.socket.remoteAddress), username);") && server.includes("throttle: loginThrottle")],
   ["remote settings and sessions need user.manage; the admin API still binds loopback by default", ['app.get("/api/remote", requirePermission("user.manage")', 'app.post("/api/remote/settings", requirePermission("user.manage")'].every(text => server.includes(text)) && server.includes('const HOST = process.env.HOST || "127.0.0.1";')],
   ["narrowing a user's access ends their remote sessions", server.includes("remoteRevoked = remoteSessions.revokeUser(target.username)") && server.includes("remoteSessions.revokeUser(user.username)")],
-  ["the web app links the source code (AGPL-3.0 §13)", read("lib/remote-app.jsx").includes("Quellcode (AGPL-3.0)") && server.includes("REMOTE_SOURCE_URL")],
+  ["the web app links the source code (AGPL-3.0 §13)", read("lib/remote-app.jsx").includes("Source code (AGPL-3.0)") && server.includes("REMOTE_SOURCE_URL")],
 ];
 for (const [name, pass] of checks) console.log(`${pass ? "PASS" : "FAIL"} ${name}`);
 if (checks.some(([, pass]) => !pass)) process.exit(1);
