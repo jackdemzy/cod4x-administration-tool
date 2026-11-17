@@ -191,7 +191,7 @@ test('alert notifier: masked status, 0600 files, push only to eligible users, go
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const audit = [], requests = [];
   let pushStatus = 201;
-  const fetchImpl = async (url, options) => { requests.push({ url, options }); return new Response(null, { status: url.startsWith('https://discord.com') ? 204 : pushStatus }); };
+  const fetchImpl = async (url, options) => { requests.push({ url, options }); return new Response(null, { status: new URL(url).hostname === 'discord.com' ? 204 : pushStatus }); };
   const eligible = new Set(['phone']);
   const notifier = new AlertNotifier({ directory: dir, fetchImpl, audit: (level, event, details) => audit.push({ level, event, details }), eligible: name => eligible.has(name), now: () => 1000 });
   await notifier.load();
