@@ -91,7 +91,7 @@ The app was played through against the real backend in English and German, as ad
 | B9 | The first runtime preflight went out with platform `windows` before the stored state loaded (400 for a Linux core) | the stored runtime is read first |
 | B10 | "UDP-Port" in English, RCON "transfer unknown" for a stopped server | fixed |
 
-Left open (cosmetic, no fault in function): the instance card in Runtime uses browser-default controls; remote host errors appear at the top of the page, far from the form; fs_homepath is shown both absolute and relative in the legacy block; "Mods" and "Version Manager" open the same view; creating a B3 plugin from the template shows no success message; `UserAdministrationPanel` holds unused lifecycle helpers; the Runtime page logs a console error every 2.5 s while no core is installed (accepted in the 4.18.31 debug phase).
+Left open (cosmetic, no fault in function): the instance card in Runtime uses browser-default controls; remote host errors appear at the top of the page, far from the form; fs_homepath is shown both absolute and relative in the legacy block; "Mods" and "Version Manager" open the same view; creating a B3 plugin from the template shows no success message; `UserAdministrationPanel` holds unused lifecycle helpers. The Runtime page's console error every 2.5 s while no core is installed (accepted in the debug phase) was fixed afterwards: the preflight answers 200 with the missing core as state.
 
 Not testable here: Windows, real Docker and SSH hosts, a real B3 with Python 2.7 and MySQL, kicking a live player, and the remote actions that need a running remote server.
 

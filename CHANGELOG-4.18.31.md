@@ -29,7 +29,7 @@ The desktop page (built `dist/`, loaded as file:// with the per-launch header, a
 
 Found, not changed:
 
-- `/api/runtime/preflight` answers HTTP 400 for a core that is not configured yet; the Runtime page asks every 2.5 s, so the browser console shows an error each time. The page handles it; changing the status code would change the API.
+- `/api/runtime/preflight` answers HTTP 400 for a core that is not configured yet; the Runtime page asks every 2.5 s, so the browser console shows an error each time. The page handles it; changing the status code would change the API. (Fixed later, see "Runtime page without a core" below.)
 - Backend error texts are mostly German (e.g. "cod4x18_dedrun wurde am ausgewählten Server-Core-Pfad nicht gefunden.", rate-limit message); a blocked B3 start shows only the code `B3_DEPENDENCIES_BLOCKED`.
 - The single-instance lock and the backend log file were checked in the source only: the Electron binary is not installed in the cloud container.
 
@@ -88,3 +88,9 @@ Found, not changed:
 - Every error code has a [German, English] pair; times follow the chosen language. `remote.html` and the web app manifest are English (`lang="en"`).
 - Gateway, push alerts and logs were already English.
 - Tests: `test/remote-ui.test.mjs` renders the app in both languages and checks that no German text is left outside the pairs; the 4.18.16 remote gate checks the English source link.
+
+## Runtime page without a core
+
+- `GET /api/runtime/preflight` answers HTTP 200 when no dedicated core is installed or selected yet (file missing, not a file, wrong name, relative path). The answer carries `ok: false`, `coreInstalled: false`, `executablePath: null` and a `core` object with `verified: false`, `corePresent: false` and the reason in `core.reasons`; the BaseGame check is reported as well. Before, the route answered 400 and the Runtime page, which polls every 2.5 s, logged a browser console error on each poll. Bad input (unsupported platform, unsafe server path) still answers 400.
+- The Runtime page now shows the backend's reason (e.g. "cod4x18_dedrun was not found at the selected server core path.") under NOT VERIFIED instead of the generic "Verified core check failed.", and shows the BaseGame state while no core is set.
+- Tests: `test/runtime-preflight-no-core.test.mjs` (new).

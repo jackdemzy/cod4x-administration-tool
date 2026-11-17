@@ -867,6 +867,11 @@ async function verifiedRuntimeCoreStatus(executablePath, expectedCod4x = "", pla
   return { ...status, requestedExecutablePath: normalizedExecutable };
 }
 
+// Preflight answer for a core that is not installed or not selected yet (same fields as verifiedCoreStatus).
+function missingRuntimeCoreStatus(platform, error) {
+  return { verified: false, corePresent: false, manifestPresent: false, manifestValid: false, manifestSource: "none", manifestPath: null, verificationMode: "none", platform, executable: serverCoreDefinition(platform).executable, executablePath: null, reasons: [String(error?.message || error || "Dedicated server core not found")], manifest: null };
+}
+
 async function adoptExistingRuntimeExecutable({executablePath,cod4x,fpsPromod="custom",platform=process.platform === "win32" ? "windows" : "linux"}) {
   if(!policyState.security.allowedCod4xVersions.includes(String(cod4x)))throw new Error("Unsupported CoD4x version");
   const core=serverCoreDefinition(platform);
@@ -2016,7 +2021,13 @@ app.get("/api/runtime/search",requirePermission("diagnostics.read"),async(_req,r
 // like saving them does.
 // The page always sends its fields; a value equal to the stored one is no choice of its own.
 const preflightChoosesPath=query=>choosesOtherPath(query.path,defaultRuntime.state.target||"./server")||choosesOtherPath(query.executablePath,defaultRuntime.state.executablePath)||choosesOtherPath(query.baseGamePath,defaultRuntime.state.baseGamePath);
-app.get("/api/runtime/preflight",requirePermission("diagnostics.read",{quietAllowed:true}),async(req,res)=>{if(preflightChoosesPath(req.query)&&!hasPermission(req.auth?.role,"server.code")){audit("warn","rbac.permission.checked",{username:req.auth?.username,role:req.auth?.role,permission:"server.code",allowed:false});return res.status(403).json({ok:false,error:"Permission denied",permission:"server.code",role:req.auth?.role});}try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested),executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform}),core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);res.json({ok:core.verified&&baseGame.valid,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
+app.get("/api/runtime/preflight",requirePermission("diagnostics.read",{quietAllowed:true}),async(req,res)=>{if(preflightChoosesPath(req.query)&&!hasPermission(req.auth?.role,"server.code")){audit("warn","rbac.permission.checked",{username:req.auth?.username,role:req.auth?.role,permission:"server.code",allowed:false});return res.status(403).json({ok:false,error:"Permission denied",permission:"server.code",role:req.auth?.role});}try{const requested=normalizeRuntimePath(req.query.path||defaultRuntime.state.target||"./server"),platform=normalizeServerPlatform(req.query.platform||defaultRuntime.state.platform||"windows"),cod4x=String(req.query.cod4x||defaultRuntime.state.cod4x||"21.5"),requestedExecutable=String(req.query.executablePath||defaultRuntime.state.executablePath||"").trim(),baseGame=await inspectBaseGame(selectRuntimeBaseGamePath(req.query.baseGamePath,defaultRuntime.state)),resolved=await resolveServerTarget(requested);
+  // A missing or unusable core is a state the page polls for, not a failed request: answering 400 here
+  // logged a browser console error every 2.5 s while no core was installed. Bad input (platform, path) stays 400.
+  let executablePath=null,core;
+  try{executablePath=await resolveRuntimeExecutable({target:resolved.target,executablePath:requestedExecutable,platform});core=await verifiedRuntimeCoreStatus(executablePath,cod4x,platform);}
+  catch(err){core=missingRuntimeCoreStatus(platform,err);}
+  res.json({ok:core.verified&&baseGame.valid,coreInstalled:core.corePresent===true,requested,platform,resolvedTarget:resolved.target,runtimeRoot:resolved.root,executablePath,candidates:resolved.checks,core,baseGame});}catch(err){res.status(400).json({ok:false,error:err.message});}});
 // Puts the runtime record of a restore point back (only the configuration fields; process fields such
 // as status and pid stay as they are).
 const RUNTIME_RECORD_FIELDS=["target","platform","resolvedTarget","runtimeRoot","executablePath","executable","cod4x","baseGamePath","updatedAt"];
