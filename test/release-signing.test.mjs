@@ -94,8 +94,8 @@ test('workflow: signing only on Windows with SignPath configured, for a tag or a
 });
 
 test('workflow: two signing requests, verified signatures, strict verification when signing', () => {
-  // Audit 4.18.31 (S-3): the action that receives the token is pinned to the commit of v3.
-  assert.equal(workflow.match(/uses: signpath\/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3\n/g).length, 2);
+  // Audit 4.18.31 (S-3): the action that receives the token is pinned to a commit (v3.2 = a2c5b60, the current v3 tag).
+  assert.equal(workflow.match(/uses: signpath\/github-action-submit-signing-request@a2c5b60d9c75f073142b653c354b632eedce097b # v3\n/g).length, 2);
   assert.doesNotMatch(workflow, /uses: [^\n]+@v\d+\n/, 'every action is pinned to a commit');
   assert.match(workflow, /artifact-configuration-slug: win-unpacked\n/);
   assert.match(workflow, /artifact-configuration-slug: win-installers\n/);
